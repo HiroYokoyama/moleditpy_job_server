@@ -2,6 +2,7 @@ import base64
 import time
 
 from job_server.auth import signing_message
+from job_server import PLUGIN_VERSION
 from .conftest import enroll
 
 
@@ -101,7 +102,7 @@ def test_origin_and_unauthenticated_boundaries(client):
     assert client.get("/api/v1/health").json() == {
         "status": "ok",
         "api_version": "1",
-        "server_version": "0.1.0",
+        "server_version": PLUGIN_VERSION,
     }
     assert (
         client.get("/api/v1/health", headers={"Origin": "https://example.org"}).status_code == 403

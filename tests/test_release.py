@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.mark.parametrize(
-    "version", ["", "v0.1.0", "0.1.0\n", "0.1.1", "0.1.0;echo injected", "$(id)"]
+    "version", ["", "v0.1.1", "0.1.1\n", "0.0.0", "0.1.1;echo injected", "$(id)"]
 )
 def test_release_rejects_mismatch_or_injected_input(version):
     with pytest.raises(ValueError):
@@ -19,7 +19,7 @@ def test_release_rejects_mismatch_or_injected_input(version):
 
 
 def test_release_accepts_matching_source_version():
-    assert validate_version(source_version()) == "0.1.0"
+    assert validate_version(source_version()) == "0.1.1"
 
 
 @pytest.mark.parametrize(
