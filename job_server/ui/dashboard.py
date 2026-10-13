@@ -49,7 +49,7 @@ class Task(QRunnable):
 class Dashboard(QDialog):
     def __init__(self, parent=None, config=None):
         super().__init__(parent)
-        self.setWindowTitle("Job Server — Trusted Lab Preview")
+        self.setWindowTitle("Job Server — LAN computational helper")
         self.setWindowIcon(QIcon(str(Path(__file__).resolve().parents[1] / "web" / "icon.png")))
         self.resize(900, 600)
         self.config = Path(config) if config else Settings().root / "settings.json"
@@ -64,7 +64,7 @@ class Dashboard(QDialog):
         layout = QVBoxLayout(self)
         notice = QLabel(
             "Trusted users only. Jobs share the service OS account; CPU/RAM reservations are advisory.\n"
-            "WARNING: Never expose to the public internet. Localhost or private Tailscale only; "
+            "WARNING: Never expose to the public internet. Localhost, private LAN or private Tailscale only; "
             "no Funnel or public port forwarding. Use a low-privilege OS account."
         )
         notice.setWordWrap(True)

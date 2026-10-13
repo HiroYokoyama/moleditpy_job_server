@@ -80,7 +80,7 @@ class Settings:
             raise ValueError("Invalid executor")
         if not self.trusted_users_only:
             raise ValueError(
-                "This preview supports trusted users only; OS isolation is not implemented"
+                "This server supports trusted users only; OS isolation is not implemented"
             )
         if self.execution_os == "wsl":
             if (

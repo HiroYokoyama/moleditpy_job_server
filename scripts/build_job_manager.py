@@ -335,7 +335,7 @@ def build(destination):
 
 
 def main():
-    output = ROOT / "dist" / "job_manager_job_server_preview.zip"
+    output = ROOT / "dist" / "job_manager_job_server.zip"
     output.parent.mkdir(exist_ok=True)
     (ROOT / "build").mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="companion-", dir=ROOT / "build") as temporary:

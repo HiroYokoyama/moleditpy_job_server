@@ -3,16 +3,17 @@
 [![Tests](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/test.yml/badge.svg)](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/test.yml)
 [![Security](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/security.yml/badge.svg)](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/security.yml)
 [![Release](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/release.yml/badge.svg)](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/release.yml)
-[![Version](https://img.shields.io/badge/version-0.1.0%20preview-orange)](pyproject.toml)
+[![Version](https://img.shields.io/badge/version-0.1.0-blue)](pyproject.toml)
 [![Downloads](https://img.shields.io/github/downloads/HiroYokoyama/moleditpy_job_server/total)](https://github.com/HiroYokoyama/moleditpy_job_server/releases)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![MoleditPy](https://img.shields.io/badge/MoleditPy-4.x-3577F7)](https://github.com/HiroYokoyama/python_molecular_editor)
 
-An authenticated shared job queue, headless daemon, MoleditPy administration plugin,
-and browser UI for trusted lab members. Version **0.1.0 — Trusted Lab Preview**.
+A LAN computational helper for MoleditPy Job Manager, with an authenticated shared
+job queue, headless daemon, MoleditPy administration plugin, and browser UI.
+Version **0.1.0**. Access is for trusted users on a private network.
 
 > [!WARNING]
-> **Never expose Job Server to the public internet. Use localhost or a private Tailscale tailnet only.**
+> **Never expose Job Server to the public internet. Use localhost, a private LAN over HTTPS, or a private Tailscale tailnet only.**
 > Do not use Tailscale Funnel, router port forwarding, a public reverse proxy, or an internet tunnel.
 > Jobs execute arbitrary commands under the service OS account. Only admit trusted users,
 > restrict tailnet access, and run under a low-privilege account. Authentication is not an OS sandbox.
@@ -95,7 +96,7 @@ and set `python_executable` in settings to that environment's interpreter.
 python scripts/build_job_manager.py
 ```
 
-Install the companion `dist/job_manager_job_server_preview.zip` alongside Job Server.
+Install the companion `dist/job_manager_job_server.zip` alongside Job Server.
 It adds **Job Server (HTTPS)** to Hosts and connects existing submit, monitor, tail,
 cancel, and download flows to `JobServerBackend`. Configure the server URL, register
 a device, and choose the native scheduler matching the server's execution OS.
@@ -106,11 +107,16 @@ overlay. It does not change your sibling Job Manager repository or its upstream 
 `integration/job_manager.patch` records changes for upstream review;
 `integration/server_backend.py` is the additional bridge module.
 
-### HTTPS inside a private Tailscale tailnet
+### HTTPS on a private LAN or Tailscale tailnet
 
 Set `public_url` in settings to the exact HTTPS origin, e.g. `https://compute.example.org`.
 This allows that browser origin; other origins are rejected. Terminate TLS in a proxy
 on the same machine. The daemon ignores forwarded headers and stays on loopback.
+
+On a private LAN, restrict the HTTPS proxy with your firewall to trusted local
+clients. Use a certificate trusted by those clients; the Job Manager host profile
+supports a CA certificate file for your own certificate authority. Never forward
+the service through an internet-facing proxy or router port mapping.
 
 ```sh
 tailscale serve --bg http://127.0.0.1:8766

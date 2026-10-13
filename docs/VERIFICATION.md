@@ -1,11 +1,15 @@
 # Verification
 
-Recorded 2026-10-13. All tests use isolated generated accounts and temporary job data.
+Updated 2026-10-14. All tests use isolated generated accounts and temporary job data.
 
 ## Results
 
-- Local server/GUI/client/security/workflow suite: **83 passed**, 3 POSIX-only skips
+- Local server/GUI/client/security/workflow suite: **87 passed**, 3 POSIX-only skips
   on Windows / Python 3.13, in an isolated environment with the hardened dependency floors.
+- Real Job Manager optional client: enrollment, password-free reauthentication,
+  native completion with exit 0, bulk polling, log/file tail, SHA-256 result download,
+  cancellation and cross-user file rejection passed against a live loopback server.
+  Dependency-free imports and ordinary GUI/service routing passed separately.
 - pip-audit: **no known vulnerabilities** in 72 third-party distributions in the
   isolated environment (the editable first-party project is skipped by the scanner).
   The original runtime had 13 unique advisory IDs across AnyIO, Cryptography and
@@ -20,9 +24,10 @@ Recorded 2026-10-13. All tests use isolated generated accounts and temporary job
   native execution, live log, DONE/exit 0, SHA-256 verified result download, and
   responsive dashboard with the reused Job Manager icon were verified in the in-app browser.
 - Built wheel, source distribution, server plugin ZIP, and companion Job Manager ZIP.
-- GitHub CI now includes Linux/Windows Python 3.11/3.12/3.13, regression jobs and
-  dependency/static/history security checks. The previous four-job matrix passed;
-  the expanded workflow result is available on the repository's Actions page.
+- GitHub CI includes Linux/Windows Python 3.11/3.12/3.13, regression jobs and
+  dependency/static/history security checks. All eight test jobs and Security passed
+  on the preceding main revision. Two additional jobs now verify the real Job Manager
+  HTTP client on Linux and Windows; current results are on the Actions page.
 
 Local Windows tests cover authentication/enrollment, successful and failed nonce replay,
 server binding, key revocation, account disable, fresh administrative authentication,

@@ -48,7 +48,7 @@ SSH/notification features are not a network-isolation boundary.
 
 ## Boundaries that remain
 
-**Never expose the service to the public internet. Localhost or a private Tailscale
+**Never expose the service to the public internet. Localhost, private LAN over HTTPS or a private Tailscale
 tailnet only; no Funnel, public reverse proxies/tunnels or router port forwarding.**
 The daemon always binds 127.0.0.1, but cannot determine whether an external proxy has
 published it. Tailscale membership/access policy supplements the application's own
