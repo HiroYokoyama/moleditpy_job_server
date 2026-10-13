@@ -32,6 +32,6 @@ def open_logs():
     from PyQt6.QtGui import QDesktopServices
     from .settings import Settings
 
-    directory = Settings().root / "logs"
+    directory = Settings.load().root / "logs"
     directory.mkdir(parents=True, exist_ok=True)
     QDesktopServices.openUrl(QUrl.fromLocalFile(str(directory)))

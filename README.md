@@ -3,14 +3,43 @@
 An authenticated shared job queue, headless daemon, MoleditPy administration plugin,
 and browser UI for trusted lab members. Version **0.1.0 — Trusted Lab Preview**.
 
-![Job Server browser dashboard](docs/web-ui.jpg)
+![Job Server browser dashboard at desktop size (1440 × 1000)](docs/web-ui.jpg)
 
 The daemon owns CPU/RAM reservations and a durable SQLite job ledger. Jobs run in
 detached supervisors, so closing MoleditPy or stopping/restarting the daemon preserves
 running calculations. Native Bash and PowerShell wrappers come from an immutable
 Job Manager source dependency, rather than a second maintained copy.
 
-## Install and start
+## Use from MoleditPy (plugin workflow)
+
+Install **`job_server_0.1.0.zip`** using MoleditPy's Plugin Installer. Then open
+**Plugin → Job Server → Server Dashboard…**.
+The ZIPs are included in the [Verify workflow's build artifacts](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/test.yml).
+Extract the artifact download and install the inner plugin ZIP, or build it from source below.
+
+You can operate the server from MoleditPy dialogs; the command line is optional:
+
+1. Open **Users & Devices… → Create initial administrator** while the server is stopped.
+2. Click **Start** in Server Dashboard.
+3. Click **Sign in / register device** once for the administrator.
+4. Use the dashboard to pause/resume the queue, view jobs, or cancel a selected job.
+5. Open **Users & Devices…** to add users, disable accounts, or revoke device keys.
+6. Open **Settings…** to configure resource budgets, limits, and the daemon runtime.
+7. Click **Open Web UI** to open the browser interface when you want it.
+
+**Start, Stop, Restart, Users & Devices, Settings, and Open Logs** are available from
+the plugin's dialogs/menu. Closing or reloading the dialog does not stop the daemon;
+running jobs continue when MoleditPy closes. Stop preserves running supervisors.
+
+For ordinary Python-based MoleditPy, the plugin uses the application's Python runtime.
+For a frozen/portable application, select a Python executable in **Settings → Daemon
+Python runtime**, with the server dependencies installed in that environment.
+
+The companion Job Manager ZIP adds the server as a normal destination for submission,
+monitoring and downloading. Both the MoleditPy dialogs and browser UI are supported;
+use whichever suits the task. Neither requires operating the headless CLI day to day.
+
+## Optional headless installation
 
 Python 3.11+; use a low-privilege OS account.
 

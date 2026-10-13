@@ -4,7 +4,7 @@ from job_server import initialize
 def test_web_assets_and_security_headers(client):
     response = client.get("/")
     assert response.status_code == 200
-    assert "Keep your calculations moving" in response.text
+    assert "Submit a job" in response.text
     assert "frame-ancestors 'none'" in response.headers["Content-Security-Policy"]
     assert client.get("/assets/app.js").status_code == 200
     assert client.get("/assets/app.css").status_code == 200
@@ -47,3 +47,43 @@ def test_gui_construction_has_no_listener(tmp_path):
     assert "OFF" in dialog.message.text()
     dialog.close()
     app.processEvents()
+    assert not dialog.timer.isActive()
+    dialog.show()
+    assert dialog.timer.isActive()
+    dialog.close()
+
+
+def test_gui_start_adopts_saved_port(tmp_path, monkeypatch):
+    import pytest
+
+    pytest.importorskip("PyQt6")
+    import time
+    from PyQt6.QtWidgets import QApplication
+    from job_server.settings import Settings
+    from job_server.ui.dashboard import Dashboard
+
+    app = QApplication.instance() or QApplication([])
+    config = tmp_path / "settings.json"
+    Settings(data_dir=str(tmp_path)).save(config)
+    dialog = Dashboard(config=config)
+    dialog.timer.stop()
+    dialog.settings.port = 8879
+
+    def offline(*args, **kwargs):
+        raise OSError("test daemon is offline")
+
+    monkeypatch.setattr(dialog.client, "request", offline)
+    commands = []
+    monkeypatch.setattr(
+        "job_server.ui.dashboard.subprocess.Popen", lambda args, **kwargs: commands.append(args)
+    )
+    dialog.start_daemon()
+    deadline = time.monotonic() + 5
+    while dialog.busy and time.monotonic() < deadline:
+        app.processEvents()
+        time.sleep(0.01)
+    assert not dialog.busy
+    assert commands
+    assert dialog.client.url == "http://127.0.0.1:8879"
+    assert Settings.load(config).port == 8879
+    dialog.close()

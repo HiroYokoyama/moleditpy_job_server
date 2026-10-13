@@ -94,6 +94,7 @@ def build_wrapper(spec, workdir, windows=False):
         return (
             wrapper,
             "$ErrorActionPreference = 'Stop'\n"
+            + "$PSDefaultParameterValues['Out-File:Encoding'] = 'ascii'\n"
             + rendered
             + "\nif ($null -ne $LASTEXITCODE) { exit $LASTEXITCODE }\n",
         )

@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import time
 from pathlib import Path
 
 from PyQt6.QtCore import QObject, QRunnable, QThreadPool, QTimer, pyqtSignal
@@ -8,6 +9,7 @@ from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
     QApplication,
     QDialog,
+    QFileDialog,
     QFormLayout,
     QHBoxLayout,
     QInputDialog,
@@ -94,6 +96,7 @@ class Dashboard(QDialog):
         self._button("Restart", self.restart_daemon, row)
         self._button("Sign in / register device", self.sign_in, row)
         self._button("Refresh", self.refresh, row)
+        self._button("Open Web UI", self.open_web_ui, row)
         layout.addLayout(row)
         row = QHBoxLayout()
         self._button("Pause queue", lambda: self.pause(True), row)
@@ -153,6 +156,28 @@ class Dashboard(QDialog):
             self.fields[key] = field
             form.addRow(label, field)
         layout.addLayout(form)
+        runtime = QHBoxLayout()
+        self.python_path = QLineEdit(self.settings.python_executable)
+        self.python_path.setPlaceholderText(
+            "Automatic for Python-based MoleditPy; select Python for portable builds"
+        )
+        runtime.addWidget(self.python_path)
+        browse = QPushButton("Browse Python...")
+
+        def choose_python():
+            path, _ = QFileDialog.getOpenFileName(
+                self,
+                "Select Python runtime",
+                self.python_path.text(),
+                "Python executable (python*.exe python*);;All files (*)",
+            )
+            if path:
+                self.python_path.setText(path)
+
+        browse.clicked.connect(choose_python)
+        runtime.addWidget(browse)
+        layout.addWidget(QLabel("Daemon Python runtime"))
+        layout.addLayout(runtime)
         layout.addWidget(
             QLabel(
                 "Bind address is always 127.0.0.1. Save takes effect after restarting the daemon.\n"
@@ -236,6 +261,7 @@ class Dashboard(QDialog):
 
     def save_settings(self):
         try:
+            self.settings.python_executable = self.python_path.text().strip()
             for key, field in self.fields.items():
                 setattr(self.settings, key, field.value())
             self.settings.validate().save(self.config)
@@ -278,6 +304,10 @@ class Dashboard(QDialog):
                     start_new_session=os.name != "nt",
                     creationflags=0x08000000 | 0x00000008 if os.name == "nt" else 0,
                 )
+            self.client = JobServerClient(
+                f"http://127.0.0.1:{self.settings.port}",
+                self.settings.root / "identity" / "admin-device.key",
+            )
             return "Start requested; see startup.log if the health check stays offline."
 
         self.task(work, self.message.setText)
@@ -288,10 +318,28 @@ class Dashboard(QDialog):
             lambda _: self.message.setText("Daemon stopping; active supervisors are preserved."),
         )
 
+    def open_web_ui(self):
+        from PyQt6.QtCore import QUrl
+        from PyQt6.QtGui import QDesktopServices
+
+        QDesktopServices.openUrl(QUrl(self.settings.public_url or self.client.url))
+
     def restart_daemon(self):
+        def work():
+            self.client.request("POST", "/admin/shutdown")
+            deadline = time.monotonic() + 20
+            health_client = JobServerClient(self.client.url, timeout=2)
+            while time.monotonic() < deadline:
+                try:
+                    health_client.request("GET", "/health", authenticated=False)
+                except Exception:
+                    return
+                time.sleep(0.2)
+            raise TimeoutError("Daemon did not stop; inspect its log before restarting")
+
         self.task(
-            lambda: self.client.request("POST", "/admin/shutdown"),
-            lambda _: QTimer.singleShot(1500, self.start_daemon),
+            work,
+            lambda _: self.start_daemon(),
         )
 
     def pause(self, value):
@@ -396,3 +444,7 @@ class Dashboard(QDialog):
         self.timer.stop()
         # Window disposal never shuts down the separately owned daemon.
         super().closeEvent(event)
+
+    def showEvent(self, event):
+        self.timer.start()
+        super().showEvent(event)

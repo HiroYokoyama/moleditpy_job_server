@@ -4,7 +4,7 @@ Recorded 2026-10-13. All tests use isolated generated accounts and temporary job
 
 ## Results
 
-- Local server/GUI/client suite: **55 passed** on Windows / Python 3.13.
+- Local server/GUI/client suite: **56 passed** on Windows / Python 3.13.
 - Companion Job Manager regression suite: **2,958 passed**, 25 platform/optional skips,
   196 subtests passed. Git Bash `awk` is required for upstream's CPU-counter check.
 - Real browser: device enrollment, password-free reauthentication, job submission,
