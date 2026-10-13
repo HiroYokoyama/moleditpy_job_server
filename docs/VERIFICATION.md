@@ -4,13 +4,16 @@ Recorded 2026-10-13. All tests use isolated generated accounts and temporary job
 
 ## Results
 
-- Local server/GUI/client suite: **52 passed** on Windows / Python 3.13.
+- Local server/GUI/client suite: **55 passed** on Windows / Python 3.13.
 - Companion Job Manager regression suite: **2,958 passed**, 25 platform/optional skips,
   196 subtests passed. Git Bash `awk` is required for upstream's CPU-counter check.
 - Real browser: device enrollment, password-free reauthentication, job submission,
   native execution, live log, DONE/exit 0, SHA-256 verified result download, and
   responsive dashboard with the reused Job Manager icon were verified in the in-app browser.
 - Built wheel, source distribution, server plugin ZIP, and companion Job Manager ZIP.
+- GitHub CI verifies tests and both builds on Linux/Windows with Python 3.11/3.13;
+  the four-job matrix is green after installing Linux Qt system libraries and removing
+  the plugin ZIP builder's runtime dependency on setuptools.
 
 Local Windows tests cover authentication/enrollment, successful and failed nonce replay,
 server binding, key revocation, account disable, fresh administrative authentication,

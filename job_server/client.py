@@ -6,7 +6,7 @@ import uuid
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import quote, urlsplit
-from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, HTTPSHandler, ProxyHandler, Request, build_opener
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -38,9 +38,10 @@ class JobServerClient:
         self.url = url.rstrip("/")
         self.key_path = Path(key_path) if key_path else None
         self.server_id, self.timeout = server_id, timeout
-        self.opener = build_opener(
-            NoRedirect(), HTTPSHandler(context=ssl.create_default_context(cafile=ca_file))
-        )
+        handlers = [NoRedirect(), HTTPSHandler(context=ssl.create_default_context(cafile=ca_file))]
+        if parts.hostname in {"127.0.0.1", "localhost", "::1"}:
+            handlers.append(ProxyHandler({}))
+        self.opener = build_opener(*handlers)
         self.token, self.expires = None, 0
         self.authenticated_at = 0
 

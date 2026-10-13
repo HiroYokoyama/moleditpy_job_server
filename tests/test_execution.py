@@ -12,7 +12,7 @@ from job_server.db import Database
 from job_server.instance import InstanceLock
 from job_server.jobs import Jobs
 from job_server.scheduler import Scheduler
-from .conftest import reserve
+from .conftest import enroll, reserve
 
 
 def wait_job(client, job_id, state, timeout=20):
@@ -161,3 +161,35 @@ def test_ambiguous_claim_keeps_allocation_and_never_relaunches(client, alice):
     assert job["state"] == "RUNNING"
     assert "NEEDS_RECHECK" in job["reason"]
     assert client.app.state.scheduler.resources()["reserved_cpus"] == 1
+
+
+def test_two_users_share_admission_and_user_concurrency_limit(client, alice):
+    bob = enroll(client, "bob")
+    client.app.state.settings.max_active_per_user = 1
+    command = (
+        "Start-Sleep -Seconds 1; Write-Output example"
+        if os.name == "nt"
+        else "sleep 1; echo example"
+    )
+    first = reserve(client, alice, command=command).json()["id"]
+    pending = reserve(client, alice, command=command).json()["id"]
+    other = reserve(client, bob, command=command).json()["id"]
+    for identifier, identity in ((first, alice), (pending, alice), (other, bob)):
+        assert (
+            client.post(
+                f"/api/v1/jobs/{identifier}/commit", headers=identity["headers"]
+            ).status_code
+            == 200
+        )
+    scheduler = client.app.state.scheduler
+    scheduler.tick()
+    scheduler.tick()
+    assert scheduler.resources()["running"] == 2
+    assert scheduler.resources()["reserved_cpus"] == 2
+    assert scheduler.resources()["reserved_memory_mb"] == 1024
+    assert (
+        client.app.state.db.one("SELECT state FROM jobs WHERE id=?", (pending,))["state"]
+        == "PENDING"
+    )
+    for identifier in (first, pending, other):
+        assert wait_job(client, identifier, {"DONE"})["exit_code"] == 0

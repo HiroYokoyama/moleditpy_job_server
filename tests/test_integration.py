@@ -79,6 +79,18 @@ def test_python_client_tls_policy():
     assert JobServerClient("http://127.0.0.1:8766").url == "http://127.0.0.1:8766"
 
 
+def test_loopback_client_never_sends_credentials_to_environment_proxy(monkeypatch):
+    from urllib.request import ProxyHandler
+    from job_server.client import JobServerClient
+
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy.example.org:8080")
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example.org:8080")
+    client = JobServerClient("http://127.0.0.1:8766")
+    assert not any(
+        isinstance(handler, ProxyHandler) and handler.proxies for handler in client.opener.handlers
+    )
+
+
 def test_credentials_roundtrip_without_plaintext_private_key(tmp_path):
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
     from job_server.credentials import save_key, load_key
