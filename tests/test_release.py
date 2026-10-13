@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.mark.parametrize(
-    "version", ["", "v0.1.1", "0.1.1\n", "0.0.0", "0.1.1;echo injected", "$(id)"]
+    "version", ["", "v0.1.2", "0.1.2\n", "0.0.0", "0.1.2;echo injected", "$(id)"]
 )
 def test_release_rejects_mismatch_or_injected_input(version):
     with pytest.raises(ValueError):
@@ -19,7 +19,7 @@ def test_release_rejects_mismatch_or_injected_input(version):
 
 
 def test_release_accepts_matching_source_version():
-    assert validate_version(source_version()) == "0.1.1"
+    assert validate_version(source_version()) == "0.1.2"
 
 
 @pytest.mark.parametrize(
@@ -46,5 +46,8 @@ def test_workflows_validate_before_publication_and_do_not_execute_event_inputs()
     assert set(release["jobs"]["release"]["needs"]) == {"validate", "tests", "security"}
     assert "REGISTRY_PAT" not in str(release["jobs"]["tests"])
     assert release["jobs"]["release"]["permissions"]["contents"] == "write"
+    # Only a manual release may skip registration; tag pushes always register.
+    assert release["on"]["workflow_dispatch"]["inputs"]["register"]["default"] == "true"
+    assert release["jobs"]["registry"]["if"] == "github.event_name == 'push' || inputs.register"
     # Syntax-check the validation script independently of imports.
     ast.parse((ROOT / "scripts/verify_release.py").read_text("utf-8"))

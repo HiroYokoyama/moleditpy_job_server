@@ -7,7 +7,7 @@ Zenodo or PyPI publication workflow.
 |---|---|---|
 | Tests | Main/dev pushes, pull requests, manual, reusable | Python 3.11/3.12/3.13 on Linux/Windows; Qt, native execution, coverage/JUnit reports, wheel/sdist and both plugin ZIPs with checksums; Linux/Windows patched Job Manager regression and real HTTP client compatibility |
 | Security | Main/dev pushes, pull requests, weekly, manual, reusable | Dependency advisories, Bandit source analysis, credential signatures in tracked source and Git history |
-| Release | `vX.Y.Z` tag push or manual on main | Validate both version declarations, rerun Tests and Security, build/validate four assets, create a GitHub release, request registry refresh when REGISTRY_PAT exists |
+| Release | `vX.Y.Z` tag push or manual on main | Validate both version declarations, rerun Tests and Security, build/validate four assets, create a GitHub release, request registry refresh when REGISTRY_PAT exists (a manual run with `register=false` skips it) |
 | Update Plugin Registry | After Release, or manual with an existing release tag | Verify the release includes `job_server_X.Y.Z.zip`, send the existing `plugin_release` registry dispatch |
 
 To prepare a release, update `PLUGIN_VERSION` in `job_server/__init__.py` and

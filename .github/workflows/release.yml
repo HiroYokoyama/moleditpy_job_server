@@ -6,6 +6,11 @@ on:
         description: Release version without leading v (must match source)
         required: true
         type: string
+      register:
+        description: Request the moleditpy-plugins registry update after publishing
+        required: false
+        default: true
+        type: boolean
   push:
     tags: ['v*.*.*']
 permissions:
@@ -83,6 +88,8 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
   registry:
     needs: release
+    # Tag pushes always register; a manual release may opt out.
+    if: github.event_name == 'push' || inputs.register
     uses: ./.github/workflows/registry.yml
     with:
       tag: ${{ needs.release.outputs.tag }}
