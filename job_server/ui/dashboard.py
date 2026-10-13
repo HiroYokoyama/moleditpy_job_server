@@ -270,13 +270,33 @@ class Dashboard(QDialog):
         except Exception as exc:
             self.message.setText(str(exc))
 
+    def require_own_daemon(self):
+        """Refuse a listener that is not the daemon holding this data directory's lock.
+
+        Anything can answer /health on the loopback port, including a process of
+        another local account that bound it first; it must never receive a password.
+        """
+        from ..instance import InstanceLock
+
+        try:
+            InstanceLock(self.settings.root).acquire().release()
+        except RuntimeError:
+            return
+        raise RuntimeError(
+            f"Port {self.settings.port} is answered by a process that is not this Job Server; "
+            "stop it or choose another port"
+        )
+
     def start_daemon(self):
         def work():
             try:
                 self.client.request("GET", "/health", authenticated=False)
-                return "Daemon is already running; reusing it."
+                running = True
             except Exception:
-                pass
+                running = False
+            if running:
+                self.require_own_daemon()
+                return "Daemon is already running; reusing it."
             self.settings.save(self.config)
             log_dir = self.settings.root / "logs"
             log_dir.mkdir(parents=True, exist_ok=True)
@@ -364,7 +384,12 @@ class Dashboard(QDialog):
         else:
             credentials = self.credentials("Register administrator device")
             if credentials:
-                self.task(lambda: self.client.enroll(*credentials), lambda _: self.refresh())
+
+                def work():
+                    self.require_own_daemon()
+                    return self.client.enroll(*credentials)
+
+                self.task(work, lambda _: self.refresh())
 
     def bootstrap(self):
         credentials = self.credentials("Initial administrator (daemon must be stopped)")

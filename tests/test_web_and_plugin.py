@@ -87,3 +87,55 @@ def test_gui_start_adopts_saved_port(tmp_path, monkeypatch):
     assert dialog.client.url == "http://127.0.0.1:8879"
     assert Settings.load(config).port == 8879
     dialog.close()
+
+
+def test_gui_refuses_listener_that_does_not_hold_daemon_lock(tmp_path, monkeypatch):
+    import pytest
+
+    pytest.importorskip("PyQt6")
+    import time
+    from PyQt6.QtWidgets import QApplication
+    from job_server.instance import InstanceLock
+    from job_server.settings import Settings
+    from job_server.ui.dashboard import Dashboard
+
+    app = QApplication.instance() or QApplication([])
+    config = tmp_path / "settings.json"
+    Settings(data_dir=str(tmp_path)).save(config)
+    dialog = Dashboard(config=config)
+    dialog.timer.stop()
+    sent = []
+
+    def answering(method, path, body=None, **kwargs):
+        sent.append((method, path, body))
+        return {"status": "ok", "server_version": "impostor"}
+
+    monkeypatch.setattr(dialog.client, "request", answering)
+    monkeypatch.setattr(
+        "job_server.ui.dashboard.subprocess.Popen", lambda *args, **kwargs: None
+    )
+
+    def run(call):
+        call()
+        deadline = time.monotonic() + 5
+        while dialog.busy and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.01)
+        assert not dialog.busy
+
+    # Something answers /health, but no daemon holds this data directory's lock.
+    run(dialog.start_daemon)
+    assert "not this Job Server" in dialog.message.text()
+    monkeypatch.setattr(dialog, "credentials", lambda title: ("admin", "example-password-123"))
+    run(dialog.sign_in)
+    assert "not this Job Server" in dialog.message.text()
+    assert not any(path == "/auth/login" for _, path, _ in sent)
+
+    # The genuine daemon holds the lock and is reused.
+    lock = InstanceLock(tmp_path).acquire()
+    try:
+        run(dialog.start_daemon)
+        assert "reusing it" in dialog.message.text()
+    finally:
+        lock.release()
+    dialog.close()
