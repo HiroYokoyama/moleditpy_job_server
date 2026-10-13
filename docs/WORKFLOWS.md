@@ -5,9 +5,9 @@ Zenodo or PyPI publication workflow.
 
 | Workflow | Trigger | Checks / outcome |
 |---|---|---|
-| Tests | Main/dev pushes, pull requests, manual, reusable | Python 3.11/3.12/3.13 on Linux/Windows; Qt, native execution, coverage/JUnit reports, wheel/sdist and both plugin ZIPs with checksums; Linux/Windows patched Job Manager regression |
+| Tests | Main/dev pushes, pull requests, manual, reusable | Python 3.11/3.12/3.13 on Linux/Windows; Qt, native execution, coverage/JUnit reports, wheel/sdist and both plugin ZIPs with checksums; Linux/Windows patched Job Manager regression and real HTTP client compatibility |
 | Security | Main/dev pushes, pull requests, weekly, manual, reusable | Dependency advisories, Bandit source analysis, credential signatures in tracked source and Git history |
-| Release | `vX.Y.Z` tag push or manual on main | Validate both version declarations, rerun Tests and Security, build/validate four assets, create a GitHub prerelease, request registry refresh |
+| Release | `vX.Y.Z` tag push or manual on main | Validate both version declarations, rerun Tests and Security, build/validate four assets, create a GitHub release, request registry refresh when REGISTRY_PAT exists |
 | Update Plugin Registry | After Release, or manual with an existing release tag | Verify the release includes `job_server_X.Y.Z.zip`, send the existing `plugin_release` registry dispatch |
 
 To prepare a release, update `PLUGIN_VERSION` in `job_server/__init__.py` and
@@ -15,10 +15,9 @@ To prepare a release, update `PLUGIN_VERSION` in `job_server/__init__.py` and
 well. Commit the change, then run **Actions → Release → Run workflow** on main with
 the matching version (without `v`), or push its `vX.Y.Z` tag. Publication occurs only
 after Tests and Security succeed. An existing tag must point to the selected commit;
-existing release assets are never overwritten by this workflow. Releases remain
-marked **Trusted Lab Preview / prerelease**.
+existing release assets are never overwritten by this workflow. Releases are published as ordinary GitHub Releases.
 
-Release assets: `job_server_X.Y.Z.zip`, `job_manager_job_server_preview.zip`, the
+Release assets: `job_server_X.Y.Z.zip`, `job_manager_job_server.zip`, the
 Python wheel, source distribution, and `SHA256SUMS`. The registry receives the
 server plugin ZIP; the companion does not replace the upstream Job Manager release.
 
@@ -30,12 +29,25 @@ manual registration route. After configuring it, rerun Update Plugin Registry fo
 the published tag. Creating these workflows does not itself release or register
 the plugin.
 
+The 0.1.0 release is triggered by its `v0.1.0` tag. It publishes GitHub assets but
+does not register this server: no `REGISTRY_PAT` is configured. Registry dispatch
+reports a skip. Job Manager has its own PAT and may register its 2.6.0 release
+through its normal workflow.
+
 CI jobs have read-only repository tokens and no publication secrets. Only the
 publication job gets `contents: write`; the registry token is passed only to the
 registry job, which never checks out or executes repository code. Action versions
 are pinned to verified full commit hashes; Dependabot proposes updates weekly.
 Event inputs enter scripts through environment variables and are validated before
 use. No `pull_request_target` or privileged `workflow_run` path executes fork code.
+
+Job Server's Tests workflow also runs Job Manager HTTP compatibility on Linux and
+Windows. `scripts/ensure_job_manager.py` reuses `../moleditpy_job_manager` when it
+exists, or clones that repository's `main` into the sibling location. It never
+resets, switches, pulls or deletes an existing checkout. Set the optional repository
+variable `JOB_MANAGER_REF` to test another branch when cloning into a fresh runner.
+The job tests optional-dependency-free imports, GUI routing, and real enrollment,
+native execution, polling, logs, verified results, cancellation and owner ACLs.
 
 Coverage is published as a report, not an unverified percentage badge. Initial
 Release/download badges can show no releases until the first release is requested.

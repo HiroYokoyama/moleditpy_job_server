@@ -1,12 +1,12 @@
 # Security model
 
 > [!WARNING]
-> **Never expose this server to the public internet. Localhost or private Tailscale only.**
+> **Never expose this server to the public internet. Localhost, private LAN or private Tailscale only.**
 > Never use Tailscale Funnel, public reverse proxies/tunnels, or router port forwarding.
 > Restrict tailnet access to trusted users. A loopback listener can still be exposed by a proxy;
 > the daemon cannot detect or prevent a misconfigured proxy or Funnel.
 
-This preview is restricted to trusted users sharing a low-privilege execution account.
+This server is restricted to trusted users sharing a low-privilege execution account.
 It does not provide OS-level multi-tenant isolation. Commands may read other jobs and
 the daemon's data if their OS identity permits it. Never accept mutually untrusted users
 until separate OS identities, containers or VMs and brokered execution are implemented.
@@ -24,7 +24,7 @@ or revoking a device invalidates outstanding tokens. Administrative writes requi
 device authentication. Initial administration is local-only with the daemon stopped.
 
 The daemon binds loopback and refuses elevated execution except an explicit isolated-test
-override. Private Tailscale clients must use validated HTTPS terminating on the same host.
+override. Private LAN/Tailscale clients must use validated HTTPS terminating on the same host.
 Forwarded headers are ignored. Only exact configured browser origins are accepted;
 there is no permissive CORS response. Browser keys remain in IndexedDB as non-exportable
 CryptoKeys, and access tokens are not placed in URLs or persistent browser storage.
@@ -52,7 +52,7 @@ should configure a suitable external per-client rate limiter as well.
 
 Resource reservation is advisory. Disk checks sample job directories and can overshoot
 between samples; use OS filesystem quotas for a strict cap. Cumulative declared input
-size is limited per user. Results are limited per job in this preview, not aggregated
+size is limited per user. Results are limited per job in this server, not aggregated
 per user. Restart recovery never automatically resubmits a claimed job. Ambiguous jobs
 retain their allocation until an administrator inspects the supervisor and payload.
 

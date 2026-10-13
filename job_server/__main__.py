@@ -8,7 +8,7 @@ from .settings import Settings
 
 
 def main():
-    parser = argparse.ArgumentParser(description="MoleditPy Job Server — Trusted Lab Preview")
+    parser = argparse.ArgumentParser(description="MoleditPy Job Server — LAN computational helper")
     parser.add_argument("--config", type=Path)
     sub = parser.add_subparsers(dest="action", required=True)
     for name in ("serve", "status", "init", "create-admin"):

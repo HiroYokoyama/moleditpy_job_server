@@ -12,18 +12,18 @@
     <a class="brand" href="/" aria-label="Job Server home"><img class="brand-mark" src="/assets/icon.png" alt=""><span>MoleditPy<small>JOB SERVER</small></span></a>
     <div class="nav-caption">WORKSPACE</div>
     <nav aria-label="Main"><button class="nav active" data-panel="overview">Overview</button><button class="nav" data-panel="submit">Submit a job</button><button class="nav" data-panel="accounts" id="accounts-nav" hidden>Users & devices</button></nav>
-    <div class="sidebar-bottom"><span class="preview">TRUSTED LAB PREVIEW</span><p>A shared queue for your lab.<br>Run under a low-privilege OS account.</p></div>
+    <div class="sidebar-bottom"><span class="preview">LAN COMPUTATIONAL HELPER</span><p>A shared queue for your network.<br>Run under a low-privilege OS account.</p></div>
   </aside>
   <main>
     <header><div><span class="eyebrow">COMPUTE WORKSPACE</span><h1 id="page-title">Overview</h1></div><div class="connection"><span class="dot" id="connection-dot"></span><span id="connection-text">Connecting</span><button id="signin">Sign in</button><button id="signout" hidden>Sign out</button></div></header>
     <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
-    <p class="notice"><strong>Warning: Never expose Job Server to the public internet.</strong> Use localhost or a private Tailscale tailnet only. No Tailscale Funnel or public port forwarding.</p>
+    <p class="notice"><strong>Warning: Never expose Job Server to the public internet.</strong> Use localhost, a private LAN over HTTPS, or a private Tailscale tailnet only. No Tailscale Funnel or public port forwarding.</p>
     <section id="overview" class="panel">
       <div class="metrics"><article><span>Running jobs</span><strong id="running">—</strong><small>Active on this server</small></article><article><span>Waiting</span><strong id="pending">—</strong><small id="queue-label">Shared queue</small></article><article><span>CPU budget</span><strong id="cpu">—</strong><small>Reserved / available cores</small></article><article><span>Memory budget</span><strong id="memory">—</strong><small>Reserved / available MB</small></article></div>
       <div class="section-head"><div><h2>Jobs</h2><p id="jobs-caption">Sign in to view your jobs.</p></div><div class="actions"><button data-panel="submit" class="primary">New job</button><button id="pause" hidden>Pause queue</button><button id="refresh">Refresh</button></div></div>
       <div class="table-wrap"><table><thead><tr><th>Job</th><th>Status</th><th>Resources</th><th>Submitted</th><th></th></tr></thead><tbody id="jobs-body"><tr><td colspan="5" class="empty">Your calculations will appear here.</td></tr></tbody></table></div>
       <div class="paging"><button id="previous-page" disabled>Previous</button><span id="page-number">Page 1</span><button id="next-page" disabled>Next</button></div>
-      <p class="footnote">CPU and memory values reserve queue capacity. This preview reports advisory limits and shares an OS execution account.</p>
+      <p class="footnote">CPU and memory values reserve queue capacity. This server reports advisory limits and shares an OS execution account.</p>
     </section>
     <section id="submit" class="panel" hidden>
       <div class="section-head"><div><h2>A new calculation</h2><p>Choose inputs and a command for this server’s native shell.</p></div></div>

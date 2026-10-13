@@ -78,3 +78,40 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e ".[test,gui]" paramiko rdkit
       - run: python scripts/run_regression.py
+  manager-client:
+    name: Job Manager HTTP compatibility (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      QT_QPA_PLATFORM: offscreen
+      JOB_MANAGER_REF: ${{ vars.JOB_MANAGER_REF || 'main' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Install Qt system libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libopengl0
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[test,gui]"
+      - name: Reuse sibling manager or clone its support branch
+        run: python scripts/ensure_job_manager.py --ref "$env:JOB_MANAGER_REF"
+        if: runner.os == 'Windows'
+      - name: Reuse sibling manager or clone its support branch
+        run: python scripts/ensure_job_manager.py --ref "$JOB_MANAGER_REF"
+        if: runner.os == 'Linux'
+      - name: Manager optional imports and GUI routing
+        working-directory: ../moleditpy_job_manager
+        run: python -m pytest tests/test_job_server_optional.py tests/test_job_server_gui.py -q --timeout=120 --timeout-method=thread
+      - name: Real manager client against the native server
+        run: python -m pytest tests/test_job_manager_client.py -q --timeout=120 --timeout-method=thread

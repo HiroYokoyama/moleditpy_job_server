@@ -67,7 +67,7 @@ jobs:
       - run: python scripts/build_plugin.py
       - run: python scripts/build_job_manager.py
       - run: python scripts/verify_release.py "$VERSION" --artifacts
-      - name: Publish Trusted Lab Preview and assets
+      - name: Publish LAN computational helper and assets
         id: publish
         env:
           GH_TOKEN: ${{ github.token }}
@@ -77,9 +77,9 @@ jobs:
             git fetch --no-tags origin "refs/tags/$TAG"
             test "$(git rev-parse 'FETCH_HEAD^{commit}')" = "$GITHUB_SHA" || { echo 'Tag points to a different commit'; exit 1; }
           fi
-          gh release create "$TAG" --target "$GITHUB_SHA" --prerelease \
-            --title "Job Server $VERSION — Trusted Lab Preview" --generate-notes \
-            dist/job_server_*.zip dist/job_manager_job_server_preview.zip dist/*.whl dist/*.tar.gz dist/SHA256SUMS
+          gh release create "$TAG" --target "$GITHUB_SHA" \
+            --title "Job Server $VERSION — LAN computational helper" --generate-notes \
+            dist/job_server_*.zip dist/job_manager_job_server.zip dist/*.whl dist/*.tar.gz dist/SHA256SUMS
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
   registry:
     needs: release

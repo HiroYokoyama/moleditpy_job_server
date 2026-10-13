@@ -3,7 +3,7 @@
 PLUGIN_NAME = "Job Server"
 PLUGIN_VERSION = "0.1.0"
 PLUGIN_AUTHOR = "HiroYokoyama"
-PLUGIN_DESCRIPTION = "Authenticated shared job queue and headless server for trusted lab members."
+PLUGIN_DESCRIPTION = "Authenticated shared job queue and headless server for trusted users."
 PLUGIN_CATEGORY = "Utility"
 PLUGIN_TAGS = ["Utility"]
 PLUGIN_DEPENDENCIES = ["fastapi", "uvicorn", "cryptography", "psutil", "packaging"]

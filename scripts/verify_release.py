@@ -51,7 +51,7 @@ def safe_members(names):
 def verify_artifacts(version, root=ROOT):
     dist = root / "dist"
     server = dist / f"job_server_{version}.zip"
-    companion = dist / "job_manager_job_server_preview.zip"
+    companion = dist / "job_manager_job_server.zip"
     wheel = dist / f"moleditpy_job_server-{version}-py3-none-any.whl"
     source = dist / f"moleditpy_job_server-{version}.tar.gz"
     with ZipFile(server) as archive:
