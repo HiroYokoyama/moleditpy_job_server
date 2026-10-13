@@ -44,3 +44,6 @@ Upstream regression testing runs against an isolated patched copy of Job Manager
 Windows-hosted WSL was unavailable in the initial environment (`WSL/E_ACCESSDENIED`);
 real WSL execution/cancellation and Linux-filesystem UNC rename must be checked on a
 WSL-capable host before claiming the draft's full three-platform acceptance matrix.
+An elevated distribution-list check on 2026-10-14 succeeded, but found only a
+container-managed distribution and no calculation distribution. No calculation was
+run there; the new Windows-to-WSL README examples remain source/documentation-based.
