@@ -1,5 +1,7 @@
 # Security audit — 2026-10-13
 
+Follow-up: [2026-10-14 security audit and authentication race fixes](SECURITY_AUDIT_2026-10-14.md).
+
 Scope: all first-party Python modules, browser JavaScript/HTML, native/WSL process
 adapters, Job Manager bridge/build overlays, GitHub workflows, package contents,
 tracked files and repository Git history. The upstream source remains pinned and
