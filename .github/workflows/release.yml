@@ -1,0 +1,90 @@
+name: Release
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version without leading v (must match source)
+        required: true
+        type: string
+  push:
+    tags: ['v*.*.*']
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  validate:
+    if: github.event_name == 'push' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Validate version before tests, builds or publication
+        id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "$EVENT_NAME" = push ]; then VERSION="${GITHUB_REF_NAME#v}"; else VERSION="$INPUT_VERSION"; fi
+          python scripts/verify_release.py "$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+  tests:
+    needs: validate
+    uses: ./.github/workflows/test.yml
+  security:
+    needs: validate
+    uses: ./.github/workflows/security.yml
+  release:
+    needs: [validate, tests, security]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.validate.outputs.version }}
+    outputs:
+      tag: ${{ steps.publish.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install build
+      - run: python scripts/verify_release.py "$VERSION"
+      - run: python -m build
+      - run: python scripts/build_plugin.py
+      - run: python scripts/build_job_manager.py
+      - run: python scripts/verify_release.py "$VERSION" --artifacts
+      - name: Publish Trusted Lab Preview and assets
+        id: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v$VERSION"
+          if git ls-remote --exit-code origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            git fetch --no-tags origin "refs/tags/$TAG"
+            test "$(git rev-parse 'FETCH_HEAD^{commit}')" = "$GITHUB_SHA" || { echo 'Tag points to a different commit'; exit 1; }
+          fi
+          gh release create "$TAG" --target "$GITHUB_SHA" --prerelease \
+            --title "Job Server $VERSION — Trusted Lab Preview" --generate-notes \
+            dist/job_server_*.zip dist/job_manager_job_server_preview.zip dist/*.whl dist/*.tar.gz dist/SHA256SUMS
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+  registry:
+    needs: release
+    uses: ./.github/workflows/registry.yml
+    with:
+      tag: ${{ needs.release.outputs.tag }}
+    secrets:
+      registry_pat: ${{ secrets.REGISTRY_PAT }}

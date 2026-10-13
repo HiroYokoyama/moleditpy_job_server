@@ -140,10 +140,14 @@ class Auth:
     def admin(self, principal):
         if principal["role"] != "admin":
             reject(403, "admin_required", "Administrator required")
+        self.fresh(principal)
+
+    def fresh(self, principal):
         if time.time() - principal["authenticated_at"] > 300:
             reject(401, "reauthenticate", "Repeat device authentication for this operation")
 
     def enroll(self, principal, device_id, public_key):
+        self.fresh(principal)
         try:
             uuid.UUID(device_id)
             key = base64.b64decode(public_key, validate=True)
@@ -151,6 +155,13 @@ class Auth:
         except (ValueError, TypeError, AttributeError):
             reject(400, "invalid_key", "A UUID device ID and raw Ed25519 public key are required")
         with self.db.transaction() as c:
+            # Recheck under the write lock: concurrent use of a one-use enrollment
+            # session must not register multiple persistent keys.
+            if not c.execute(
+                "SELECT 1 FROM sessions WHERE digest=? AND expires>?",
+                (principal["digest"], time.time()),
+            ).fetchone():
+                reject(401, "unauthenticated", "Enrollment session already consumed or revoked")
             if c.execute("SELECT 1 FROM devices WHERE id=?", (device_id,)).fetchone():
                 reject(409, "device_exists", "Device already registered")
             c.execute(
@@ -158,6 +169,8 @@ class Auth:
                 (device_id, principal["user_id"], public_key, time.time()),
             )
             self.db.event(c, "device_enrolled", principal["user_id"], device_id=device_id)
+            if principal["scope"] == "enrollment":
+                c.execute("DELETE FROM sessions WHERE digest=?", (principal["digest"],))
         return {"device_id": device_id}
 
     def challenge(self, device_id):

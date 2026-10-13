@@ -17,6 +17,7 @@
   <main>
     <header><div><span class="eyebrow">COMPUTE WORKSPACE</span><h1 id="page-title">Overview</h1></div><div class="connection"><span class="dot" id="connection-dot"></span><span id="connection-text">Connecting</span><button id="signin">Sign in</button><button id="signout" hidden>Sign out</button></div></header>
     <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+    <p class="notice"><strong>Warning: Never expose Job Server to the public internet.</strong> Use localhost or a private Tailscale tailnet only. No Tailscale Funnel or public port forwarding.</p>
     <section id="overview" class="panel">
       <div class="metrics"><article><span>Running jobs</span><strong id="running">—</strong><small>Active on this server</small></article><article><span>Waiting</span><strong id="pending">—</strong><small id="queue-label">Shared queue</small></article><article><span>CPU budget</span><strong id="cpu">—</strong><small>Reserved / available cores</small></article><article><span>Memory budget</span><strong id="memory">—</strong><small>Reserved / available MB</small></article></div>
       <div class="section-head"><div><h2>Jobs</h2><p id="jobs-caption">Sign in to view your jobs.</p></div><div class="actions"><button data-panel="submit" class="primary">New job</button><button id="pause" hidden>Pause queue</button><button id="refresh">Refresh</button></div></div>

@@ -1,22 +1,30 @@
-name: Verify
-on: [push, pull_request, workflow_dispatch]
+name: Tests
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
 permissions:
   contents: read
 jobs:
   test:
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        python: ['3.11', '3.13']
+        python: ['3.11', '3.12', '3.13']
     runs-on: ${{ matrix.os }}
     env:
       QT_QPA_PLATFORM: offscreen
+      PYTHONFAULTHANDLER: '1'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
-      - uses: actions/setup-python@v5
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python }}
       - name: Install Qt system libraries
@@ -24,13 +32,49 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libegl1 libgl1 libopengl0
+      - run: python -m pip install --upgrade pip
       - run: python -m pip install -e ".[test,gui]"
       - run: python -m ruff check job_server scripts tests integration setup.py
-      - run: python -m pytest -q
+      - run: python -m pytest -q --timeout=120 --timeout-method=thread --cov=job_server --cov-report=term-missing --cov-report=xml:test-results/coverage.xml --junitxml=test-results/pytest.xml
       - run: python -m build
       - run: python scripts/build_plugin.py
       - run: python scripts/build_job_manager.py
-      - uses: actions/upload-artifact@v4
+      - run: python scripts/verify_release.py --artifacts
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: reports-${{ matrix.os }}-${{ matrix.python }}
+          path: test-results/*.xml
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: distributions-${{ matrix.os }}-${{ matrix.python }}
           path: dist/*
+          if-no-files-found: error
+  regression:
+    name: Job Manager regression (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONFAULTHANDLER: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Install Qt system libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libopengl0
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[test,gui]" paramiko rdkit
+      - run: python scripts/run_regression.py

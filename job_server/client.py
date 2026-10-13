@@ -178,7 +178,7 @@ class JobServerClient:
         return self.request("POST", f"/jobs/{job_id}/commit")
 
     def download(self, job_id, relative, destination):
-        from .files import validate_path
+        from .files import open_regular, validate_path
 
         validate_path(relative)
         entry = next(
@@ -214,7 +214,10 @@ class JobServerClient:
                     or not response.headers.get("Content-Range", "").startswith(f"bytes {offset}-")
                 ):
                     raise ValueError("Server did not honor resume range")
-                with partial.open("ab" if offset else "wb") as stream:
+                with open_regular(partial, "r+b") as stream:
+                    if not offset:
+                        stream.truncate(0)
+                    stream.seek(offset)
                     while data := response.read(1024 * 1024):
                         stream.write(data)
                         if stream.tell() > entry["size"]:

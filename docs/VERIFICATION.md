@@ -4,16 +4,25 @@ Recorded 2026-10-13. All tests use isolated generated accounts and temporary job
 
 ## Results
 
-- Local server/GUI/client suite: **56 passed** on Windows / Python 3.13.
+- Local server/GUI/client/security/workflow suite: **83 passed**, 3 POSIX-only skips
+  on Windows / Python 3.13, in an isolated environment with the hardened dependency floors.
+- pip-audit: **no known vulnerabilities** in 72 third-party distributions in the
+  isolated environment (the editable first-party project is skipped by the scanner).
+  The original runtime had 13 unique advisory IDs across AnyIO, Cryptography and
+  Starlette; those versions are now rejected by the daemon's startup checks.
+- Bandit: **0 medium/high findings**; low-severity process invocation/control-flow
+  findings were manually reviewed. GitHub workflow lint: **actionlint 1.7.12 passed**.
+- Bundled execution core: **no Bandit findings**. Full companion upstream: no high
+  findings; four medium warnings reviewed in [the audit](SECURITY_AUDIT.md).
 - Companion Job Manager regression suite: **2,958 passed**, 25 platform/optional skips,
   196 subtests passed. Git Bash `awk` is required for upstream's CPU-counter check.
 - Real browser: device enrollment, password-free reauthentication, job submission,
   native execution, live log, DONE/exit 0, SHA-256 verified result download, and
   responsive dashboard with the reused Job Manager icon were verified in the in-app browser.
 - Built wheel, source distribution, server plugin ZIP, and companion Job Manager ZIP.
-- GitHub CI verifies tests and both builds on Linux/Windows with Python 3.11/3.13;
-  the four-job matrix is green after installing Linux Qt system libraries and removing
-  the plugin ZIP builder's runtime dependency on setuptools.
+- GitHub CI now includes Linux/Windows Python 3.11/3.12/3.13, regression jobs and
+  dependency/static/history security checks. The previous four-job matrix passed;
+  the expanded workflow result is available on the repository's Actions page.
 
 Local Windows tests cover authentication/enrollment, successful and failed nonce replay,
 server binding, key revocation, account disable, fresh administrative authentication,
@@ -24,7 +33,7 @@ tree cleanup, walltime, supervisor recovery, retained ambiguous allocations, the
 web CSP/origin checks, plugin registration and offscreen GUI construction.
 
 The source audit and native acceptance findings are in `SPEC_AUDIT.md`. The repository's
-CI matrix runs Linux/Windows on Python 3.11/3.13, builds wheels/sdist and both plugin ZIPs.
+CI matrix runs Linux/Windows on Python 3.11/3.12/3.13, builds wheels/sdist and both plugin ZIPs.
 Upstream regression testing runs against an isolated patched copy of Job Manager.
 
 Windows-hosted WSL was unavailable in the initial environment (`WSL/E_ACCESSDENIED`);

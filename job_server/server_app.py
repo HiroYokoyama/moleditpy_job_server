@@ -7,6 +7,9 @@ from .api import create_app
 
 
 def serve(settings):
+    from .runtime import ensure_secure_dependencies
+
+    ensure_secure_dependencies()
     if not settings.allow_privileged:
         if os.name == "nt":
             import ctypes

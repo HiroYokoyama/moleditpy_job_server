@@ -1,7 +1,21 @@
 # MoleditPy Job Server
 
+[![Tests](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/test.yml/badge.svg)](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/test.yml)
+[![Security](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/security.yml/badge.svg)](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/security.yml)
+[![Release](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/release.yml/badge.svg)](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/release.yml)
+[![Version](https://img.shields.io/badge/version-0.1.0%20preview-orange)](pyproject.toml)
+[![Downloads](https://img.shields.io/github/downloads/HiroYokoyama/moleditpy_job_server/total)](https://github.com/HiroYokoyama/moleditpy_job_server/releases)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![MoleditPy](https://img.shields.io/badge/MoleditPy-4.x-3577F7)](https://github.com/HiroYokoyama/python_molecular_editor)
+
 An authenticated shared job queue, headless daemon, MoleditPy administration plugin,
 and browser UI for trusted lab members. Version **0.1.0 — Trusted Lab Preview**.
+
+> [!WARNING]
+> **Never expose Job Server to the public internet. Use localhost or a private Tailscale tailnet only.**
+> Do not use Tailscale Funnel, router port forwarding, a public reverse proxy, or an internet tunnel.
+> Jobs execute arbitrary commands under the service OS account. Only admit trusted users,
+> restrict tailnet access, and run under a low-privilege account. Authentication is not an OS sandbox.
 
 ![Job Server browser dashboard at desktop size (1440 × 1000)](docs/web-ui.jpg)
 
@@ -14,7 +28,7 @@ Job Manager source dependency, rather than a second maintained copy.
 
 Install **`job_server_0.1.0.zip`** using MoleditPy's Plugin Installer. Then open
 **Plugin → Job Server → Server Dashboard…**.
-The ZIPs are included in the [Verify workflow's build artifacts](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/test.yml).
+The ZIPs are included in the [Tests workflow's build artifacts](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/test.yml).
 Extract the artifact download and install the inner plugin ZIP, or build it from source below.
 
 You can operate the server from MoleditPy dialogs; the command line is optional:
@@ -92,7 +106,7 @@ overlay. It does not change your sibling Job Manager repository or its upstream 
 `integration/job_manager.patch` records changes for upstream review;
 `integration/server_backend.py` is the additional bridge module.
 
-### HTTPS on a LAN or Tailscale
+### HTTPS inside a private Tailscale tailnet
 
 Set `public_url` in settings to the exact HTTPS origin, e.g. `https://compute.example.org`.
 This allows that browser origin; other origins are rejected. Terminate TLS in a proxy
@@ -103,9 +117,12 @@ tailscale serve --bg http://127.0.0.1:8766
 ```
 
 Use the HTTPS URL shown by Tailscale Serve as `public_url`, then restart the daemon.
-For a LAN proxy, use a certificate trusted by clients and forward to loopback.
+Limit access to trusted members using your tailnet access policy. Verify that this
+service is not exposed by an existing Funnel or public proxy configuration.
 Python clients validate TLS and refuse redirects; custom trust uses a CA file.
-Funnel and direct public-internet deployments are outside this preview.
+[Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve) shares within
+your tailnet. [Tailscale Funnel](https://tailscale.com/docs/features/tailscale-funnel)
+publishes to the internet and **must never be used with Job Server**.
 
 ## Python client
 
@@ -165,8 +182,13 @@ python scripts/build_plugin.py
 python scripts/build_job_manager.py
 ```
 
-CI covers Python 3.11/3.13 on Linux and Windows. Windows-hosted WSL needs a machine
+CI covers Python 3.11/3.12/3.13 on Linux and Windows, including Qt dialogs, real native
+job execution, coverage reports, packaging, and the patched Job Manager regression suite.
+Security CI audits dependencies and source on each change and weekly.
+Windows-hosted WSL needs a machine
 with an installed distribution; its end-to-end acceptance is not claimed by native CI.
 See [verification](docs/VERIFICATION.md) for actual results and outstanding platform checks.
+See [workflows](docs/WORKFLOWS.md) for release/registry setup and
+[security audit](docs/SECURITY_AUDIT.md) for findings and remaining limitations.
 
 GPL-3.0-only. Upstream execution code retains its original license and attribution.

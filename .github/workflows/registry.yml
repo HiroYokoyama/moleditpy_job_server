@@ -1,0 +1,45 @@
+name: Update Plugin Registry
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing published release tag (e.g. v0.1.0)
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+    secrets:
+      registry_pat:
+        required: false
+permissions:
+  contents: read
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify release contains the installable server plugin
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Invalid release tag'; exit 1; }
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,assets > release.json
+          jq -e --arg asset "job_server_${TAG#v}.zip" '.isDraft == false and any(.assets[]; .name == $asset)' release.json
+      - name: Trigger moleditpy-plugins registry update
+        env:
+          GH_TOKEN: ${{ secrets.registry_pat || secrets.REGISTRY_PAT }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo 'REGISTRY_PAT is not configured; release is available but registry dispatch was skipped.' >> "$GITHUB_STEP_SUMMARY"
+            echo 'Configure REGISTRY_PAT and rerun this workflow, or request registration at https://github.com/HiroYokoyama/moleditpy-plugins/issues/new/choose' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          jq -n --arg repo "$GITHUB_REPOSITORY" --arg tag "$TAG" \
+            '{event_type:"plugin_release",client_payload:{repo:$repo,tag:$tag}}' > payload.json
+          gh api --method POST repos/HiroYokoyama/moleditpy-plugins/dispatches --input payload.json
+          echo 'Registry refresh requested for the Job Server plugin ZIP.' >> "$GITHUB_STEP_SUMMARY"

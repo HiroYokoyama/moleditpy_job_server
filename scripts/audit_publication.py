@@ -1,5 +1,6 @@
 """Check the exact Git index before public publication, without printing secrets."""
 
+import argparse
 import re
 import subprocess
 from pathlib import Path
@@ -15,6 +16,9 @@ PATTERNS = [
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--history", action="store_true")
+    args = parser.parse_args()
     paths = subprocess.check_output(["git", "ls-files", "-z"], cwd=ROOT).decode().split("\0")
     issues = []
     scanned = 0
@@ -39,6 +43,20 @@ def main():
         print(f"FAIL {name}: {reason}")
     if issues:
         return 1
+    if args.history:
+        objects = subprocess.check_output(["git", "rev-list", "--objects", "--all"], cwd=ROOT)
+        blobs = 0
+        for line in objects.decode().splitlines():
+            identifier = line.split(" ", 1)[0]
+            kind = subprocess.check_output(["git", "cat-file", "-t", identifier], cwd=ROOT).strip()
+            if kind != b"blob":
+                continue
+            data = subprocess.check_output(["git", "cat-file", "blob", identifier], cwd=ROOT)
+            blobs += 1
+            if any(re.search(pattern, data) for pattern in PATTERNS):
+                print(f"FAIL historical blob {identifier}: credential signature; inspect privately")
+                return 1
+        print(f"PASS: {blobs} historical Git blobs scanned for credential signatures.")
     print(
         f"PASS: {scanned} staged text files scanned; no private-key, GitHub-token, AWS-key or API-key signatures."
     )

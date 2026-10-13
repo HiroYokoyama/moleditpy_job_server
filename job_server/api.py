@@ -16,7 +16,7 @@ from .auth import Auth
 from .core import build_wrapper
 from .db import Database
 from .errors import ServerError, reject
-from .files import contained, open_regular, sha256
+from .files import contained, is_link, open_regular, sha256
 from .instance import InstanceLock
 from .jobs import Jobs
 from .scheduler import Scheduler
@@ -280,7 +280,7 @@ def create_app(settings=None, dispatch=True):
         path = jobs.directory(job_id) / "job.log"
         if not path.exists():
             return {"offset": offset, "next_offset": offset, "text": ""}
-        if path.is_symlink() or (hasattr(path, "is_junction") and path.is_junction()):
+        if is_link(path) or is_link(path.parent):
             reject(400, "unsafe_file", "Linked logs are forbidden")
         with open_regular(path) as stream:
             import os

@@ -3,6 +3,8 @@ import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from .files import atomic_write
+
 
 @dataclass
 class Settings:
@@ -108,8 +110,4 @@ class Settings:
         )
 
     def save(self, path):
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        temporary = path.with_suffix(".tmp")
-        temporary.write_text(json.dumps(asdict(self), indent=2), "utf-8")
-        temporary.replace(path)
+        atomic_write(path, json.dumps(asdict(self), indent=2).encode("utf-8"))

@@ -64,7 +64,8 @@ class Dashboard(QDialog):
         layout = QVBoxLayout(self)
         notice = QLabel(
             "Trusted users only. Jobs share the service OS account; CPU/RAM reservations are advisory.\n"
-            "Use a low-privilege account and HTTPS through Tailscale Serve or a LAN reverse proxy."
+            "WARNING: Never expose to the public internet. Localhost or private Tailscale only; "
+            "no Funnel or public port forwarding. Use a low-privilege OS account."
         )
         notice.setWordWrap(True)
         layout.addWidget(notice)

@@ -5,6 +5,8 @@ import subprocess
 import time
 from pathlib import Path
 
+from ..files import is_link
+
 
 def powershell():
     return (
@@ -75,19 +77,11 @@ def terminate(process, containment, grace=1):
 def directory_size(root):
     total = 0
     for directory, dirs, files in os.walk(root, followlinks=False):
-        dirs[:] = [
-            name
-            for name in dirs
-            if not (Path(directory) / name).is_symlink()
-            and not (
-                hasattr(Path(directory) / name, "is_junction")
-                and (Path(directory) / name).is_junction()
-            )
-        ]
+        dirs[:] = [name for name in dirs if not is_link(Path(directory) / name)]
         for name in files:
             path = Path(directory) / name
             try:
-                if not path.is_symlink():
+                if not is_link(path):
                     total += path.stat().st_size
             except OSError:
                 pass

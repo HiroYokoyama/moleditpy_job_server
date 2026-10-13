@@ -3,6 +3,7 @@
 import os
 import subprocess
 import sys
+import sysconfig
 import tempfile
 from pathlib import Path
 from shutil import copytree, copy2
@@ -29,15 +30,25 @@ def main():
         git_utilities = Path(r"C:\Program Files\Git\usr\bin")
         if os.name == "nt" and (git_utilities / "awk.exe").exists():
             environment["PATH"] = str(git_utilities) + os.pathsep + environment.get("PATH", "")
-        environment["PYTHONPATH"] = str(directory) + os.pathsep + str(root)
+        python = sys.executable
+        paths = [str(directory), str(root)]
+        if os.name == "nt" and sys.prefix != sys.base_prefix:
+            # Windows venv python.exe is a redirector with a second PID. Upstream
+            # real-process tests compare Popen.pid with the beacon's os.getpid().
+            # Run the actual interpreter with this venv's packages on PYTHONPATH.
+            python = sys._base_executable
+            paths.append(sysconfig.get_path("purelib"))
+        environment["PYTHONPATH"] = os.pathsep.join(paths)
         result = subprocess.run(
             [
-                sys.executable,
+                python,
                 "-m",
                 "pytest",
                 "tests",
                 "-q",
                 "--tb=short",
+                "--timeout=300",
+                "--timeout-method=thread",
                 "-n",
                 "4",
                 "--basetemp",

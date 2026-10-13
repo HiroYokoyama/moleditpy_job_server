@@ -7,6 +7,8 @@ from pathlib import Path
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
+from .files import atomic_write, open_regular
+
 
 def dpapi(data, decrypt=False):
     from ctypes import wintypes
@@ -49,22 +51,17 @@ def save_key(path, device_id, server_id, key):
     ).encode()
     if os.name == "nt":
         data = b"DPAPI\n" + dpapi(data)
-    temporary = path.with_suffix(".tmp")
-    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "wb") as stream:
-        stream.write(data)
-        stream.flush()
-        os.fsync(stream.fileno())
-    if os.name != "nt":
-        os.chmod(temporary, 0o600)
-    temporary.replace(path)
+    atomic_write(path, data)
 
 
 def load_key(path):
     path = Path(path)
     if os.name != "nt" and path.stat().st_mode & 0o077:
         raise ValueError("Private key file must be accessible only to its owner (chmod 600)")
-    data = path.read_bytes()
+    with open_regular(path) as stream:
+        data = stream.read(65537)
+    if len(data) > 65536:
+        raise ValueError("Credential file is too large")
     if data.startswith(b"DPAPI\n"):
         if os.name != "nt":
             raise ValueError("This credential is encrypted for its Windows account")

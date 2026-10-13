@@ -3,7 +3,6 @@ import getpass
 import json
 import sys
 from pathlib import Path
-from urllib.request import urlopen
 
 from .settings import Settings
 
@@ -30,8 +29,10 @@ def main():
 
             serve(settings)
         elif args.action == "status":
-            with urlopen(f"http://127.0.0.1:{settings.port}/api/v1/health", timeout=3) as response:
-                print(response.read().decode())
+            from .client import JobServerClient
+
+            client = JobServerClient(f"http://127.0.0.1:{settings.port}", timeout=3)
+            print(json.dumps(client.request("GET", "/health", authenticated=False)))
         elif args.action == "create-admin":
             from .auth import Auth
             from .db import Database

@@ -10,15 +10,11 @@ import psutil
 from .core import build_wrapper
 from .executor import native, wsl
 from .settings import Settings
+from .files import atomic_write
 
 
 def atomic_json(path, value):
-    temporary = path.with_suffix(".tmp")
-    with temporary.open("w", encoding="utf-8") as stream:
-        json.dump(value, stream)
-        stream.flush()
-        os.fsync(stream.fileno())
-    temporary.replace(path)
+    atomic_write(path, json.dumps(value).encode("utf-8"))
 
 
 def main(config, job_id):

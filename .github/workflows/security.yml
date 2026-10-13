@@ -1,0 +1,47 @@
+name: Security
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[gui,security]"
+      - run: mkdir -p test-results
+      - name: Scan tracked files and Git history for credential signatures
+        run: python scripts/audit_publication.py --history
+      - name: Audit installed dependencies
+        run: python -m pip_audit --skip-editable --progress-spinner off --format json --output test-results/dependency-audit.json
+      - name: Static security scan (all findings)
+        continue-on-error: true
+        run: python -m bandit -r job_server scripts integration -f json -o test-results/bandit.json
+      - name: Fail on medium or high severity findings
+        run: python -m bandit -r job_server scripts integration -ll
+      - name: Scan the exact upstream execution modules shipped with Job Server
+        run: python -m bandit -r upstream/job_manager/job_manager/__init__.py upstream/job_manager/job_manager/models.py upstream/job_manager/job_manager/remote_paths.py upstream/job_manager/job_manager/remote_runner.py upstream/job_manager/job_manager/schedulers -ll -f json -o test-results/execution-core-bandit.json
+      - name: Report all pinned companion upstream findings for review
+        continue-on-error: true
+        run: python -m bandit -r upstream/job_manager/job_manager -f json -o test-results/companion-upstream-bandit.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: security-reports
+          path: test-results/*.json
+          if-no-files-found: ignore
