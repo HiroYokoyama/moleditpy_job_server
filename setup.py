@@ -1,10 +1,6 @@
 from pathlib import Path
 from shutil import copy2, copytree
 
-from setuptools import setup
-from setuptools.command.build_py import build_py
-
-
 CORE_FILES = ("__init__.py", "models.py", "remote_paths.py", "remote_runner.py")
 
 
@@ -23,11 +19,13 @@ def copy_core(destination):
     )
 
 
-class Build(build_py):
-    def run(self):
-        super().run()
-        copy_core(Path(self.build_lib) / "job_server" / "_execution")
-
-
 if __name__ == "__main__":
+    from setuptools import setup
+    from setuptools.command.build_py import build_py
+
+    class Build(build_py):
+        def run(self):
+            super().run()
+            copy_core(Path(self.build_lib) / "job_server" / "_execution")
+
     setup(cmdclass={"build_py": Build})
