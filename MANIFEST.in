@@ -1,0 +1,12 @@
+include LICENSE README.md
+include upstream/job_manager/LICENSE
+include upstream/job_manager/job_manager/__init__.py
+include upstream/job_manager/job_manager/models.py
+include upstream/job_manager/job_manager/remote_paths.py
+include upstream/job_manager/job_manager/remote_runner.py
+recursive-include upstream/job_manager/job_manager/schedulers *.py
+recursive-include docs *.md
+recursive-include docs *.jpg
+recursive-include scripts *.py
+recursive-include integration *.py *.patch
+include upstream/job_manager/img/icon.png

@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "moleditpy-job-server"
+version = "0.1.0"
+description = "MoleditPy authenticated job server — Trusted Lab Preview"
+requires-python = ">=3.11"
+license = "GPL-3.0-only"
+dependencies = ["fastapi>=0.115,<1", "uvicorn>=0.30,<1", "cryptography>=43", "psutil>=6"]
+
+[project.optional-dependencies]
+gui = ["PyQt6>=6.6"]
+test = ["pytest>=8", "httpx>=0.27", "ruff>=0.9", "build>=1", "pytest-xdist>=3"]
+
+[project.scripts]
+moleditpy-job-server = "job_server.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["job_server*"]
+
+[tool.setuptools.package-data]
+job_server = ["web/*.html", "web/*.css", "web/*.js", "web/*.png"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+exclude = ["upstream", "build"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

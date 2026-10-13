@@ -1,0 +1,16 @@
+[Unit]
+Description=MoleditPy Job Server (Trusted Lab Preview)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/moleditpy-job-server serve --config %h/.moleditpy/job_server/settings.json
+Restart=on-failure
+RestartSec=3
+# Workers must survive a daemon-only stop/restart. Use cancel APIs for jobs.
+KillMode=process
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

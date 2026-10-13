@@ -1,0 +1,3 @@
+[submodule "upstream/job_manager"]
+	path = upstream/job_manager
+	url = https://github.com/HiroYokoyama/moleditpy_job_manager.git

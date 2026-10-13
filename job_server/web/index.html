@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Job Server · MoleditPy</title><link rel="stylesheet" href="/assets/app.css">
+  <link rel="icon" href="/assets/icon.png" type="image/png"><link rel="apple-touch-icon" href="/assets/icon.png">
+  <script src="/assets/app.js" type="module"></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="/" aria-label="Job Server home"><img class="brand-mark" src="/assets/icon.png" alt=""><span>MoleditPy<small>JOB SERVER</small></span></a>
+    <div class="nav-caption">WORKSPACE</div>
+    <nav aria-label="Main"><button class="nav active" data-panel="overview">Overview</button><button class="nav" data-panel="submit">Submit a job</button><button class="nav" data-panel="accounts" id="accounts-nav" hidden>Users & devices</button></nav>
+    <div class="sidebar-bottom"><span class="preview">TRUSTED LAB PREVIEW</span><p>A shared queue for your lab.<br>Run under a low-privilege OS account.</p></div>
+  </aside>
+  <main>
+    <header><div><span class="eyebrow">COMPUTE WORKSPACE</span><h1 id="page-title">Overview</h1></div><div class="connection"><span class="dot" id="connection-dot"></span><span id="connection-text">Connecting</span><button id="signin">Sign in</button><button id="signout" hidden>Sign out</button></div></header>
+    <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+    <section id="overview" class="panel">
+      <div class="welcome"><div><span class="eyebrow">ONE QUEUE. ROOM FOR EVERYONE.</span><h2>Keep your calculations moving.</h2><p>Submit, follow the output, and collect your results.<br>The server keeps working when you close this page.</p></div><button data-panel="submit" class="primary">New job <span aria-hidden="true">↗</span></button></div>
+      <div class="metrics"><article><span>Running jobs</span><strong id="running">—</strong><small>Active on this server</small></article><article><span>Waiting</span><strong id="pending">—</strong><small id="queue-label">Shared queue</small></article><article><span>CPU budget</span><strong id="cpu">—</strong><small>Reserved / available cores</small></article><article><span>Memory budget</span><strong id="memory">—</strong><small>Reserved / available MB</small></article></div>
+      <div class="section-head"><div><h2>Jobs</h2><p id="jobs-caption">Sign in to view your jobs.</p></div><div class="actions"><button id="pause" hidden>Pause queue</button><button id="refresh">Refresh</button></div></div>
+      <div class="table-wrap"><table><thead><tr><th>Job</th><th>Status</th><th>Resources</th><th>Submitted</th><th></th></tr></thead><tbody id="jobs-body"><tr><td colspan="5" class="empty">Your calculations will appear here.</td></tr></tbody></table></div>
+      <div class="paging"><button id="previous-page" disabled>Previous</button><span id="page-number">Page 1</span><button id="next-page" disabled>Next</button></div>
+      <p class="footnote">CPU and memory values reserve queue capacity. This preview reports advisory limits and shares an OS execution account.</p>
+    </section>
+    <section id="submit" class="panel" hidden>
+      <div class="section-head"><div><h2>A new calculation</h2><p>Choose inputs and a command for this server’s native shell.</p></div></div>
+      <form id="submit-form" class="card form-card"><label>Job name<input name="name" required maxlength="128" placeholder="My calculation"></label><label>Command<textarea name="command" rows="4" required placeholder="mycommand {input} > {stem}.out"></textarea><small>Use unquoted {input}, {stem}, or {basename} placeholders. The first file is the primary input.</small></label><label>Input files<input name="files" type="file" multiple></label><div class="form-row"><label>CPU cores<input name="cpus" type="number" min="1" value="1" required></label><label>Memory (MB)<input name="memory" type="number" min="1" value="512" required></label><label>Walltime (seconds)<input name="walltime" type="number" min="1" value="3600" required></label></div><label>After job (optional)<input name="after" placeholder="Server job UUID"></label><label class="checkbox"><input name="chain_any" type="checkbox"> Continue even if the earlier job fails</label><label>Result patterns<input name="globs" value="*.out, *.xyz, *.log"></label><div class="form-actions"><span id="upload-progress" role="status"></span><button type="submit" class="primary">Submit job</button></div></form>
+    </section>
+    <section id="accounts" class="panel" hidden><div class="section-head"><div><h2>Users & devices</h2><p>Manage access to the shared queue.</p></div></div><form id="user-form" class="card form-row"><label>Username<input name="username" required maxlength="64"></label><label>Initial password<input name="password" type="password" minlength="12" required autocomplete="new-password"></label><label>Role<select name="role"><option value="user">User</option><option value="admin">Administrator</option></select></label><button type="submit">Create user</button></form><div class="table-wrap"><table><thead><tr><th>User</th><th>Role</th><th>Status</th><th></th></tr></thead><tbody id="users-body"></tbody></table></div><h2 class="device-title">Registered devices</h2><div class="table-wrap"><table><thead><tr><th>Device</th><th>User</th><th>Last access</th><th></th></tr></thead><tbody id="devices-body"></tbody></table></div></section>
+    <section id="detail" class="panel" hidden><button id="back">← Jobs</button><div class="section-head"><div><h2 id="detail-name"></h2><p id="detail-id"></p></div><button id="cancel-job">Cancel job</button></div><pre id="detail-spec"></pre><h3>Live output</h3><pre id="log" class="log" tabindex="0"></pre><div class="section-head"><h3>Result files</h3><button id="refresh-detail">Refresh</button></div><ul id="result-files" class="results"></ul></section>
+  </main>
+  <dialog id="login-dialog"><form id="login-form"><span class="eyebrow">YOUR WORKSPACE</span><h2>Sign in to Job Server</h2><p>Register a device once. Your browser keeps a non-exportable signing key; your password is used only for registration.</p><label>Username<input name="username" required autocomplete="username"></label><label>Initial password<input name="password" type="password" autocomplete="current-password"></label><p id="login-status" role="status"></p><div class="form-actions"><button type="button" id="close-login">Cancel</button><button type="submit" class="primary">Continue</button></div></form></dialog>
+</body>
+</html>
