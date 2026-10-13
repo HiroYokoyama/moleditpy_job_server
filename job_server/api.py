@@ -151,8 +151,7 @@ def create_app(settings=None, dispatch=True):
         return auth.principal(authorization[7:], scope="enrollment")
 
     def admin(p=Depends(principal)):
-        auth.admin(p)
-        return p
+        return auth.admin(p)
 
     def limited(request):
         auth.rate_limit(request.client.host if request.client else "unknown")
@@ -222,7 +221,7 @@ def create_app(settings=None, dispatch=True):
     def revoke_own(device_id: str, p=Depends(principal)):
         if not db.one("SELECT 1 FROM devices WHERE id=? AND user_id=?", (device_id, p["user_id"])):
             reject(404, "not_found", "Device not found")
-        auth.revoke(device_id, p["user_id"])
+        auth.revoke(device_id, p["user_id"], principal=p)
         return {"revoked": True}
 
     @app.post(prefix + "/jobs", status_code=201)
@@ -387,13 +386,14 @@ def create_app(settings=None, dispatch=True):
 
     @app.post(prefix + "/admin/users", status_code=201)
     def create_user(body: UserCreate, p=Depends(admin)):
-        return auth.create_user(body.username, body.password, body.role, p["user_id"])
+        return auth.create_user(body.username, body.password, body.role, principal=p)
 
     @app.post(prefix + "/admin/users/{user_id}/disable")
     def disable_user(user_id: str, p=Depends(admin)):
         if user_id == p["user_id"]:
             reject(409, "self_disable", "Use another administrator to disable your own account")
         with db.transaction() as c:
+            auth.admin(p)
             if not c.execute("SELECT 1 FROM users WHERE id=?", (user_id,)).fetchone():
                 reject(404, "not_found", "User not found")
             c.execute("UPDATE users SET enabled=0 WHERE id=?", (user_id,))
@@ -403,12 +403,13 @@ def create_app(settings=None, dispatch=True):
 
     @app.post(prefix + "/admin/devices/{device_id}/revoke")
     def revoke_device(device_id: str, p=Depends(admin)):
-        auth.revoke(device_id, p["user_id"])
+        auth.revoke(device_id, p["user_id"], principal=p)
         return {"revoked": True}
 
     @app.post(prefix + "/admin/queue/pause")
     def pause(body: Pause, p=Depends(admin)):
         with db.transaction() as c:
+            auth.admin(p)
             c.execute("UPDATE metadata SET value=? WHERE key='paused'", (json.dumps(body.paused),))
             db.event(c, "queue_pause", p["user_id"], paused=body.paused)
         return scheduler.resources()
@@ -423,6 +424,7 @@ def create_app(settings=None, dispatch=True):
         if callback is None:
             reject(503, "shutdown_unavailable", "Process lifecycle is managed externally")
         with db.transaction() as c:
+            auth.admin(p)
             db.event(c, "daemon_stop", p["user_id"])
         callback()
         return {"stopping": True, "running_jobs": "preserved"}

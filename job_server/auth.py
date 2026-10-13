@@ -71,7 +71,7 @@ class Auth:
                 reject(429, "rate_limit", "Authentication rate limit exceeded")
             history.append(now)
 
-    def create_user(self, username, password, role="user", actor=None):
+    def create_user(self, username, password, role="user", actor=None, *, principal=None):
         if (
             not isinstance(username, str)
             or not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", username)
@@ -81,6 +81,8 @@ class Auth:
         encoded = password_hash(password)
         identifier = str(uuid.uuid4())
         with self.db.transaction() as c:
+            if principal is not None:
+                actor = self.admin(principal)["user_id"]
             if c.execute("SELECT 1 FROM users WHERE username=?", (username,)).fetchone():
                 reject(409, "user_exists", "Username already exists")
             c.execute(
@@ -115,17 +117,31 @@ class Auth:
         ):
             reject(401, "invalid_credentials", "Invalid credentials")
         with self.db.transaction() as c:
+            # Password verification is deliberately outside the write lock. A
+            # disable/password change that completed meanwhile must win.
+            if not c.execute(
+                "SELECT 1 FROM users WHERE id=? AND enabled=1 AND password_hash=?",
+                (user["id"], user["password_hash"]),
+            ).fetchone():
+                reject(401, "invalid_credentials", "Invalid credentials")
             self.db.event(c, "login", user["id"])
             return self.issue(c, user["id"], scope="enrollment", lifetime=300)
 
     def principal(self, token, scope="access"):
         if not isinstance(token, str) or len(token) > 256:
             reject(401, "unauthenticated", "Authentication required")
+        return self._session(hashlib.sha256(token.encode()).hexdigest(), scope)
+
+    def current(self, principal):
+        """Revalidate a snapshot under the caller's mutation transaction."""
+        return self._session(principal["digest"], principal["scope"])
+
+    def _session(self, digest, scope):
         result = self.db.one(
             """SELECT s.*,u.role,u.username,u.enabled,d.revoked_at FROM sessions s
                               JOIN users u ON u.id=s.user_id LEFT JOIN devices d ON d.id=s.device_id
                               WHERE digest=?""",
-            (hashlib.sha256(token.encode()).hexdigest(),),
+            (digest,),
         )
         if (
             not result
@@ -138,9 +154,11 @@ class Auth:
         return result
 
     def admin(self, principal):
+        principal = self.current(principal)
         if principal["role"] != "admin":
             reject(403, "admin_required", "Administrator required")
         self.fresh(principal)
+        return principal
 
     def fresh(self, principal):
         if time.time() - principal["authenticated_at"] > 300:
@@ -157,11 +175,8 @@ class Auth:
         with self.db.transaction() as c:
             # Recheck under the write lock: concurrent use of a one-use enrollment
             # session must not register multiple persistent keys.
-            if not c.execute(
-                "SELECT 1 FROM sessions WHERE digest=? AND expires>?",
-                (principal["digest"], time.time()),
-            ).fetchone():
-                reject(401, "unauthenticated", "Enrollment session already consumed or revoked")
+            principal = self.current(principal)
+            self.fresh(principal)
             if c.execute("SELECT 1 FROM devices WHERE id=?", (device_id,)).fetchone():
                 reject(409, "device_exists", "Device already registered")
             c.execute(
@@ -228,9 +243,17 @@ class Auth:
             reject(401, "invalid_signature", "Invalid or expired challenge signature")
         return result
 
-    def revoke(self, device_id, actor):
+    def revoke(self, device_id, actor, *, principal=None):
         with self.db.transaction() as c:
-            if not c.execute("SELECT 1 FROM devices WHERE id=?", (device_id,)).fetchone():
+            device = c.execute("SELECT user_id FROM devices WHERE id=?", (device_id,)).fetchone()
+            if principal is not None:
+                principal = self.current(principal)
+                if principal["role"] == "admin":
+                    self.admin(principal)
+                elif device and device["user_id"] != principal["user_id"]:
+                    reject(404, "not_found", "Device not found")
+                actor = principal["user_id"]
+            if not device:
                 reject(404, "not_found", "Device not found")
             c.execute("UPDATE devices SET revoked_at=? WHERE id=?", (time.time(), device_id))
             c.execute("DELETE FROM sessions WHERE device_id=?", (device_id,))
