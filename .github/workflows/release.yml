@@ -67,7 +67,7 @@ jobs:
       - run: python scripts/build_plugin.py
       - run: python scripts/build_job_manager.py
       - run: python scripts/verify_release.py "$VERSION" --artifacts
-      - name: Publish LAN computational helper and assets
+      - name: Publish release and assets
         id: publish
         env:
           GH_TOKEN: ${{ github.token }}
@@ -78,7 +78,7 @@ jobs:
             test "$(git rev-parse 'FETCH_HEAD^{commit}')" = "$GITHUB_SHA" || { echo 'Tag points to a different commit'; exit 1; }
           fi
           gh release create "$TAG" --target "$GITHUB_SHA" \
-            --title "Job Server $VERSION — LAN computational helper" --generate-notes \
+            --title "Job Server $VERSION" --generate-notes \
             dist/job_server_*.zip dist/job_manager_job_server.zip dist/*.whl dist/*.tar.gz dist/SHA256SUMS
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
   registry:
