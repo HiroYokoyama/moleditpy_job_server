@@ -1,7 +1,7 @@
 """MoleditPy Job Server: loading the plugin never starts a listener."""
 
 PLUGIN_NAME = "Job Server"
-PLUGIN_VERSION = "0.1.1"
+PLUGIN_VERSION = "0.1.2"
 PLUGIN_AUTHOR = "HiroYokoyama"
 PLUGIN_DESCRIPTION = "Authenticated shared job queue and headless server for trusted users."
 PLUGIN_CATEGORY = "Utility"
