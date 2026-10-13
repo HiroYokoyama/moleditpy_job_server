@@ -105,21 +105,25 @@ def create_app(settings=None, dispatch=True):
         if request.method in {"POST", "PUT"}:
             length = request.headers.get("content-length")
             cap = settings.max_chunk_bytes if request.method == "PUT" else settings.max_json_bytes
-            if length is None or not length.isdecimal():
+            if length is None or not length.isascii() or not length.isdecimal():
                 return error_response(request, 400, "length_required", "Content-Length is required")
-            if int(length) > cap:
+            # Compare digit counts before int(): attacker-controlled decimal strings
+            # can exceed Python's conversion limit even within HTTP header limits.
+            length = length.lstrip("0") or "0"
+            if len(length) > len(str(cap)) or int(length) > cap:
                 return error_response(
                     request, 413, "request_too_large", "Request exceeds configured size limit"
                 )
+            expected = int(length)
             # FastAPI can otherwise buffer an unbounded chunked body before validation.
             data = bytearray()
             async for chunk in request.stream():
-                data.extend(chunk)
-                if len(data) > cap or len(data) > int(length):
+                if len(data) + len(chunk) > expected:
                     return error_response(
                         request, 413, "request_too_large", "Request exceeds declared length"
                     )
-            if len(data) != int(length):
+                data.extend(chunk)
+            if len(data) != expected:
                 return error_response(
                     request, 400, "length_mismatch", "Body differs from Content-Length"
                 )
@@ -233,7 +237,8 @@ def create_app(settings=None, dispatch=True):
 
     @app.get(prefix + "/jobs")
     def list_jobs(
-        p=Depends(principal), offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=1000)
+        p=Depends(principal), offset: int = Query(0, ge=0, le=2**63 - 1),
+        limit: int = Query(100, ge=1, le=1000)
     ):
         return [
             jobs.public(job)
@@ -273,7 +278,7 @@ def create_app(settings=None, dispatch=True):
     def log(
         job_id: str,
         p=Depends(principal),
-        offset: int = Query(0, ge=0),
+        offset: int = Query(0, ge=0, le=2**63 - 1),
         limit: int = Query(65536, ge=1, le=1048576),
     ):
         jobs.authorize(job_id, p)
@@ -303,23 +308,28 @@ def create_app(settings=None, dispatch=True):
     def download(job_id: str, path: str, request: Request, p=Depends(principal)):
         jobs.authorize(job_id, p)
         target = contained(jobs.directory(job_id), path)
-        digest = sha256(target)
+        range_header = request.headers.get("range")
+        match = None
+        if range_header is not None:
+            match = re.fullmatch(r"bytes=([0-9]{1,19})-([0-9]{0,19})", range_header)
+            if not match:
+                reject(416, "invalid_range", "Only a single explicit byte range is supported")
         stream = open_regular(target)
         import os
 
-        size = os.fstat(stream.fileno()).st_size
-        start, end = 0, size - 1
-        range_header = request.headers.get("range")
-        if range_header:
-            match = re.fullmatch(r"bytes=(\d+)-(\d*)", range_header)
-            if not match:
-                stream.close()
-                reject(416, "invalid_range", "Only a single explicit byte range is supported")
-            start = int(match.group(1))
-            end = min(size - 1, int(match.group(2))) if match.group(2) else size - 1
-            if start >= size or end < start:
-                stream.close()
-                reject(416, "invalid_range", "Range is outside file")
+        try:
+            size = os.fstat(stream.fileno()).st_size
+            start, end = 0, size - 1
+            if match:
+                start = int(match.group(1))
+                end = min(size - 1, int(match.group(2))) if match.group(2) else size - 1
+                if start >= size or end < start:
+                    reject(416, "invalid_range", "Range is outside file")
+            # Invalid ranges must not force hashing a potentially large result.
+            digest = sha256(target)
+        except BaseException:
+            stream.close()
+            raise
         headers = {
             "Accept-Ranges": "bytes",
             "Content-Length": str(max(0, end - start + 1)),
@@ -355,7 +365,8 @@ def create_app(settings=None, dispatch=True):
 
     @app.get(prefix + "/admin/jobs")
     def all_jobs(
-        p=Depends(admin), offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=1000)
+        p=Depends(admin), offset: int = Query(0, ge=0, le=2**63 - 1),
+        limit: int = Query(100, ge=1, le=1000)
     ):
         return [
             jobs.public(job)
@@ -403,7 +414,7 @@ def create_app(settings=None, dispatch=True):
         return scheduler.resources()
 
     @app.get(prefix + "/admin/events")
-    def events(p=Depends(admin), after: int = Query(0, ge=0)):
+    def events(p=Depends(admin), after: int = Query(0, ge=0, le=2**63 - 1)):
         return db.rows("SELECT * FROM events WHERE seq>? ORDER BY seq LIMIT 1000", (after,))
 
     @app.post(prefix + "/admin/shutdown", status_code=202)

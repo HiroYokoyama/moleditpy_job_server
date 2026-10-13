@@ -138,8 +138,10 @@ class Jobs:
             if not file:
                 reject(404, "file_missing", "File is not in the manifest")
             start, end, total = 0, len(data) - 1, file["size"]
-            if content_range:
-                match = re.fullmatch(r"bytes (\d+)-(\d+)/(\d+)", content_range)
+            if content_range is not None:
+                match = re.fullmatch(
+                    r"bytes ([0-9]{1,19})-([0-9]{1,19})/([0-9]{1,19})", content_range
+                )
                 if not match:
                     reject(400, "invalid_range", "Invalid Content-Range")
                 start, end, total = map(int, match.groups())
