@@ -109,8 +109,12 @@ class JobServerClient:
         self.authenticate(challenge)
 
     def authenticate(self, challenge=None):
-        if not self.key_path:
-            raise ValueError("Sign in and register this device first")
+        if not self.key_path or not self.key_path.is_file():
+            raise ValueError(
+                "This application's device credential is missing. Use Sign in / register device "
+                "with an existing Job Server account first. Each application or browser "
+                "registers its own device."
+            )
         credential = load_key(self.key_path)
         device = credential["device_id"]
         challenge = challenge or self.request(

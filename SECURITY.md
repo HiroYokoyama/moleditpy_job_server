@@ -21,7 +21,10 @@ server identity, device and purpose.
 Nonces expire after 60 seconds and are consumed after any verification attempt.
 Access tokens expire after 15 minutes by default and are stored hashed. Disabling a user
 or revoking a device invalidates outstanding tokens. Administrative writes require fresh
-device authentication. Initial administration is local-only with the daemon stopped.
+device authentication. Initial administration is local-only using access to the
+server's data directory. It works with the daemon running; a SQLite write
+transaction atomically prevents creation when an enabled administrator exists.
+There is no unauthenticated HTTP bootstrap endpoint.
 
 The daemon binds loopback and refuses elevated execution except an explicit isolated-test
 override. Private LAN/Tailscale clients must use validated HTTPS terminating on the same host.

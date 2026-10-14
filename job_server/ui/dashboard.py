@@ -9,10 +9,10 @@ from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
     QApplication,
     QDialog,
+    QDialogButtonBox,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -192,7 +192,7 @@ class Dashboard(QDialog):
         layout.addStretch()
         self.tabs.addTab(page, "Settings")
 
-    def task(self, call, on_ok=None):
+    def task(self, call, on_ok=None, *, interactive=True, success_message=None):
         if self.busy:
             return
         self.busy = True
@@ -202,10 +202,14 @@ class Dashboard(QDialog):
             self.busy = False
             if on_ok:
                 on_ok(value)
+            if success_message:
+                QMessageBox.information(self, "Success", success_message)
 
         def failed(message):
             self.busy = False
             self.message.setText(message)
+            if interactive:
+                QMessageBox.warning(self, "Job Server", message)
 
         task.signals.finished.connect(finished)
         task.signals.failed.connect(failed)
@@ -250,7 +254,7 @@ class Dashboard(QDialog):
                 ],
             )
 
-        self.task(work, display)
+        self.task(work, display, interactive=False)
 
     @staticmethod
     def fill(table, rows):
@@ -331,12 +335,19 @@ class Dashboard(QDialog):
             )
             return "Start requested; see startup.log if the health check stays offline."
 
-        self.task(work, self.message.setText)
+        def started(message):
+            self.message.setText(message)
+            QMessageBox.information(self, "Success", message)
+
+        self.task(work, started)
 
     def stop_daemon(self):
+        if not self.require_admin_registration():
+            return
         self.task(
             lambda: self.client.request("POST", "/admin/shutdown"),
             lambda _: self.message.setText("Daemon stopping; active supervisors are preserved."),
+            success_message="Shutdown requested. Active job supervisors are preserved.",
         )
 
     def open_web_ui(self):
@@ -346,6 +357,8 @@ class Dashboard(QDialog):
         QDesktopServices.openUrl(QUrl(self.settings.public_url or self.client.url))
 
     def restart_daemon(self):
+        if not self.require_admin_registration():
+            return
         def work():
             self.client.request("POST", "/admin/shutdown")
             deadline = time.monotonic() + 20
@@ -367,20 +380,41 @@ class Dashboard(QDialog):
         self.task(
             lambda: self.client.request("POST", "/admin/queue/pause", {"paused": value}),
             lambda _: self.refresh(),
+            success_message="Queue paused." if value else "Queue resumed.",
         )
 
     def credentials(self, title):
-        username, ok = QInputDialog.getText(self, title, "Username")
-        if not ok:
-            return None
-        password, ok = QInputDialog.getText(
-            self, title, "Password (12+ characters)", QLineEdit.EchoMode.Password
+        dialog = QDialog(self)
+        dialog.setWindowTitle(title)
+        layout = QFormLayout(dialog)
+        username, password = QLineEdit(dialog), QLineEdit(dialog)
+        username.setObjectName("username")
+        password.setObjectName("password")
+        password.setEchoMode(QLineEdit.EchoMode.Password)
+        layout.addRow("Username", username)
+        layout.addRow("Password (12+ characters)", password)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            parent=dialog,
         )
-        return (username, password) if ok else None
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addRow(buttons)
+        username.setFocus()
+        result = None
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            result = (username.text().strip(), password.text())
+        password.clear()
+        dialog.deleteLater()
+        return result
 
     def sign_in(self):
+        def signed_in(_):
+            QMessageBox.information(self, "Success", "This administration window is signed in.")
+            self.refresh()
+
         if self.client.key_path.exists():
-            self.task(lambda: self.client.authenticate(), lambda _: self.refresh())
+            self.task(lambda: self.client.authenticate(), signed_in)
         else:
             credentials = self.credentials("Register administrator device")
             if credentials:
@@ -389,36 +423,50 @@ class Dashboard(QDialog):
                     self.require_own_daemon()
                     return self.client.enroll(*credentials)
 
-                self.task(work, lambda _: self.refresh())
+                self.task(work, signed_in)
+
+    def require_admin_registration(self):
+        if self.client.key_path and self.client.key_path.is_file():
+            return True
+        QMessageBox.warning(
+            self, "Job Server — Administrator sign-in required",
+            "Use Sign in / register device in this administration window before this operation.\n\n"
+            "If no administrator exists yet, use Users & Devices → Create initial administrator "
+            "on the server PC. This works while the daemon is running.\n\n"
+            "Signing in through the browser or Job Manager does not register this window.",
+        )
+        return False
 
     def bootstrap(self):
-        credentials = self.credentials("Initial administrator (daemon must be stopped)")
+        credentials = self.credentials("Create initial administrator on this server PC")
         if not credentials:
             return
 
         def work():
             from ..auth import Auth
             from ..db import Database
-            from ..instance import InstanceLock
-
-            lock = InstanceLock(self.settings.root).acquire()
             db = Database(self.settings.root)
             try:
-                if db.one("SELECT 1 FROM users WHERE role='admin' AND enabled=1"):
-                    raise ValueError("Initial administrator already exists")
-                return Auth(db, self.settings).create_user(*credentials, role="admin")
+                return Auth(db, self.settings).create_initial_admin(*credentials)
             finally:
                 db.close()
-                lock.release()
+
+        def created(_):
+            message = (
+                "Administrator created. Start the server if needed, then use "
+                "Sign in / register device in this window with the new administrator account."
+            )
+            self.message.setText(message)
+            QMessageBox.information(self, "Success", message)
 
         self.task(
             work,
-            lambda _: self.message.setText(
-                "Administrator created. Start server and register this device."
-            ),
+            created,
         )
 
     def add_user(self):
+        if not self.require_admin_registration():
+            return
         credentials = self.credentials("Add user")
         if credentials:
             self.task(
@@ -426,6 +474,7 @@ class Dashboard(QDialog):
                     "POST", "/admin/users", {"username": credentials[0], "password": credentials[1]}
                 ),
                 lambda _: self.refresh(),
+                success_message="User created.",
             )
 
     def selected(self, table):
@@ -438,6 +487,7 @@ class Dashboard(QDialog):
             self.task(
                 lambda: self.client.request("POST", f"/jobs/{job_id}/cancel"),
                 lambda _: self.refresh(),
+                success_message="Job cancellation requested.",
             )
 
     def disable_user(self):
@@ -450,6 +500,7 @@ class Dashboard(QDialog):
             self.task(
                 lambda: self.client.request("POST", f"/admin/users/{user}/disable"),
                 lambda _: self.refresh(),
+                success_message="User disabled.",
             )
 
     def revoke_device(self):
@@ -464,6 +515,7 @@ class Dashboard(QDialog):
             self.task(
                 lambda: self.client.request("POST", f"/admin/devices/{device}/revoke"),
                 lambda _: self.refresh(),
+                success_message="Device revoked.",
             )
 
     def closeEvent(self, event):

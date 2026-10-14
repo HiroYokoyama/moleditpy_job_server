@@ -125,11 +125,12 @@ def test_gui_start_adopts_saved_port(tmp_path, monkeypatch):
 
     pytest.importorskip("PyQt6")
     import time
-    from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtWidgets import QApplication, QMessageBox
     from job_server.settings import Settings
     from job_server.ui.dashboard import Dashboard
 
     app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(QMessageBox, "information", lambda *args: None)
     config = tmp_path / "settings.json"
     Settings(data_dir=str(tmp_path)).save(config)
     dialog = Dashboard(config=config)
@@ -161,12 +162,14 @@ def test_gui_refuses_listener_that_does_not_hold_daemon_lock(tmp_path, monkeypat
 
     pytest.importorskip("PyQt6")
     import time
-    from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtWidgets import QApplication, QMessageBox
     from job_server.instance import InstanceLock
     from job_server.settings import Settings
     from job_server.ui.dashboard import Dashboard
 
     app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args: None)
+    monkeypatch.setattr(QMessageBox, "information", lambda *args: None)
     config = tmp_path / "settings.json"
     Settings(data_dir=str(tmp_path)).save(config)
     dialog = Dashboard(config=config)

@@ -36,10 +36,8 @@ def main():
         elif args.action == "create-admin":
             from .auth import Auth
             from .db import Database
-            from .instance import InstanceLock
-
-            # Bootstrap is local, interactive, and unavailable while the daemon owns the DB.
-            lock = InstanceLock(settings.root).acquire()
+            # Bootstrap uses local filesystem access and an atomic SQLite guard.
+            # It does not require stopping an already-running daemon.
             db = Database(settings.root)
             try:
                 if db.one("SELECT 1 FROM users WHERE role='admin' AND enabled=1"):
@@ -50,10 +48,9 @@ def main():
                 password = getpass.getpass("Initial password (12+ characters): ")
                 if password != getpass.getpass("Repeat password: "):
                     raise ValueError("Passwords differ")
-                print(json.dumps(Auth(db, settings).create_user(username, password, "admin")))
+                print(json.dumps(Auth(db, settings).create_initial_admin(username, password)))
             finally:
                 db.close()
-                lock.release()
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1

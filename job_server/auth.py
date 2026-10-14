@@ -71,7 +71,13 @@ class Auth:
                 reject(429, "rate_limit", "Authentication rate limit exceeded")
             history.append(now)
 
-    def create_user(self, username, password, role="user", actor=None, *, principal=None):
+    def create_initial_admin(self, username, password):
+        """Local bootstrap only; never expose this operation through HTTP."""
+        return self.create_user(username, password, "admin", initial_admin=True)
+
+    def create_user(
+        self, username, password, role="user", actor=None, *, principal=None, initial_admin=False
+    ):
         if (
             not isinstance(username, str)
             or not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", username)
@@ -81,6 +87,13 @@ class Auth:
         encoded = password_hash(password)
         identifier = str(uuid.uuid4())
         with self.db.transaction() as c:
+            if initial_admin and c.execute(
+                "SELECT 1 FROM users WHERE role='admin' AND enabled=1"
+            ).fetchone():
+                reject(
+                    409, "admin_exists",
+                    "An administrator already exists. Sign in with that administrator account.",
+                )
             if principal is not None:
                 actor = self.admin(principal)["user_id"]
             if c.execute("SELECT 1 FROM users WHERE username=?", (username,)).fetchone():
