@@ -1,6 +1,73 @@
 from job_server import initialize
 
 
+def test_missing_libraries_show_dialog_and_allow_retry(monkeypatch):
+    import sys
+    import types
+    import pytest
+
+    pytest.importorskip("PyQt6")
+    from PyQt6.QtWidgets import QMessageBox
+    import importlib.util
+
+    messages, windows, actions = [], [], []
+    missing = {"cryptography", "uvicorn"}
+    original = importlib.util.find_spec
+    monkeypatch.setattr(
+        importlib.util, "find_spec", lambda name: None if name in missing else original(name)
+    )
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args: messages.append(args))
+
+    class Context:
+        def add_plugin_menu(self, path, callback, **kwargs):
+            actions.append(callback)
+
+        def get_window(self, name):
+            return None
+
+        def get_main_window(self):
+            return None
+
+        def register_window(self, name, window):
+            windows.append(window)
+
+    initialize(Context())
+    assert not messages  # Plugin loading stays lazy.
+    for action in actions[:3]:
+        action()
+    assert len(messages) == 3
+    assert all("cryptography" in message[2] and "uvicorn" in message[2] for message in messages)
+    assert "pip install" in messages[0][2]
+    assert not windows
+
+    class FakeDashboard:
+        def __init__(self, parent):
+            self.tabs = self
+            self.index = None
+
+        def setCurrentIndex(self, index):
+            self.index = index
+
+        def show(self):
+            pass
+
+    module = types.ModuleType("job_server.ui.dashboard")
+    module.Dashboard = FakeDashboard
+    monkeypatch.setitem(sys.modules, "job_server.ui.dashboard", module)
+    missing.clear()
+    actions[2]()
+    assert len(windows) == 1
+    assert windows[0].index == 2
+
+    def broken_import(parent):
+        raise ModuleNotFoundError("Missing transitive library", name="cffi")
+
+    module.Dashboard = broken_import
+    actions[0]()
+    assert "cffi" in messages[-1][2]
+    assert len(windows) == 1
+
+
 def test_web_assets_and_security_headers(client):
     response = client.get("/")
     assert response.status_code == 200

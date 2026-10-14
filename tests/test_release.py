@@ -44,7 +44,7 @@ def test_release_checksums_cover_only_distributed_assets(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "version", ["", "v0.1.2", "0.1.2\n", "0.0.0", "0.1.2;echo injected", "$(id)"]
+    "version", ["", "v0.1.3", "0.1.3\n", "0.0.0", "0.1.3;echo injected", "$(id)"]
 )
 def test_release_rejects_mismatch_or_injected_input(version):
     with pytest.raises(ValueError):
@@ -52,7 +52,7 @@ def test_release_rejects_mismatch_or_injected_input(version):
 
 
 def test_release_accepts_matching_source_version():
-    assert validate_version(source_version()) == "0.1.2"
+    assert validate_version(source_version()) == "0.1.3"
 
 
 @pytest.mark.parametrize(
