@@ -3,14 +3,14 @@
 [![Tests](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/test.yml/badge.svg)](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/test.yml)
 [![Security](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/security.yml/badge.svg)](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/security.yml)
 [![Release](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/release.yml/badge.svg)](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/release.yml)
-[![Version](https://img.shields.io/badge/version-0.1.3-blue)](pyproject.toml)
+[![Version](https://img.shields.io/badge/version-0.1.4-blue)](pyproject.toml)
 [![Downloads](https://img.shields.io/github/downloads/HiroYokoyama/moleditpy_job_server/total)](https://github.com/HiroYokoyama/moleditpy_job_server/releases)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![MoleditPy](https://img.shields.io/badge/MoleditPy-4.x-3577F7)](https://github.com/HiroYokoyama/python_molecular_editor)
 
 A LAN computational helper for MoleditPy Job Manager, with an authenticated shared
 job queue, headless daemon, MoleditPy administration plugin, and browser UI.
-Version **0.1.3**. Access is for trusted users on a private network.
+Version **0.1.4**. Access is for trusted users on a private network.
 
 > [!WARNING]
 > **Never expose Job Server to the public internet. Use localhost, a private LAN over HTTPS, or a private Tailscale tailnet only.**
@@ -27,7 +27,7 @@ Job Manager source dependency, rather than a second maintained copy.
 
 ## Use from MoleditPy (plugin workflow)
 
-Install **`job_server_0.1.3.zip`** using MoleditPy's Plugin Installer. Then open
+Install **`job_server_0.1.4.zip`** using MoleditPy's Plugin Installer. Then open
 **Plugin → Job Server → Server Dashboard…**.
 If required Python libraries are missing, opening a Job Server dialog shows their
 names and installation guidance. Install them in MoleditPy's Python environment
@@ -38,13 +38,27 @@ Extract the artifact download and install the inner plugin ZIP, or build it from
 
 You can operate the server from MoleditPy dialogs; the command line is optional:
 
-1. Open **Users & Devices… → Create initial administrator** while the server is stopped.
+1. On the **server PC**, open **Users & Devices… → Create initial administrator**.
+   This also works if the daemon is already running. An existing enabled
+   administrator prevents a second bootstrap account.
 2. Click **Start** in Server Dashboard.
 3. Click **Sign in / register device** once for the administrator.
 4. Use the dashboard to pause/resume the queue, view jobs, or cancel a selected job.
 5. Open **Users & Devices…** to add users, disable accounts, or revoke device keys.
 6. Open **Settings…** to configure resource budgets, limits, and the daemon runtime.
 7. Click **Open Web UI** to open the browser interface when you want it.
+
+Username and password are entered together in one dialog. Successful actions show
+a **Success** dialog, and interactive errors remain visible until dismissed.
+The administration window, Job Manager, and browser each register their own device:
+signing in to one does not sign in the others. **Stop** and **Add user** require
+signing in within the administration window first. If its credential file is
+missing, the dialog explains how to register instead of reporting "File not found".
+
+For a remote server, create the initial account on that server PC (for example,
+through a remote desktop session), then register Job Manager on the client PC using
+that account and the server's HTTPS URL. Initial-account creation is not exposed
+as an unauthenticated network operation.
 
 **Start, Stop, Restart, Users & Devices, Settings, and Open Logs** are available from
 the plugin's dialogs/menu. Closing or reloading the dialog does not stop the daemon;
@@ -87,7 +101,7 @@ The listener starts only on explicit `serve` or GUI Start and binds **127.0.0.1*
 python scripts/build_plugin.py
 ```
 
-Install `dist/job_server_0.1.3.zip` using MoleditPy's Plugin Installer. Open
+Install `dist/job_server_0.1.4.zip` using MoleditPy's Plugin Installer. Open
 **Plugin → Job Server → Server Dashboard…**. The GUI can bootstrap the first
 administrator, start/stop/restart the daemon, pause/resume the queue, manage accounts
 and device keys, and cancel jobs. Reloading or closing the plugin does not stop the daemon.
