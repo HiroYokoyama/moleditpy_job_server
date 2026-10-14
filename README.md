@@ -101,19 +101,17 @@ Job Server host, configure the HTTPS origin (HTTP is allowed only on localhost),
 and click **Sign in / register device**. The server's execution OS selects the native
 scheduler. Submit, monitor, tail, cancel, and download then use the normal Job Manager UI.
 
-For a reproducible companion built from this server's pinned older Job Manager source:
+For development and regression checks, build a reproducible companion from this
+server's pinned older Job Manager source:
 
 ```sh
 python scripts/build_job_manager.py
 ```
 
-The alternative companion is `dist/job_manager_job_server.zip`.
-It adds **Job Server (HTTPS)** to Hosts and connects existing submit, monitor, tail,
-cancel, and download flows to `JobServerBackend`. Configure the server URL, register
-a device, and choose the native scheduler matching the server's execution OS.
-The installer replaces Job Manager's code, while its normal data directory is retained.
-Prefer the normal 2.6.0+ release; installing this companion replaces it with the pinned
-older version plus this repository's integration overlay.
+The test-only companion is `dist/job_manager_job_server.zip`. CI builds and validates
+it, but it is excluded from release downloads, distribution artifacts and `SHA256SUMS`.
+Install the normal Job Manager 2.6.0+ release for everyday use; installing this test
+companion would replace it with the pinned older version plus the integration overlay.
 
 The companion is generated from the audited upstream commit and an explicit integration
 overlay. It does not change your sibling Job Manager repository or its upstream branch.

@@ -39,7 +39,7 @@ jobs:
       - run: python -m build
       - run: python scripts/build_plugin.py
       - run: python scripts/build_job_manager.py
-      - run: python scripts/verify_release.py --artifacts
+      - run: python scripts/verify_release.py --artifacts --companion
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -49,7 +49,11 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: distributions-${{ matrix.os }}-${{ matrix.python }}
-          path: dist/*
+          path: |
+            dist/job_server_*.zip
+            dist/*.whl
+            dist/*.tar.gz
+            dist/SHA256SUMS
           if-no-files-found: error
   regression:
     name: Job Manager regression (${{ matrix.os }})

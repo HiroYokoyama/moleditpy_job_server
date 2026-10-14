@@ -10,6 +10,39 @@ from scripts.verify_release import safe_members, source_version, validate_versio
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_release_checksums_cover_only_distributed_assets(tmp_path):
+    import hashlib
+    import tarfile
+    from zipfile import ZipFile
+    from scripts.verify_release import verify_artifacts, verify_companion
+
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    version = source_version()
+    server = dist / f"job_server_{version}.zip"
+    wheel = dist / f"moleditpy_job_server-{version}-py3-none-any.whl"
+    source = dist / f"moleditpy_job_server-{version}.tar.gz"
+    with ZipFile(server, "w") as archive:
+        for name in ("__init__.py", "_execution/schedulers/windows.py", "web/icon.png", "LICENSE"):
+            archive.writestr("job_server/" + name, "fixture")
+    with ZipFile(wheel, "w") as archive:
+        archive.writestr("job_server/_execution/schedulers/base.py", "fixture")
+        archive.writestr("job_server/web/app.js", "fixture")
+    with tarfile.open(source, "w:gz"):
+        pass
+    assets = [server, wheel, source]
+    assert verify_artifacts(version, tmp_path) == assets
+    expected = "".join(
+        f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n" for path in assets
+    )
+    assert (dist / "SHA256SUMS").read_text() == expected
+    with ZipFile(dist / "job_manager_job_server.zip", "w") as archive:
+        archive.writestr("job_manager/server_backend.py", "fixture")
+    verify_companion(tmp_path)
+    assert verify_artifacts(version, tmp_path) == assets
+    assert (dist / "SHA256SUMS").read_text() == expected
+
+
 @pytest.mark.parametrize(
     "version", ["", "v0.1.2", "0.1.2\n", "0.0.0", "0.1.2;echo injected", "$(id)"]
 )

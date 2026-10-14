@@ -70,7 +70,6 @@ jobs:
       - run: python scripts/verify_release.py "$VERSION"
       - run: python -m build
       - run: python scripts/build_plugin.py
-      - run: python scripts/build_job_manager.py
       - run: python scripts/verify_release.py "$VERSION" --artifacts
       - name: Publish release and assets
         id: publish
@@ -84,7 +83,9 @@ jobs:
           fi
           gh release create "$TAG" --target "$GITHUB_SHA" \
             --title "Job Server $VERSION" --generate-notes \
-            dist/job_server_*.zip dist/job_manager_job_server.zip dist/*.whl dist/*.tar.gz dist/SHA256SUMS
+            "dist/job_server_${VERSION}.zip" \
+            "dist/moleditpy_job_server-${VERSION}-py3-none-any.whl" \
+            "dist/moleditpy_job_server-${VERSION}.tar.gz" dist/SHA256SUMS
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
   registry:
     needs: release

@@ -5,9 +5,9 @@ Zenodo or PyPI publication workflow.
 
 | Workflow | Trigger | Checks / outcome |
 |---|---|---|
-| Tests | Main/dev pushes, pull requests, manual, reusable | Python 3.11/3.12/3.13 on Linux/Windows; Qt, native execution, coverage/JUnit reports, wheel/sdist and both plugin ZIPs with checksums; Linux/Windows patched Job Manager regression and real HTTP client compatibility |
+| Tests | Main/dev pushes, pull requests, manual, reusable | Python 3.11/3.12/3.13 on Linux/Windows; Qt, native execution, coverage/JUnit reports, wheel/sdist and server plugin ZIP with checksums; test-only companion build/validation, Linux/Windows patched Job Manager regression and real HTTP client compatibility |
 | Security | Main/dev pushes, pull requests, weekly, manual, reusable | Dependency advisories, Bandit source analysis, credential signatures in tracked source and Git history |
-| Release | `vX.Y.Z` tag push or manual on main | Validate both version declarations, rerun Tests and Security, build/validate four assets, create a GitHub release, request registry refresh when REGISTRY_PAT exists (a manual run with `register=false` skips it) |
+| Release | `vX.Y.Z` tag push or manual on main | Validate both version declarations, rerun Tests and Security, build/validate three assets, create a GitHub release, request registry refresh when REGISTRY_PAT exists (a manual run with `register=false` skips it) |
 | Update Plugin Registry | After Release, or manual with an existing release tag | Verify the release includes `job_server_X.Y.Z.zip`, send the existing `plugin_release` registry dispatch |
 
 To prepare a release, update `PLUGIN_VERSION` in `job_server/__init__.py` and
@@ -17,9 +17,11 @@ the matching version (without `v`), or push its `vX.Y.Z` tag. Publication occurs
 after Tests and Security succeed. An existing tag must point to the selected commit;
 existing release assets are never overwritten by this workflow. Releases are published as ordinary GitHub Releases.
 
-Release assets: `job_server_X.Y.Z.zip`, `job_manager_job_server.zip`, the
-Python wheel, source distribution, and `SHA256SUMS`. The registry receives the
-server plugin ZIP; the companion does not replace the upstream Job Manager release.
+Release assets: `job_server_X.Y.Z.zip`, the Python wheel, source distribution,
+and `SHA256SUMS` covering those three files. The registry receives the server
+plugin ZIP. The pinned companion `job_manager_job_server.zip` is built and
+validated only for testing; it is not uploaded with release/distribution assets
+or included in the release checksums. Use the normal Job Manager release.
 
 Set repository Actions secret **REGISTRY_PAT** to a token authorized to dispatch
 `HiroYokoyama/moleditpy-plugins`. No token value belongs in source. At setup time

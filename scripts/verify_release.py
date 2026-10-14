@@ -51,16 +51,12 @@ def safe_members(names):
 def verify_artifacts(version, root=ROOT):
     dist = root / "dist"
     server = dist / f"job_server_{version}.zip"
-    companion = dist / "job_manager_job_server.zip"
     wheel = dist / f"moleditpy_job_server-{version}-py3-none-any.whl"
     source = dist / f"moleditpy_job_server-{version}.tar.gz"
     with ZipFile(server) as archive:
         safe_members(archive.namelist())
         for name in ("__init__.py", "_execution/schedulers/windows.py", "web/icon.png", "LICENSE"):
             archive.getinfo("job_server/" + name)
-    with ZipFile(companion) as archive:
-        safe_members(archive.namelist())
-        archive.getinfo("job_manager/server_backend.py")
     with ZipFile(wheel) as archive:
         safe_members(archive.namelist())
         archive.getinfo("job_server/_execution/schedulers/base.py")
@@ -69,7 +65,7 @@ def verify_artifacts(version, root=ROOT):
         safe_members(archive.getnames())
         if any(member.issym() or member.islnk() for member in archive.getmembers()):
             raise ValueError("Source archive contains linked files")
-    assets = [server, companion, wheel, source]
+    assets = [server, wheel, source]
     checksums = []
     for path in assets:
         with path.open("rb") as stream:
@@ -81,17 +77,28 @@ def verify_artifacts(version, root=ROOT):
     return assets
 
 
+def verify_companion(root=ROOT):
+    """Validate the test-only companion without adding it to release checksums."""
+    with ZipFile(root / "dist" / "job_manager_job_server.zip") as archive:
+        safe_members(archive.namelist())
+        archive.getinfo("job_manager/server_backend.py")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("version", nargs="?")
     parser.add_argument("--artifacts", action="store_true")
+    parser.add_argument("--companion", action="store_true", help="Validate the test-only companion")
     args = parser.parse_args()
     version = validate_version(args.version if args.version is not None else source_version())
     if args.artifacts:
         verify_artifacts(version)
+    if args.companion:
+        verify_companion()
     print(
         f"Verified release {version}"
-        + (" and all four assets + SHA256SUMS" if args.artifacts else "")
+        + (" and all three release assets + SHA256SUMS" if args.artifacts else "")
+        + ("; test-only companion verified" if args.companion else "")
     )
 
 
