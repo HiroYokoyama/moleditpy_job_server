@@ -123,26 +123,47 @@ overlay. It does not change your sibling Job Manager repository or its upstream 
 
 ### HTTPS on a private LAN or Tailscale tailnet
 
-Set `public_url` in settings to the exact HTTPS origin, e.g. `https://compute.example.org`.
-This allows that browser origin; other origins are rejected. Terminate TLS in a proxy
-on the same machine. The daemon ignores forwarded headers and stays on loopback.
+**Setting up HTTPS yourself on a LAN can be cumbersome.** It requires a TLS proxy,
+a certificate matching the server address, and a way for every client to trust that
+certificate. A private IP address alone does not provide a trusted HTTPS endpoint.
+For a small lab, **Tailscale Serve is the simpler setup**: it manages HTTPS
+certificates and forwards connections to the local Job Server.
 
-On a private LAN, restrict the HTTPS proxy with your firewall to trusted local
-clients. Use a certificate trusted by those clients; the Job Manager host profile
-supports a CA certificate file for your own certificate authority. Never forward
-the service through an internet-facing proxy or router port mapping.
+1. Install Tailscale on the server PC and each client PC, and connect them to the
+   same tailnet with access permitted between them.
+2. Start Job Server on the server PC. Its default local address is
+   `http://127.0.0.1:8766`.
+3. On that **server PC**, run:
 
-```sh
-tailscale serve --bg http://127.0.0.1:8766
-```
+   ```sh
+   tailscale serve --bg http://127.0.0.1:8766
+   ```
 
-Use the HTTPS URL shown by Tailscale Serve as `public_url`, then restart the daemon.
+   If prompted, follow Tailscale's setup link to enable HTTPS for the tailnet.
+   If you changed Job Server's port, replace `8766` with that port.
+4. Copy the **HTTPS URL printed by Tailscale Serve** into Job Manager's
+   **Hosts → Server URL**, then use **Sign in / register device**. Use the printed
+   hostname, not the server's LAN IP, and do not append `:8766` to that HTTPS URL.
+5. To use the browser UI, also set Job Server's `public_url` to that exact HTTPS
+   origin and restart the daemon. This permits that browser origin; other origins
+   remain rejected.
+
+The daemon stays on loopback and ignores forwarded headers. HTTP on
+`127.0.0.1:8766` is the local connection from Tailscale Serve to Job Server; remote
+clients connect to the HTTPS URL. Same-PC clients can use the loopback HTTP URL
+directly without setting up HTTPS.
 Limit access to trusted members using your tailnet access policy. Verify that this
 service is not exposed by an existing Funnel or public proxy configuration.
-Python clients validate TLS and refuse redirects; custom trust uses a CA file.
 [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve) shares within
 your tailnet. [Tailscale Funnel](https://tailscale.com/docs/features/tailscale-funnel)
 publishes to the internet and **must never be used with Job Server**.
+
+For a LAN without Tailscale, terminate HTTPS in a proxy on the server PC, restrict
+it with your firewall to trusted local clients, and configure certificate trust on
+each client. Job Manager's host profile supports a CA certificate file for your
+own certificate authority. Set `public_url` to the proxy's exact HTTPS origin if
+using the browser UI. Python clients validate TLS and refuse redirects. Never
+forward the service through an internet-facing proxy or router port mapping.
 
 ## Python client
 
