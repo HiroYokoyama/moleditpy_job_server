@@ -8,7 +8,7 @@ PLUGIN_CATEGORY = "Utility"
 PLUGIN_TAGS = ["Utility"]
 PLUGIN_DEPENDENCIES = ["fastapi", "uvicorn", "cryptography", "psutil", "packaging"]
 PLUGIN_OPTIONAL_DEPENDENCIES = []
-PLUGIN_SUPPORTED_MOLEDITPY_VERSION = ">=5.0.0a1, <6.0.0"
+PLUGIN_SUPPORTED_MOLEDITPY_VERSION = ">=5.0.0, <6.0.0"
 PLUGIN_SUPPORTED_OS = ["Windows", "Linux", "WSL"]
 
 
