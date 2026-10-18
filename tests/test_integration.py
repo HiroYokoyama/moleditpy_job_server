@@ -9,11 +9,16 @@ from scripts.build_job_manager import build
 def test_companion_job_manager_routes_use_backend_not_transport(tmp_path):
     target = tmp_path / "job_manager"
     patch = build(target)
-    assert "Job Server (HTTPS)" in patch
+    assert patch == ""
+    assert "Job Server (HTTPS)" in (target / "host_profile_form.py").read_text("utf-8")
+    assert (target / "server_backend.py").read_bytes() == (
+        Path(__file__).resolve().parents[1]
+        / "upstream/job_manager/job_manager/server_backend.py"
+    ).read_bytes()
     code = r"""
 import os
 os.environ['QT_QPA_PLATFORM']='offscreen'
-from PyQt6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication
 app=QApplication([])
 from job_manager.models import HostProfile,Job,SubmitPreset
 host=HostProfile(backend='job_server',server_url='https://compute.example.org',server_key_path='/tmp/device.key')
@@ -43,7 +48,7 @@ dialog=HostsDialog(service)
 index=dialog.cmb_backend.findData('job_server')
 assert index>=0
 dialog.cmb_backend.setCurrentIndex(index)
-assert 'Authenticated Job Server' in dialog.lbl_backend_hint.text()
+assert 'LAN computational helper' in dialog.lbl_backend_hint.text()
 dialog.close()
 service.shutdown()
 print('companion integration passed')

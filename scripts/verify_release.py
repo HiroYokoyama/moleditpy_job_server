@@ -24,14 +24,14 @@ def source_version(root=ROOT):
             for target in node.targets
         )
     )
-    if package != plugin or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", package):
-        raise ValueError("Python package and plugin versions must match and use X.Y.Z")
+    if package != plugin or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:(?:a|b|rc)[0-9]+)?", package):
+        raise ValueError("Python package and plugin versions must match and use X.Y.Z with an optional a/b/rc prerelease")
     return package
 
 
 def validate_version(version, root=ROOT):
-    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version) or len(version) > 32:
-        raise ValueError("Invalid version: use X.Y.Z without leading v")
+    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:(?:a|b|rc)[0-9]+)?", version) or len(version) > 32:
+        raise ValueError("Invalid version: use X.Y.Z with an optional a/b/rc prerelease without leading v")
     if version != source_version(root):
         raise ValueError("Release version does not match package/plugin source")
     return version

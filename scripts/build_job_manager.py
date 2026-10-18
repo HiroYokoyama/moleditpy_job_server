@@ -315,6 +315,12 @@ def build(destination):
     copytree(
         source, destination, ignore=lambda _p, n: [name for name in n if name == "__pycache__"]
     )
+    # Current upstream includes the audited server integration itself.
+    if (source / "server_backend.py").exists():
+        models = (source / "models.py").read_text("utf-8")
+        if 'BACKEND_JOB_SERVER = "job_server"' not in models:
+            raise RuntimeError("Upstream server integration is incomplete")
+        return ""
     diffs = []
     for name, patcher in PATCHERS.items():
         original = (source / name).read_text("utf-8")

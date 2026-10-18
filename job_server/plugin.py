@@ -9,7 +9,7 @@ def missing_dependencies():
 
 
 def dependency_dialog(parent, missing):
-    from PyQt6.QtWidgets import QMessageBox
+    from PySide6.QtWidgets import QMessageBox
     from .runtime import DEPENDENCY_FLOORS
 
     requirements = " ".join(f'"{name}>={minimum}"' for name, minimum in DEPENDENCY_FLOORS.items())
@@ -62,8 +62,8 @@ def initialize(context):
 
 
 def open_logs():
-    from PyQt6.QtCore import QUrl
-    from PyQt6.QtGui import QDesktopServices
+    from PySide6.QtCore import QUrl
+    from PySide6.QtGui import QDesktopServices
     from .settings import Settings
 
     directory = Settings.load().root / "logs"
