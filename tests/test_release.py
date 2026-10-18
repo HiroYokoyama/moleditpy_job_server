@@ -52,7 +52,8 @@ def test_release_rejects_mismatch_or_injected_input(version):
 
 
 def test_release_accepts_matching_source_version():
-    assert validate_version(source_version()) == "0.1.4"
+    version = source_version()
+    assert validate_version(version) == version
 
 
 @pytest.mark.parametrize(
