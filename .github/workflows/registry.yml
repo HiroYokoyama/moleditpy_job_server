@@ -26,7 +26,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
         run: |
-          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Invalid release tag'; exit 1; }
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(a[0-9]+|b[0-9]+|rc[0-9]+)?$ ]] || { echo 'Invalid release tag'; exit 1; }
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,assets > release.json
           jq -e --arg asset "job_server_${TAG#v}.zip" '.isDraft == false and any(.assets[]; .name == $asset)' release.json
       - name: Trigger moleditpy-plugins registry update

@@ -4,17 +4,17 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "moleditpy-job-server"
-version = "0.1.4"
+version = "0.2.0"
 description = "MoleditPy authenticated job server — LAN computational helper"
 requires-python = ">=3.11"
-license = "GPL-3.0-only"
+license = "LGPL-3.0-or-later"
 dependencies = [
     "fastapi>=0.143.0,<1", "uvicorn>=0.54.0,<1", "cryptography>=50.0.2",
     "psutil>=7.2.2", "starlette>=1.3.1,<2", "anyio>=4.14.2,<5", "packaging>=25",
 ]
 
 [project.optional-dependencies]
-gui = ["PyQt6>=6.6"]
+gui = ["PySide6-Essentials>=6.9,<6.12"]
 test = ["pytest>=8", "httpx>=0.27", "ruff>=0.9", "build>=1", "pytest-xdist>=3", "pytest-cov>=6", "pytest-timeout>=2", "PyYAML>=6"]
 security = ["bandit>=1.8", "pip-audit>=2.9", "pip>=26.2"]
 
@@ -37,3 +37,6 @@ select = ["E4", "E7", "E9", "F"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.setuptools]
+license-files = ["LICENSE", "COPYING", "LICENSING.md"]

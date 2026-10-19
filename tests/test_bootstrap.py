@@ -71,8 +71,8 @@ def test_missing_device_file_has_actionable_message(tmp_path):
 
 @pytest.fixture
 def dashboard(tmp_path):
-    pytest.importorskip("PyQt6")
-    from PyQt6.QtWidgets import QApplication
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
     from job_server.ui.dashboard import Dashboard
 
     app = QApplication.instance() or QApplication([])
@@ -86,7 +86,7 @@ def dashboard(tmp_path):
 
 
 def test_stop_and_add_user_without_key_show_registration_help(dashboard, monkeypatch):
-    from PyQt6.QtWidgets import QMessageBox
+    from PySide6.QtWidgets import QMessageBox
 
     dialog, app = dashboard
     warnings = []
@@ -101,7 +101,7 @@ def test_stop_and_add_user_without_key_show_registration_help(dashboard, monkeyp
 
 @pytest.mark.parametrize("accepted", [True, False])
 def test_username_and_password_share_one_dialog(dashboard, monkeypatch, accepted):
-    from PyQt6.QtWidgets import QDialog, QLineEdit
+    from PySide6.QtWidgets import QDialog, QLineEdit
 
     dialog, app = dashboard
     calls = []
@@ -122,7 +122,7 @@ def test_username_and_password_share_one_dialog(dashboard, monkeypatch, accepted
 
 
 def test_interactive_error_remains_in_dialog_and_success_is_explicit(dashboard, monkeypatch):
-    from PyQt6.QtWidgets import QMessageBox
+    from PySide6.QtWidgets import QMessageBox
 
     dialog, app = dashboard
     warnings, successes = [], []

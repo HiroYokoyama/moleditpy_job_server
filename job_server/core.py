@@ -6,7 +6,7 @@ import shlex
 import sys
 from pathlib import Path
 
-UPSTREAM_REVISION = "e790fb63b6985f13cf2653a50c6845f4494516cf"
+UPSTREAM_REVISION = "290ad452a8af81a99b1dab0320b52c67f33200e1"
 
 
 def execution_core():

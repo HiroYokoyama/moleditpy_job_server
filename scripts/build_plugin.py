@@ -24,8 +24,8 @@ def main():
             ignore=lambda _p, n: [name for name in n if name == "__pycache__"],
         )
         build["copy_core"](plugin / "_execution")
-        copy2(ROOT / "LICENSE", plugin / "LICENSE")
-        copy2(ROOT / "upstream" / "job_manager" / "LICENSE", plugin / "_execution" / "LICENSE")
+        for name in ("LICENSE", "COPYING", "LICENSING.md"):
+            copy2(ROOT / name, plugin / name)
         with ZipFile(destination, "w", ZIP_DEFLATED) as archive:
             for path in sorted(plugin.rglob("*")):
                 if path.is_file():

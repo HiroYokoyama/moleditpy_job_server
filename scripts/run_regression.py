@@ -11,6 +11,20 @@ from shutil import copytree, copy2
 from build_job_manager import build
 
 
+def patch_native_menu_fixture(tests_directory):
+    """Adapt the copied upstream Qt fixture without modifying upstream."""
+    path = Path(tests_directory) / "test_host_monitor_gui.py"
+    text = path.read_text("utf-8")
+    before = 'with patch.object(QMenu, "exec", capture):'
+    after = (
+        'with patch.object(self.dialog.menu_job, "exec", '
+        'lambda *args, **kwargs: capture(self.dialog.menu_job, *args, **kwargs)):'
+    )
+    if text.count(before) != 1:
+        raise RuntimeError("Upstream native menu fixture changed; review the Qt adaptation")
+    path.write_text(text.replace(before, after), "utf-8")
+
+
 def main():
     root = Path(__file__).resolve().parents[1]
     temporary_root = root / "test-results"
@@ -19,6 +33,7 @@ def main():
         directory = Path(temporary)
         build(directory / "job_manager")
         copytree(root / "upstream" / "job_manager" / "tests", directory / "tests")
+        patch_native_menu_fixture(directory / "tests")
         for path in (root / "upstream" / "job_manager").iterdir():
             if path.name in {".git", "job_manager", "tests"}:
                 continue

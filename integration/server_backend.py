@@ -14,11 +14,11 @@ def backend_for(host):
 def show_enrollment(parent, url, key_field, ca_file):
     from pathlib import Path
     import uuid
-    from PyQt6.QtWidgets import QInputDialog, QLineEdit, QMessageBox
+    from PySide6.QtWidgets import QInputDialog, QLineEdit, QMessageBox
     from job_server.client import JobServerClient
     from job_server.settings import Settings
     from .tasks import run_async
-    from PyQt6.QtCore import QThreadPool
+    from PySide6.QtCore import QThreadPool
 
     username, ok = QInputDialog.getText(parent, "Job Server", "Username")
     if not ok:

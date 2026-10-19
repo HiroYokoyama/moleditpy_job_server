@@ -4,9 +4,9 @@ import subprocess
 import time
 from pathlib import Path
 
-from PyQt6.QtCore import QObject, QRunnable, QThreadPool, QTimer, pyqtSignal
-from PyQt6.QtGui import QIcon
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal
+from PySide6.QtGui import QIcon
+from PySide6.QtWidgets import (
     QApplication,
     QDialog,
     QDialogButtonBox,
@@ -30,8 +30,8 @@ from ..settings import Settings
 
 
 class Signals(QObject):
-    finished = pyqtSignal(object)
-    failed = pyqtSignal(str)
+    finished = Signal(object)
+    failed = Signal(str)
 
 
 class Task(QRunnable):
@@ -60,6 +60,7 @@ class Dashboard(QDialog):
         )
         self.pool = QThreadPool(self)
         self.pool.setMaxThreadCount(1)
+        self._tasks = set()
         self.busy = False
         layout = QVBoxLayout(self)
         notice = QLabel(
@@ -197,8 +198,10 @@ class Dashboard(QDialog):
             return
         self.busy = True
         task = Task(call)
+        self._tasks.add(task)
 
         def finished(value):
+            self._tasks.discard(task)
             self.busy = False
             if on_ok:
                 on_ok(value)
@@ -206,6 +209,7 @@ class Dashboard(QDialog):
                 QMessageBox.information(self, "Success", success_message)
 
         def failed(message):
+            self._tasks.discard(task)
             self.busy = False
             self.message.setText(message)
             if interactive:
@@ -351,8 +355,8 @@ class Dashboard(QDialog):
         )
 
     def open_web_ui(self):
-        from PyQt6.QtCore import QUrl
-        from PyQt6.QtGui import QDesktopServices
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
 
         QDesktopServices.openUrl(QUrl(self.settings.public_url or self.client.url))
 

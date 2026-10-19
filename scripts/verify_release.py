@@ -24,14 +24,14 @@ def source_version(root=ROOT):
             for target in node.targets
         )
     )
-    if package != plugin or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", package):
-        raise ValueError("Python package and plugin versions must match and use X.Y.Z")
+    if package != plugin or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:(?:a|b|rc)[0-9]+)?", package):
+        raise ValueError("Python package and plugin versions must match and use X.Y.Z with an optional a/b/rc prerelease")
     return package
 
 
 def validate_version(version, root=ROOT):
-    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version) or len(version) > 32:
-        raise ValueError("Invalid version: use X.Y.Z without leading v")
+    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:(?:a|b|rc)[0-9]+)?", version) or len(version) > 32:
+        raise ValueError("Invalid version: use X.Y.Z with an optional a/b/rc prerelease without leading v")
     if version != source_version(root):
         raise ValueError("Release version does not match package/plugin source")
     return version
@@ -55,7 +55,7 @@ def verify_artifacts(version, root=ROOT):
     source = dist / f"moleditpy_job_server-{version}.tar.gz"
     with ZipFile(server) as archive:
         safe_members(archive.namelist())
-        for name in ("__init__.py", "_execution/schedulers/windows.py", "web/icon.png", "LICENSE"):
+        for name in ("__init__.py", "_execution/schedulers/windows.py", "web/icon.png", "LICENSE", "COPYING", "LICENSING.md", "_execution/UPSTREAM_LICENSE"):
             archive.getinfo("job_server/" + name)
     with ZipFile(wheel) as archive:
         safe_members(archive.namelist())

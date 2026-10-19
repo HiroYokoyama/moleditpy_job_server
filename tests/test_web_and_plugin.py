@@ -6,8 +6,8 @@ def test_missing_libraries_show_dialog_and_allow_retry(monkeypatch):
     import types
     import pytest
 
-    pytest.importorskip("PyQt6")
-    from PyQt6.QtWidgets import QMessageBox
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QMessageBox
     import importlib.util
 
     messages, windows, actions = [], [], []
@@ -101,8 +101,8 @@ def test_plugin_registration_is_lazy_and_uses_supported_context():
 def test_gui_construction_has_no_listener(tmp_path):
     import pytest
 
-    pytest.importorskip("PyQt6")
-    from PyQt6.QtWidgets import QApplication
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
     from job_server.settings import Settings
     from job_server.ui.dashboard import Dashboard
 
@@ -123,9 +123,9 @@ def test_gui_construction_has_no_listener(tmp_path):
 def test_gui_start_adopts_saved_port(tmp_path, monkeypatch):
     import pytest
 
-    pytest.importorskip("PyQt6")
+    pytest.importorskip("PySide6")
     import time
-    from PyQt6.QtWidgets import QApplication, QMessageBox
+    from PySide6.QtWidgets import QApplication, QMessageBox
     from job_server.settings import Settings
     from job_server.ui.dashboard import Dashboard
 
@@ -160,9 +160,9 @@ def test_gui_start_adopts_saved_port(tmp_path, monkeypatch):
 def test_gui_refuses_listener_that_does_not_hold_daemon_lock(tmp_path, monkeypatch):
     import pytest
 
-    pytest.importorskip("PyQt6")
+    pytest.importorskip("PySide6")
     import time
-    from PyQt6.QtWidgets import QApplication, QMessageBox
+    from PySide6.QtWidgets import QApplication, QMessageBox
     from job_server.instance import InstanceLock
     from job_server.settings import Settings
     from job_server.ui.dashboard import Dashboard

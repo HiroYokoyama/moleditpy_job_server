@@ -1,6 +1,6 @@
 # Development guidance
 
-Job Server is a GPL-3.0-only LAN computational helper. Keep the default listener off until
+Job Server is a LGPL-3.0-or-later LAN computational helper. Keep the default listener off until
 explicit start, bind loopback, and report resource enforcement as advisory.
 
 Run `python -m pytest -q` and `python -m ruff check job_server scripts tests integration setup.py`.
