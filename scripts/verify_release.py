@@ -55,7 +55,7 @@ def verify_artifacts(version, root=ROOT):
     source = dist / f"moleditpy_job_server-{version}.tar.gz"
     with ZipFile(server) as archive:
         safe_members(archive.namelist())
-        for name in ("__init__.py", "_execution/schedulers/windows.py", "web/icon.png", "LICENSE"):
+        for name in ("__init__.py", "_execution/schedulers/windows.py", "web/icon.png", "LICENSE", "COPYING", "LICENSING.md", "_execution/UPSTREAM_LICENSE"):
             archive.getinfo("job_server/" + name)
     with ZipFile(wheel) as archive:
         safe_members(archive.namelist())

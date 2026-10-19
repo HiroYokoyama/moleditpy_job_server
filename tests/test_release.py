@@ -23,7 +23,7 @@ def test_release_checksums_cover_only_distributed_assets(tmp_path):
     wheel = dist / f"moleditpy_job_server-{version}-py3-none-any.whl"
     source = dist / f"moleditpy_job_server-{version}.tar.gz"
     with ZipFile(server, "w") as archive:
-        for name in ("__init__.py", "_execution/schedulers/windows.py", "web/icon.png", "LICENSE"):
+        for name in ("__init__.py", "_execution/schedulers/windows.py", "web/icon.png", "LICENSE", "COPYING", "LICENSING.md", "_execution/UPSTREAM_LICENSE"):
             archive.writestr("job_server/" + name, "fixture")
     with ZipFile(wheel, "w") as archive:
         archive.writestr("job_server/_execution/schedulers/base.py", "fixture")

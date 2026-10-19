@@ -1,3 +1,4 @@
+include COPYING LICENSING.md
 include LICENSE README.md
 include upstream/job_manager/LICENSE
 include upstream/job_manager/job_manager/__init__.py

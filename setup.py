@@ -9,6 +9,10 @@ def copy_core(destination):
     if not (source / "models.py").exists():
         raise RuntimeError("git submodule update --init is required before building")
     destination.mkdir(parents=True, exist_ok=True)
+    project = Path(__file__).parent
+    for name in ("LICENSE", "COPYING", "LICENSING.md"):
+        copy2(project / name, destination / name)
+    copy2(project / "upstream" / "job_manager" / "LICENSE", destination / "UPSTREAM_LICENSE")
     for name in CORE_FILES:
         copy2(source / name, destination / name)
     copytree(

@@ -7,7 +7,7 @@ This branch targets **MoleditPy 5.0.0a1–5.x** and uses **PySide6**. Plugin lic
 [![Release](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/release.yml/badge.svg)](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/release.yml)
 [![Version](https://img.shields.io/badge/version-0.2.0-blue)](pyproject.toml)
 [![Downloads](https://img.shields.io/github/downloads/HiroYokoyama/moleditpy_job_server/total)](https://github.com/HiroYokoyama/moleditpy_job_server/releases)
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![License: GPL v3](https://img.shields.io/badge/License-LGPLv3-blue.svg)](LICENSE)
 [![MoleditPy](https://img.shields.io/badge/MoleditPy-5.x-3577F7)](https://github.com/HiroYokoyama/python_molecular_editor)
 
 A LAN computational helper for MoleditPy Job Manager, with an authenticated shared
@@ -303,4 +303,8 @@ See [verification](docs/VERIFICATION.md) for actual results and outstanding plat
 See [workflows](docs/WORKFLOWS.md) for release/registry setup and
 [security audit](docs/SECURITY_AUDIT.md) for findings and remaining limitations.
 
-GPL-3.0-only. Upstream execution code retains its original license and attribution.
+LGPL-3.0-or-later. Upstream execution code retains its original license and attribution.
+
+## Licensing scope
+
+First-party code in this migration is LGPL-3.0-or-later. See [LICENSE](LICENSE), [COPYING](COPYING) and [dependency/provenance terms](LICENSING.md). Third-party components and historical releases retain their own terms.

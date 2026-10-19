@@ -351,7 +351,9 @@ def main():
         with ZipFile(output, "w", ZIP_DEFLATED) as archive:
             for path in sorted(target.rglob("*.py")):
                 archive.write(path, "job_manager/" + path.relative_to(target).as_posix())
-            archive.write(ROOT / "upstream" / "job_manager" / "LICENSE", "job_manager/LICENSE")
+            for name in ("LICENSE", "COPYING", "LICENSING.md"):
+                archive.write(ROOT / name, "job_manager/" + name)
+            archive.write(ROOT / "upstream" / "job_manager" / "LICENSE", "job_manager/UPSTREAM_LICENSE")
     print(output)
 
 
