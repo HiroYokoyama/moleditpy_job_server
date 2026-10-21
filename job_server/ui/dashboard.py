@@ -1,3 +1,5 @@
+
+from ._qt_callbacks import connect_queued
 import json
 import os
 import subprocess
@@ -215,8 +217,8 @@ class Dashboard(QDialog):
             if interactive:
                 QMessageBox.warning(self, "Job Server", message)
 
-        task.signals.finished.connect(finished)
-        task.signals.failed.connect(failed)
+        connect_queued(task.signals.finished, finished, self, (object,), cleanup=(task.signals.finished, task.signals.failed))
+        connect_queued(task.signals.failed, failed, self, (str,), cleanup=(task.signals.finished, task.signals.failed))
         self.pool.start(task)
 
     def refresh(self):
