@@ -20,6 +20,8 @@ def patch_native_menu_fixture(tests_directory):
         'with patch.object(self.dialog.menu_job, "exec", '
         'lambda *args, **kwargs: capture(self.dialog.menu_job, *args, **kwargs)):'
     )
+    if 'with patch.object(menu, "exec", return_value=None) as execute:' in text:
+        return  # Upstream now patches the menu instance directly.
     if text.count(before) != 1:
         raise RuntimeError("Upstream native menu fixture changed; review the Qt adaptation")
     path.write_text(text.replace(before, after), "utf-8")
