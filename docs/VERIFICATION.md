@@ -1,6 +1,22 @@
 # Verification
 
-Updated 2026-10-14. All tests use isolated generated accounts and temporary job data.
+Updated 2026-10-25. All tests use isolated generated accounts and temporary job data.
+
+## 0.3.0 audit
+
+The authored server, client, execution adapters, web application, integration and
+build/release code were reviewed. Regression cases cover literal Windows commands,
+marker-like job names, WSL LF wrappers and background cleanup, strict settings
+booleans, blank commands, malformed remote IDs and walltimes, and stale browser
+authentication/list/detail responses. Browser cases execute the shipped JavaScript
+with Node's built-in VM and deferred HTTP responses; no npm dependency is needed.
+
+Real Windows-to-WSL execution with Ubuntu passed normal completion, exit 7,
+background-descendant cleanup, result download, roots containing spaces and released
+resource reservations. These were synthetic shell jobs, not ORCA calculations.
+Live WSL cancellation remains outside this acceptance run.
+
+The results below describe the earlier 0.1.x acceptance baseline.
 
 ## Results
 
