@@ -83,14 +83,23 @@ def build_wrapper(spec, workdir, windows=False):
     wrapper = (powershell if windows else shell).build_script(
         spec["name"], preset, "", "job.log", remote_dir=str(workdir)
     )
-    wrapper = wrapper.replace(marker, rendered)
+    replacement = rendered
     if windows:
         # The upstream inline payload loses `exit N` in finally and non-terminating
         # cmdlet errors can report success. A separate payload preserves both.
-        wrapper = wrapper.replace(
-            rendered,
-            "& powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File './payload.ps1'",
+        replacement = (
+            "& powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File './payload.ps1'"
         )
+    # Replace the standalone payload line only. The command may be '$null' or
+    # '0', which also occurs in the supervisor, and the marker can be a job name.
+    wrapper, substitutions = re.subn(
+        rf"(?m)^([ \t]*){re.escape(marker)}([ \t]*\r?)$",
+        lambda match: match.group(1) + replacement + match.group(2),
+        wrapper,
+    )
+    if substitutions != 1:
+        raise RuntimeError("Upstream wrapper payload boundary changed")
+    if windows:
         return (
             wrapper,
             "$ErrorActionPreference = 'Stop'\n"

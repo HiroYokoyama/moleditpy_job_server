@@ -4,7 +4,7 @@ import fnmatch
 import uuid
 from pathlib import Path
 
-from .client import JobServerClient
+from .client import JobServerClient, job_path
 from .files import validate_path
 
 
@@ -42,6 +42,8 @@ class JobServerBackend:
         if len(parts) != 3 or not all(part.isdecimal() for part in parts):
             raise ValueError("Use HH:MM:SS walltime")
         hours, minutes, seconds = map(int, parts)
+        if minutes >= 60 or seconds >= 60:
+            raise ValueError("Use HH:MM:SS walltime with minutes and seconds below 60")
         memory = parse_memory_mb(preset.memory) if preset.memory else 512
         if memory <= 0:
             raise ValueError("Invalid memory request")
@@ -81,25 +83,24 @@ class JobServerBackend:
     def poll(self, jobs):
         result = {}
         for job in jobs:
-            remote = self.client.request("GET", "/jobs/" + job.remote_job_id)
+            remote = self.client.request("GET", job_path(job.remote_job_id))
             job.rc = remote["exit_code"]
             job.last_server_state = remote["state"]
             result[job.id] = remote["state"]
         return result
 
     def cancel(self, job):
-        return self.client.request("POST", f"/jobs/{job.remote_job_id}/cancel")
+        return self.client.request("POST", job_path(job.remote_job_id) + "/cancel")
 
     def tail(self, job, lines=100):
-        info = self.client.request("GET", f"/jobs/{job.remote_job_id}/log?limit=1")
+        route = job_path(job.remote_job_id)
+        info = self.client.request("GET", route + "/log?limit=1")
         offset = max(0, info.get("size", 0) - 1048576)
-        result = self.client.request(
-            "GET", f"/jobs/{job.remote_job_id}/log?offset={offset}&limit=1048576"
-        )
+        result = self.client.request("GET", route + f"/log?offset={offset}&limit=1048576")
         return "\n".join(result["text"].splitlines()[-lines:])
 
     def files(self, job):
-        return self.client.request("GET", f"/jobs/{job.remote_job_id}/files")
+        return self.client.request("GET", job_path(job.remote_job_id) + "/files")
 
     def fetch_file(self, job, relative, target):
         return self.client.download(job.remote_job_id, relative, target)

@@ -23,7 +23,15 @@ def test_release_checksums_cover_only_distributed_assets(tmp_path):
     wheel = dist / f"moleditpy_job_server-{version}-py3-none-any.whl"
     source = dist / f"moleditpy_job_server-{version}.tar.gz"
     with ZipFile(server, "w") as archive:
-        for name in ("__init__.py", "_execution/schedulers/windows.py", "web/icon.png", "LICENSE", "COPYING", "LICENSING.md", "_execution/UPSTREAM_LICENSE"):
+        for name in (
+            "__init__.py",
+            "_execution/schedulers/windows.py",
+            "web/icon.png",
+            "LICENSE",
+            "COPYING",
+            "LICENSING.md",
+            "_execution/UPSTREAM_LICENSE",
+        ):
             archive.writestr("job_server/" + name, "fixture")
     with ZipFile(wheel, "w") as archive:
         archive.writestr("job_server/_execution/schedulers/base.py", "fixture")
@@ -80,8 +88,11 @@ def test_workflows_validate_before_publication_and_do_not_execute_event_inputs()
     assert set(release["jobs"]["release"]["needs"]) == {"validate", "tests", "security"}
     assert "REGISTRY_PAT" not in str(release["jobs"]["tests"])
     assert release["jobs"]["release"]["permissions"]["contents"] == "write"
-    # Only a manual release may skip registration; tag pushes always register.
-    assert release["on"]["workflow_dispatch"]["inputs"]["register"]["default"] == "true"
-    assert release["jobs"]["registry"]["if"] == "github.event_name == 'push' || inputs.register"
+    # Publishing a release does not implicitly register the server.
+    assert release["on"]["workflow_dispatch"]["inputs"]["register"]["default"] == "false"
+    assert release["jobs"]["registry"]["if"] == (
+        "(github.event_name == 'workflow_dispatch' && inputs.register) || "
+        "(github.event_name == 'push' && vars.REGISTER_PLUGIN == 'true')"
+    )
     # Syntax-check the validation script independently of imports.
     ast.parse((ROOT / "scripts/verify_release.py").read_text("utf-8"))

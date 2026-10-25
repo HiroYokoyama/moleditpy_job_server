@@ -9,7 +9,7 @@ on:
       register:
         description: Request the moleditpy-plugins registry update after publishing
         required: false
-        default: true
+        default: false
         type: boolean
   push:
     tags: ['v*.*.*']
@@ -89,8 +89,8 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
   registry:
     needs: release
-    # Tag pushes always register; a manual release may opt out.
-    if: github.event_name == 'push' || inputs.register
+    # Registration requires an explicit manual choice or repository opt-in.
+    if: (github.event_name == 'workflow_dispatch' && inputs.register) || (github.event_name == 'push' && vars.REGISTER_PLUGIN == 'true')
     uses: ./.github/workflows/registry.yml
     with:
       tag: ${{ needs.release.outputs.tag }}

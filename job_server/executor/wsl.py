@@ -39,7 +39,7 @@ def start(settings, job_id, wrapper, log):
     return process, wrapper.parent / ".server_process"
 
 
-def terminate(settings, process, pidfile):
+def terminate(settings, process, pidfile, grace=0.5):
     try:
         pid = int(pidfile.read_text().strip())
         if pid <= 1:
@@ -54,7 +54,8 @@ def terminate(settings, process, pidfile):
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-            time.sleep(0.5)
+            if signal == "-TERM":
+                time.sleep(grace)
     except subprocess.CalledProcessError:
         # A vanished group is the expected result of a successful termination.
         pass

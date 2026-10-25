@@ -45,9 +45,9 @@ def main(config, job_id):
         )
         script, payload = build_wrapper(spec, execution_dir, windows)
         wrapper = work / ("moleditpy_run.ps1" if windows else "moleditpy_run.sh")
-        wrapper.write_text(script, encoding="utf-8-sig" if windows else "utf-8")
+        wrapper.write_text(script, encoding="utf-8-sig" if windows else "utf-8", newline="\n")
         if payload:
-            (work / "payload.ps1").write_text(payload, encoding="utf-8-sig")
+            (work / "payload.ps1").write_text(payload, encoding="utf-8-sig", newline="\n")
         with (work / "job.log").open("wb") as log:
             process, containment = (
                 wsl.start(settings, job_id, wrapper, log)
@@ -69,6 +69,7 @@ def main(config, job_id):
                     )
                     if settings.execution_os == "wsl":
                         wsl.terminate(settings, process, containment)
+                        containment = None
                     else:
                         native.terminate(process, containment)
                     outcome = {
@@ -89,7 +90,12 @@ def main(config, job_id):
                 except (OSError, ValueError):
                     outcome = {"state": "LOST", "exit_code": return_code}
                     reason = "missing_or_invalid_sentinel"
-            if containment and settings.execution_os != "wsl":
+            if containment and settings.execution_os == "wsl":
+                # A successful shell may leave background descendants in its
+                # Linux process group after wsl.exe itself has returned.
+                wsl.terminate(settings, process, containment, grace=0.1)
+                containment = None
+            elif containment:
                 containment.terminate()
                 containment.close()
                 containment = None

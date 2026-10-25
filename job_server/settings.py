@@ -42,6 +42,9 @@ class Settings:
         )
 
     def validate(self):
+        for key in ("trusted_users_only", "allow_privileged", "web_ui"):
+            if type(getattr(self, key)) is not bool:
+                raise ValueError(f"{key} must be a boolean")
         if self.public_url:
             from urllib.parse import urlsplit
 

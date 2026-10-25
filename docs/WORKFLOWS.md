@@ -7,7 +7,7 @@ Zenodo or PyPI publication workflow.
 |---|---|---|
 | Tests | Main/dev pushes, pull requests, manual, reusable | Python 3.11/3.12/3.13 on Linux/Windows; Qt, native execution, coverage/JUnit reports, wheel/sdist and server plugin ZIP with checksums; test-only companion build/validation, Linux/Windows patched Job Manager regression and real HTTP client compatibility |
 | Security | Main/dev pushes, pull requests, weekly, manual, reusable | Dependency advisories, Bandit source analysis, credential signatures in tracked source and Git history |
-| Release | `vX.Y.Z` tag push or manual on main | Validate both version declarations, rerun Tests and Security, build/validate three assets, create a GitHub release, request registry refresh when REGISTRY_PAT exists (a manual run with `register=false` skips it) |
+| Release | `vX.Y.Z` tag push or manual on main | Validate both version declarations, rerun Tests and Security, build/validate three assets, create a GitHub release; registry registration requires explicit opt-in |
 | Update Plugin Registry | After Release, or manual with an existing release tag | Verify the release includes `job_server_X.Y.Z.zip`, send the existing `plugin_release` registry dispatch |
 
 To prepare a release, update `PLUGIN_VERSION` in `job_server/__init__.py` and
@@ -23,18 +23,15 @@ plugin ZIP. The pinned companion `job_manager_job_server.zip` is built and
 validated only for testing; it is not uploaded with release/distribution assets
 or included in the release checksums. Use the normal Job Manager release.
 
-Set repository Actions secret **REGISTRY_PAT** to a token authorized to dispatch
-`HiroYokoyama/moleditpy-plugins`. No token value belongs in source. At setup time
-(2026-10-13), this repository has no configured Actions secrets. Without this
-secret, registry dispatch is explicitly skipped and the workflow summary gives the
-manual registration route. After configuring it, rerun Update Plugin Registry for
-the published tag. Creating these workflows does not itself release or register
-the plugin.
+Registration is disabled by default. Leave the manual Release input **register**
+unchecked (`false`). Tag releases register only when the repository variable
+**REGISTER_PLUGIN** is explicitly `true`. Publishing Job Server 0.3.0 does not
+register it in the public plugin catalog.
 
-The 0.1.0 release is triggered by its `v0.1.0` tag. It publishes GitHub assets but
-does not register this server: no `REGISTRY_PAT` is configured. Registry dispatch
-reports a skip. Job Manager has its own PAT and may register its 2.6.0 release
-through its normal workflow.
+If registration is authorized later, set repository Actions secret **REGISTRY_PAT**
+to a token authorized to dispatch `HiroYokoyama/moleditpy-plugins`, then explicitly
+run Update Plugin Registry for the published tag. No token value belongs in source.
+Configuring the secret alone does not opt tag releases into registration.
 
 CI jobs have read-only repository tokens and no publication secrets. Only the
 publication job gets `contents: write`; the registry token is passed only to the

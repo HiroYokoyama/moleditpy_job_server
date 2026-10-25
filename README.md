@@ -3,14 +3,14 @@
 [![Tests](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/test.yml/badge.svg)](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/test.yml)
 [![Security](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/security.yml/badge.svg)](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/security.yml)
 [![Release](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/release.yml/badge.svg)](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/release.yml)
-[![Version](https://img.shields.io/badge/version-0.2.0-blue)](pyproject.toml)
+[![Version](https://img.shields.io/badge/version-0.3.0-blue)](pyproject.toml)
 [![Downloads](https://img.shields.io/github/downloads/HiroYokoyama/moleditpy_job_server/total)](https://github.com/HiroYokoyama/moleditpy_job_server/releases)
 [![License: GPL v3](https://img.shields.io/badge/License-LGPLv3-blue.svg)](LICENSE)
 [![MoleditPy](https://img.shields.io/badge/MoleditPy-5.x-3577F7)](https://github.com/HiroYokoyama/python_molecular_editor)
 
 A LAN computational helper for MoleditPy Job Manager, with an authenticated shared
 job queue, headless daemon, MoleditPy administration plugin, and browser UI.
-Version **0.2.0**. Access is for trusted users on a private network.
+Version **0.3.0**. Access is for trusted users on a private network.
 
 > [!WARNING]
 > **Never expose Job Server to the public internet. Use localhost, a private LAN over HTTPS, or a private Tailscale tailnet only.**
@@ -27,7 +27,7 @@ Job Manager source dependency, rather than a second maintained copy.
 
 ## Use from MoleditPy (plugin workflow)
 
-Install **`job_server_0.1.4.zip`** using MoleditPy's Plugin Installer. Then open
+Install **`job_server_0.3.0.zip`** using MoleditPy's Plugin Installer. Then open
 **Plugin → Job Server → Server Dashboard…**.
 If required Python libraries are missing, opening a Job Server dialog shows their
 names and installation guidance. Install them in MoleditPy's Python environment
@@ -101,7 +101,7 @@ The listener starts only on explicit `serve` or GUI Start and binds **127.0.0.1*
 python scripts/build_plugin.py
 ```
 
-Install `dist/job_server_0.1.4.zip` using MoleditPy's Plugin Installer. Open
+Install `dist/job_server_0.3.0.zip` using MoleditPy's Plugin Installer. Open
 **Plugin → Job Server → Server Dashboard…**. The GUI can bootstrap the first
 administrator, start/stop/restart the daemon, pause/resume the queue, manage accounts
 and device keys, and cancel jobs. Reloading or closing the plugin does not stop the daemon.
@@ -248,11 +248,11 @@ process-group signals for cancellation. Submit Linux commands directly, such as
 selects the Bash scheduler when registering with this server. Execution mode is
 **server-wide**; each job cannot independently switch a Windows server to WSL.
 
-The Windows-hosted WSL adapter has not yet passed end-to-end calculation,
-cancellation and filesystem validation on a calculation-capable WSL host; see
-[verification](docs/VERIFICATION.md). The command example follows the documented
-WSL invocation interface, but is not a claim that ORCA or WSL execution was tested
-in this development environment.
+Verified on Windows with the Ubuntu WSL distribution: synthetic job submission,
+normal and failed completion, input/result transfer, roots containing spaces,
+and cleanup of background descendants after completion. Wrappers use LF line
+endings for Bash. ORCA calculations and live cancellation on this adapter have
+not been verified; native Windows/Linux tests cover cancellation separately.
 
 For WSL on your own PC without a shared server, Job Manager also offers
 **Hosts → This machine, inside WSL (no SSH)** with a distribution selector.

@@ -66,6 +66,46 @@ def test_bash_wrapper_real_command(tmp_path):
     assert (tmp_path / ".moleditpy_rc").read_text().strip() == "7"
 
 
+def test_wsl_worker_writes_posix_text_and_cleans_background_group(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from job_server import worker
+    from job_server.settings import Settings
+
+    settings = Settings(data_dir=str(tmp_path / "data"), executor="wsl", wsl_root="/home/synthetic")
+    job_id = "synthetic-job"
+    control = settings.root / "control" / job_id
+    control.mkdir(parents=True)
+    work = tmp_path / "linux" / "jobs" / job_id / "work"
+    work.mkdir(parents=True)
+    spec = {
+        "name": "synthetic",
+        "command": "echo synthetic",
+        "files": [],
+        "resources": {"cpus_per_task": 1, "memory_mb": 512, "walltime_seconds": 30},
+    }
+    (control / "request.json").write_text(json.dumps({"spec": spec}), encoding="utf-8")
+    monkeypatch.setattr(worker.Settings, "load", lambda _: settings)
+    monkeypatch.setattr(worker.wsl, "native_root", lambda _: tmp_path / "linux")
+    group = SimpleNamespace(alive=False)
+
+    def start(settings, identifier, wrapper, log):
+        group.alive = True
+        # A CRLF script cannot install the Bash EXIT trap on WSL.
+        if b"\r\n" not in wrapper.read_bytes():
+            (work / ".moleditpy_rc").write_text("0\n", encoding="ascii")
+        return SimpleNamespace(poll=lambda: 0, returncode=0), work / ".server_process"
+
+    def terminate(*args, **kwargs):
+        group.alive = False
+
+    monkeypatch.setattr(worker.wsl, "start", start)
+    monkeypatch.setattr(worker.wsl, "terminate", terminate)
+    worker.main("unused-synthetic-config", job_id)
+    result = json.loads((control / "done.json").read_text())
+    assert result["state"] == "DONE"
+    assert not group.alive
+
+
 def test_cpu_memory_queue_and_restart_reconciliation(client, alice):
     command = "Start-Sleep -Seconds 3" if os.name == "nt" else "sleep 3"
     request = {"cpus_per_task": 2, "memory_mb": 1024, "walltime_seconds": 15}
