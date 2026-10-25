@@ -59,6 +59,13 @@ class JobSpec(Model):
             raise ValueError("NUL is forbidden")
         return text
 
+    @field_validator("command")
+    @classmethod
+    def command_required(cls, text):
+        if not text.strip():
+            raise ValueError("A nonblank command is required")
+        return text
+
 
 class Login(Model):
     username: StrictStr = Field(max_length=64)

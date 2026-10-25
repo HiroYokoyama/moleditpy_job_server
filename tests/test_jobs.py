@@ -158,3 +158,10 @@ def test_pause_rejects_new_jobs(client, alice):
     admin = enroll(client, "admin", "admin")
     client.post("/api/v1/admin/queue/pause", json={"paused": True}, headers=admin["headers"])
     assert reserve(client, alice).status_code == 503
+
+
+@pytest.mark.parametrize("command", [" ", "\t\r\n"])
+def test_blank_commands_are_rejected_before_reservation(client, alice, command):
+    response = reserve(client, alice, command=command)
+    assert response.status_code == 400
+    assert client.app.state.db.rows("SELECT id FROM jobs") == []
