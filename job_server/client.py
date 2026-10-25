@@ -26,6 +26,15 @@ class NoRedirect(HTTPRedirectHandler):
         raise ClientError(code, {"message": "Server redirects are forbidden"})
 
 
+def job_path(identifier):
+    """Keep imported job IDs inside one UUID path segment."""
+    try:
+        identifier = str(uuid.UUID(str(identifier)))
+    except (ValueError, AttributeError, TypeError):
+        raise ValueError("Job ID must be a UUID") from None
+    return "/jobs/" + identifier
+
+
 class JobServerClient:
     def __init__(self, url, key_path=None, ca_file=None, server_id=None, timeout=30):
         parts = urlsplit(url)
@@ -154,8 +163,8 @@ class JobServerClient:
         reservation = self.request(
             "POST", "/jobs", spec, headers={"Idempotency-Key": idempotency_key or str(uuid.uuid4())}
         )
-        job_id = reservation["id"]
-        status = self.request("GET", f"/jobs/{job_id}/uploads")
+        route = job_path(reservation["id"])
+        status = self.request("GET", route + "/uploads")
         capabilities = self.request("GET", "/capabilities")
         chunk_size = min(capabilities["max_chunk_bytes"], 8 * 1024 * 1024)
         for entry in status:
@@ -168,7 +177,7 @@ class JobServerClient:
                 while data := stream.read(chunk_size):
                     result = self.request(
                         "PUT",
-                        f"/jobs/{job_id}/files/" + quote(entry["path"], safe="/"),
+                        route + "/files/" + quote(entry["path"], safe="/"),
                         data,
                         headers={
                             "Content-Range": f"bytes {offset}-{offset + len(data) - 1}/{total}"
@@ -176,21 +185,16 @@ class JobServerClient:
                     )
                     offset = result["offset"]
                 if total == 0:
-                    self.request(
-                        "PUT", f"/jobs/{job_id}/files/" + quote(entry["path"], safe="/"), b""
-                    )
-        return self.request("POST", f"/jobs/{job_id}/commit")
+                    self.request("PUT", route + "/files/" + quote(entry["path"], safe="/"), b"")
+        return self.request("POST", route + "/commit")
 
     def download(self, job_id, relative, destination):
         from .files import open_regular, validate_path
 
         validate_path(relative)
+        route = job_path(job_id)
         entry = next(
-            (
-                item
-                for item in self.request("GET", f"/jobs/{job_id}/files")
-                if item["path"] == relative
-            ),
+            (item for item in self.request("GET", route + "/files") if item["path"] == relative),
             None,
         )
         if not entry:
@@ -209,7 +213,7 @@ class JobServerClient:
             if offset:
                 headers["Range"] = f"bytes={offset}-"
             request = Request(
-                self.url + f"/api/v1/jobs/{job_id}/files/" + quote(relative, safe="/"),
+                self.url + "/api/v1" + route + "/files/" + quote(relative, safe="/"),
                 headers=headers,
             )
             with self.opener.open(request, timeout=self.timeout) as response:
