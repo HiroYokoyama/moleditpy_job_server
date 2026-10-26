@@ -49,11 +49,7 @@ class Scheduler:
                 if result["state"] not in TERMINAL:
                     continue
                 if result["reason"] == "termination_needs_recheck":
-                    with self.db.transaction() as c:
-                        c.execute(
-                            "UPDATE jobs SET reason='NEEDS_RECHECK: termination could not be verified' WHERE id=?",
-                            (job["id"],),
-                        )
+                    self._mark_recheck(job, "NEEDS_RECHECK: termination could not be verified")
                     continue
                 with self.db.transaction() as c:
                     c.execute(
@@ -99,11 +95,16 @@ class Scheduler:
                 alive = time.time() - job["started_at"] < 10
             if not alive:
                 # Keep uncertain allocations reserved. Never resubmit a claimed job.
-                with self.db.transaction() as c:
-                    c.execute(
-                        "UPDATE jobs SET reason='NEEDS_RECHECK: supervisor identity missing' WHERE id=?",
-                        (job["id"],),
-                    )
+                self._mark_recheck(job, "NEEDS_RECHECK: supervisor identity missing")
+
+    def _mark_recheck(self, job, reason):
+        if job["reason"] == reason:
+            return
+        with self.db.transaction() as c:
+            c.execute(
+                "UPDATE jobs SET reason=? WHERE id=? AND state='RUNNING' AND reason<>?",
+                (reason, job["id"], reason),
+            )
 
     def tick(self):
         self.reconcile()
