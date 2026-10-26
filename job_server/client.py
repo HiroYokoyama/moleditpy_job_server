@@ -79,19 +79,21 @@ class JobServerClient:
         self._active_auth_key = None
 
     def _configure_transport(self):
-        context = ssl.create_default_context(cafile=self._ca_file)
+        tls_context = ssl.create_default_context(cafile=self._ca_file)
         self._ca_digest = self._file_digest(self._ca_file)
         self._trust_identity = (
             str(self._ca_file.resolve()) if self._ca_file else None,
             self._ca_digest,
-            hashlib.sha256(b"".join(sorted(context.get_ca_certs(binary_form=True)))).digest(),
-            context.verify_mode,
-            context.verify_flags,
-            context.check_hostname,
-            context.minimum_version,
-            context.maximum_version,
+            hashlib.sha256(b"".join(sorted(tls_context.get_ca_certs(binary_form=True)))).digest(),
+            ssl.get_default_verify_paths() if not self._ca_file else None,
+            tls_context.verify_mode,
+            tls_context.verify_flags,
+            tls_context.check_hostname,
+            tls_context.minimum_version,
+            tls_context.maximum_version,
+            tls_context.options,
         )
-        handlers = [NoRedirect(), HTTPSHandler(context=context)]
+        handlers = [NoRedirect(), HTTPSHandler(context=tls_context)]
         if self._loopback:
             handlers.append(ProxyHandler({}))
         self.opener = build_opener(*handlers)
