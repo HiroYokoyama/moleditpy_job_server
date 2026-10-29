@@ -35,7 +35,7 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e ".[test,gui]"
       - run: python -m ruff check job_server scripts tests integration setup.py
-      - run: python -m pytest -q --timeout=120 --timeout-method=thread --cov=job_server --cov-report=term-missing --cov-report=xml:test-results/coverage.xml --junitxml=test-results/pytest.xml
+      - run: python -m pytest -q -n 4 --timeout=120 --timeout-method=thread --cov=job_server --cov-report=term-missing --cov-report=xml:test-results/coverage.xml --junitxml=test-results/pytest.xml
       - run: python -m build
       - run: python scripts/build_plugin.py
       - run: python scripts/build_job_manager.py

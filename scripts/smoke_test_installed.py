@@ -54,6 +54,24 @@ def main():
                 [executable, "--config", str(config), "serve"], stdout=log, stderr=log,
             )
             client = JobServerClient(f"http://127.0.0.1:{port}", root / "device.key", timeout=3)
+
+            def restart_server():
+                nonlocal process
+                client.request("POST", "/admin/shutdown")
+                process.wait(timeout=20)
+                assert process.returncode == 0
+                process = subprocess.Popen(
+                    [executable, "--config", str(config), "serve"], stdout=log, stderr=log,
+                )
+                deadline = time.monotonic() + 30
+                while True:
+                    try:
+                        client.request("GET", "/health", authenticated=False)
+                        return
+                    except OSError:
+                        assert process.poll() is None and time.monotonic() < deadline
+                        time.sleep(0.2)
+
             try:
                 deadline = time.monotonic() + 45
                 while True:
@@ -88,7 +106,7 @@ def main():
                 if args.manager_version:
                     from smoke_test_manager import check_manager
 
-                    check_manager(client, root, args.manager_version)
+                    check_manager(client, root, args.manager_version, restart_server)
                 client.request("POST", "/admin/shutdown")
                 process.wait(timeout=20)
                 assert process.returncode == 0

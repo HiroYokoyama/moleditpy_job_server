@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   integration:
-    name: Manager 3.4.0 / ${{ matrix.os }} / Python ${{ matrix.python }}
+    name: Latest Job Manager / ${{ matrix.os }} / Python ${{ matrix.python }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
@@ -46,7 +46,7 @@ jobs:
         shell: bash
         run: |
           python -m pip install --upgrade pip
-          python -m pip install build moleditpy-job-manager==3.4.0
+          python -m pip install --upgrade build moleditpy-job-manager
           if [ -z "$SERVER_VERSION" ]; then
             python -m build --wheel --outdir "$RUNNER_TEMP/wheels"
             python -m pip install "$RUNNER_TEMP"/wheels/*.whl
@@ -65,4 +65,5 @@ jobs:
           cp scripts/smoke_test_installed.py scripts/smoke_test_manager.py "$RUNNER_TEMP/"
           cd "$RUNNER_TEMP"
           VERSION=$(python -c 'from importlib.metadata import version; print(version("moleditpy-job-server"))')
-          python smoke_test_installed.py --version "$VERSION" --manager-version 3.4.0
+          MANAGER_VERSION=$(python -c 'from importlib.metadata import version; print(version("moleditpy-job-manager"))')
+          python smoke_test_installed.py --version "$VERSION" --manager-version "$MANAGER_VERSION"

@@ -9,7 +9,7 @@ PyPI publication reuses the distributions already attached to a GitHub Release.
 | Security | Main/dev pushes, pull requests, weekly, manual, reusable | Dependency advisories, Bandit source analysis, credential signatures in tracked source and Git history |
 | Release | `vX.Y.Z` tag push or manual on main | Validate both version declarations, rerun Tests and Security, build/validate three assets, create a GitHub release; registry registration requires explicit opt-in |
 | Publish to PyPI | Published release or manual on main | Download the released wheel/sdist, verify release checksums, exercise the installed wheel, publish with OIDC/PEP 740 attestations, attach attestations to the GitHub Release |
-| Installed Job Manager integration | Manual only | Install Job Manager 3.4.0 from PyPI alongside a built server wheel or a selected PyPI server version; test GUI/CLI/daemon integration on Ubuntu Python 3.11–3.14 and Windows/macOS 3.12 |
+| Installed Job Manager integration | Manual only | Install the latest stable Job Manager from PyPI alongside a built server wheel or a selected PyPI server version; test GUI/CLI/daemon integration on Ubuntu Python 3.11–3.14 and Windows/macOS 3.12 |
 | Update Plugin Registry | After Release, or manual with an existing release tag | Verify the release includes `job_server_X.Y.Z.zip`, send the existing `plugin_release` registry dispatch |
 
 To prepare a release, update `PLUGIN_VERSION` in `job_server/__init__.py` and
@@ -46,7 +46,7 @@ Run **Actions → Publish to PyPI → Run workflow** on **main**, supplying an e
 GitHub Release version such as **0.3.2** without `v`. The workflow uploads the exact
 released wheel and sdist, after checksum verification and an isolated wheel check
 of CLI startup, daemon/API, web UI, authentication, native execution and verified
-output download. The published Job Manager 3.4.0 is also exercised through its
+output download. The latest stable Job Manager from PyPI is also exercised through its
 standalone window and `moleditpy-job submit --wait`, including input upload,
 automatic/manual download, file preview, failure exit codes and cancellation.
 After publishing, manually run **Installed Job Manager integration** with

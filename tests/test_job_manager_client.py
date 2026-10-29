@@ -120,6 +120,7 @@ def test_real_manager_enrollment_execution_logs_and_verified_results(
     assert wait_state(backend, job, {"DONE", "FAILED", "LOST"}) == "DONE"
     assert job.rc == 0
     assert "manager-client-ok" in backend.tail(job)
+    assert "manager-client-ok" in backend.tail_file(job, "job.log")
     result = backend.fetch(job, tmp_path / "results", ["*.out"])
     assert len(result) == 1 and Path(result[0]).read_text().strip() == "verified output"
     assert backend.tail_file(job, "result.out").strip() == "verified output"

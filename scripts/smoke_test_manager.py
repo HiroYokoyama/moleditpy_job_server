@@ -10,7 +10,7 @@ from importlib.metadata import distribution
 from pathlib import Path
 
 
-def check_manager(server_client, root, expected_version):
+def check_manager(server_client, root, expected_version, restart_server):
     import job_manager
     from job_manager.api_client import JobManagerClient, discover
     from job_manager.models import HostProfile
@@ -94,6 +94,73 @@ def check_manager(server_client, root, expected_version):
             assert len(manual["files"]) == 1
             assert Path(manual["files"][0]).read_text().strip() == "manager-server-integration-ok"
 
+            def wait_state(job, expected, seconds=30):
+                deadline = time.monotonic() + seconds
+                while job["state"] != expected:
+                    assert time.monotonic() < deadline, job
+                    assert job["state"] not in {"DONE", "FAILED", "LOST", "CANCELLED"}, job
+                    time.sleep(0.2)
+                    job = api.job(job["id"])
+                return job
+
+            # Reserve the budget so two manager jobs reach the queue before pause
+            # (paused queues deliberately reject new submissions).
+            blocker = server_client.submit({
+                "name": "budget-fixture",
+                "command": "Start-Sleep -Seconds 60" if os.name == "nt" else "sleep 60",
+                "resources": {"cpus_per_task": 2, "memory_mb": 1024, "walltime_seconds": 90},
+            })
+            try:
+                deadline = time.monotonic() + 15
+                while blocker["state"] != "RUNNING":
+                    assert time.monotonic() < deadline, blocker
+                    time.sleep(0.2)
+                    blocker = server_client.request("GET", "/jobs/" + blocker["id"])
+                queued = api.submit(
+                    host=host.name, files=[str(source)], command="echo queued", memory="512M",
+                    auto_download=False,
+                )
+                queued = wait_state(queued, "PENDING")
+                resumed = api.submit(
+                    host=host.name, files=[str(source)], command="echo resumed", memory="512M",
+                    auto_download=False,
+                )
+                resumed = wait_state(resumed, "PENDING")
+                server_client.request("POST", "/admin/queue/pause", {"paused": True})
+                api.cancel(queued["id"])
+                assert api.wait(queued["id"], interval=0.2, timeout=20)["state"] == "CANCELLED"
+                server_client.request("POST", "/jobs/" + blocker["id"] + "/cancel")
+                deadline = time.monotonic() + 15
+                while server_client.request("GET", "/jobs/" + blocker["id"])["state"] != "CANCELLED":
+                    assert time.monotonic() < deadline
+                    time.sleep(0.2)
+                assert server_client.request("GET", "/jobs/" + resumed["server_job_id"])["state"] == "PENDING"
+            finally:
+                server_client.request("POST", "/admin/queue/pause", {"paused": False})
+                server_client.request("POST", "/jobs/" + blocker["id"] + "/cancel")
+            assert api.wait(resumed["id"], interval=0.2, timeout=30)["state"] == "DONE"
+
+            # The same manager session and device key must reconnect after the
+            # daemon restarts, while its detached supervisor keeps the job alive.
+            restarted = api.submit(
+                host=host.name, files=[str(source)], memory="512M", auto_download=False,
+                command="Start-Sleep -Seconds 12; Write-Output survived" if os.name == "nt"
+                else "sleep 12; echo survived",
+            )
+            restarted = wait_state(restarted, "RUNNING")
+            restart_server()
+            restarted = api.wait(restarted["id"], interval=0.2, timeout=45)
+            assert restarted["state"] == "DONE" and restarted["rc"] == 0, restarted
+            assert "survived" in api.log(restarted["id"])
+            assert sum(
+                item["id"] == restarted["server_job_id"]
+                for item in server_client.request("GET", "/jobs")
+            ) == 1
+            assert sum(
+                item["job_id"] == restarted["server_job_id"] and item["event"] == "dispatch_claimed"
+                for item in server_client.request("GET", "/admin/events")
+            ) == 1, "Restart dispatched the same job more than once"
+
             # A failing remote command must reach the manager with its actual exit code.
             failed = api.submit(
                 host=host.name, files=[str(source)], command="exit 7", memory="512M",
@@ -109,12 +176,7 @@ def check_manager(server_client, root, expected_version):
                 command="Start-Sleep -Seconds 30" if os.name == "nt" else "sleep 30",
                 memory="512M", auto_download=False,
             )
-            deadline = time.monotonic() + 30
-            while cancelled["state"] != "RUNNING":
-                assert time.monotonic() < deadline, cancelled
-                assert cancelled["state"] not in {"DONE", "FAILED", "LOST", "CANCELLED"}, cancelled
-                time.sleep(0.2)
-                cancelled = api.job(cancelled["id"])
+            cancelled = wait_state(cancelled, "RUNNING")
             api.cancel(cancelled["id"])
             cancelled = api.wait(cancelled["id"], interval=0.2, timeout=30)
             assert cancelled["state"] == "CANCELLED", cancelled
@@ -142,4 +204,5 @@ def check_manager(server_client, root, expected_version):
                     window.wait(timeout=20)
                 print(log_path.read_text(errors="replace"))
     print(f"Installed Job Manager {expected_version}: CLI -> GUI/API -> server execution, upload, "
-          "automatic/manual download, file preview, failure and cancellation passed")
+          "automatic/manual download, file preview, queue pause/resume, daemon restart, "
+          "failure and queued/running cancellation passed")

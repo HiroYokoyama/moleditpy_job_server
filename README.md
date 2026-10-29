@@ -301,7 +301,7 @@ HTTP ACLs and working directories do not isolate mutually untrusted jobs. See
 
 ```sh
 python -m pip install -e ".[test,gui]"
-python -m pytest -q
+python -m pytest -q -n 4
 python -m ruff check job_server scripts tests integration setup.py
 python scripts/run_regression.py
 python -m build
@@ -315,6 +315,7 @@ Security CI audits dependencies and source on each change and weekly.
 Windows-hosted WSL needs a machine
 with an installed distribution; its end-to-end acceptance is not claimed by native CI.
 See [verification](docs/VERIFICATION.md) for actual results and outstanding platform checks.
+See [workflow coverage](docs/TESTING.md) for automated scenarios and the manual package-integration matrix.
 See [workflows](docs/WORKFLOWS.md) for release/registry setup and
 [security audit](docs/SECURITY_AUDIT.md) for findings and remaining limitations.
 

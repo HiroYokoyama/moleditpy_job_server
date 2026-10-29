@@ -62,10 +62,11 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: |
           python -m venv "$RUNNER_TEMP/wheel-check"
-          "$RUNNER_TEMP/wheel-check/bin/python" -m pip install "dist/moleditpy_job_server-${VERSION}-py3-none-any.whl" moleditpy-job-manager==3.4.0
+          "$RUNNER_TEMP/wheel-check/bin/python" -m pip install "dist/moleditpy_job_server-${VERSION}-py3-none-any.whl" moleditpy-job-manager
           cp scripts/smoke_test_installed.py scripts/smoke_test_manager.py "$RUNNER_TEMP/"
           cd "$RUNNER_TEMP"
-          "$RUNNER_TEMP/wheel-check/bin/python" smoke_test_installed.py --version "$VERSION" --manager-version 3.4.0
+          MANAGER_VERSION=$("$RUNNER_TEMP/wheel-check/bin/python" -c 'from importlib.metadata import version; print(version("moleditpy-job-manager"))')
+          "$RUNNER_TEMP/wheel-check/bin/python" smoke_test_installed.py --version "$VERSION" --manager-version "$MANAGER_VERSION"
       - name: Publish with Trusted Publishing and PEP 740 attestations
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # release/v1
         with:
