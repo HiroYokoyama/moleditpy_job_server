@@ -4,8 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "moleditpy-job-server"
-version = "0.3.1"
+version = "0.3.2"
 description = "MoleditPy authenticated job server — LAN computational helper"
+readme = "README.md"
 requires-python = ">=3.11"
 license = "LGPL-3.0-or-later"
 dependencies = [
@@ -20,6 +21,10 @@ security = ["bandit>=1.8", "pip-audit>=2.9", "pip>=26.2"]
 
 [project.scripts]
 moleditpy-job-server = "job_server.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/HiroYokoyama/moleditpy_job_server"
+Issues = "https://github.com/HiroYokoyama/moleditpy_job_server/issues"
 
 [tool.setuptools.packages.find]
 include = ["job_server*"]

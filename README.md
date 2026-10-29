@@ -3,14 +3,14 @@
 [![Tests](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/test.yml/badge.svg)](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/test.yml)
 [![Security](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/security.yml/badge.svg)](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/security.yml)
 [![Release](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/release.yml/badge.svg)](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/release.yml)
-[![Version](https://img.shields.io/badge/version-0.3.1-blue)](pyproject.toml)
+[![Version](https://img.shields.io/badge/version-0.3.2-blue)](pyproject.toml)
 [![Downloads](https://img.shields.io/github/downloads/HiroYokoyama/moleditpy_job_server/total)](https://github.com/HiroYokoyama/moleditpy_job_server/releases)
 [![License: GPL v3](https://img.shields.io/badge/License-LGPLv3-blue.svg)](LICENSE)
 [![MoleditPy](https://img.shields.io/badge/MoleditPy-5.x-3577F7)](https://github.com/HiroYokoyama/python_molecular_editor)
 
 A LAN computational helper for MoleditPy Job Manager, with an authenticated shared
 job queue, headless daemon, MoleditPy administration plugin, and browser UI.
-Version **0.3.1**. Access is for trusted users on a private network.
+Version **0.3.2**. Access is for trusted users on a private network.
 
 > [!WARNING]
 > **Never expose Job Server to the public internet. Use localhost, a private LAN over HTTPS, or a private Tailscale tailnet only.**
@@ -27,7 +27,7 @@ Job Manager source dependency, rather than a second maintained copy.
 
 ## Use from MoleditPy (plugin workflow)
 
-Install **`job_server_0.3.1.zip`** using MoleditPy's Plugin Installer. Then open
+Install **`job_server_0.3.2.zip`** using MoleditPy's Plugin Installer. Then open
 **Plugin → Job Server → Server Dashboard…**.
 If required Python libraries are missing, opening a Job Server dialog shows their
 names and installation guidance. Install them in MoleditPy's Python environment
@@ -77,6 +77,17 @@ use whichever suits the task. Neither requires operating the headless CLI day to
 Python 3.11+; use a low-privilege OS account.
 
 ```sh
+python -m pip install moleditpy-job-server
+moleditpy-job-server init
+moleditpy-job-server create-admin
+moleditpy-job-server serve
+```
+
+The headless installation does not require Qt or MoleditPy. Install
+`moleditpy-job-server[gui]` for the optional administration dialogs.
+To install from source instead:
+
+```sh
 git clone --recurse-submodules https://github.com/HiroYokoyama/moleditpy_job_server.git
 cd moleditpy_job_server
 python -m pip install ".[gui]"
@@ -101,7 +112,7 @@ The listener starts only on explicit `serve` or GUI Start and binds **127.0.0.1*
 python scripts/build_plugin.py
 ```
 
-Install `dist/job_server_0.3.1.zip` using MoleditPy's Plugin Installer. Open
+Install `dist/job_server_0.3.2.zip` using MoleditPy's Plugin Installer. Open
 **Plugin → Job Server → Server Dashboard…**. The GUI can bootstrap the first
 administrator, start/stop/restart the daemon, pause/resume the queue, manage accounts
 and device keys, and cancel jobs. Reloading or closing the plugin does not stop the daemon.
@@ -290,7 +301,7 @@ HTTP ACLs and working directories do not isolate mutually untrusted jobs. See
 
 ```sh
 python -m pip install -e ".[test,gui]"
-python -m pytest -q
+python -m pytest -q -n 4
 python -m ruff check job_server scripts tests integration setup.py
 python scripts/run_regression.py
 python -m build
@@ -304,6 +315,7 @@ Security CI audits dependencies and source on each change and weekly.
 Windows-hosted WSL needs a machine
 with an installed distribution; its end-to-end acceptance is not claimed by native CI.
 See [verification](docs/VERIFICATION.md) for actual results and outstanding platform checks.
+See [workflow coverage](docs/TESTING.md) for automated scenarios and the manual package-integration matrix.
 See [workflows](docs/WORKFLOWS.md) for release/registry setup and
 [security audit](docs/SECURITY_AUDIT.md) for findings and remaining limitations.
 
