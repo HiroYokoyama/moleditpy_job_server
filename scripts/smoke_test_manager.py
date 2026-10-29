@@ -4,7 +4,7 @@ import json
 import os
 import shutil
 import subprocess
-import sys
+import sysconfig
 import time
 from importlib.metadata import distribution
 from pathlib import Path
@@ -51,7 +51,7 @@ def check_manager(server_client, root, expected_version):
     env.pop("MOLEDITPY_JOB_API_TOKEN", None)
 
     def executable(name):
-        value = shutil.which(name, path=str(Path(sys.executable).parent))
+        value = shutil.which(name, path=sysconfig.get_path("scripts"))
         assert value, f"Missing installed command {name}"
         return value
 

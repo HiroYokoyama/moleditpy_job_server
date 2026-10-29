@@ -5,7 +5,7 @@ import os
 import shutil
 import socket
 import subprocess
-import sys
+import sysconfig
 import tempfile
 import time
 from importlib.metadata import distribution
@@ -30,7 +30,7 @@ def main():
     assert Path(job_server.__file__).resolve().is_relative_to(
         Path(package.locate_file("job_server")).resolve()
     ), "Imported the checkout instead of the installed wheel"
-    executable = shutil.which("moleditpy-job-server", path=str(Path(sys.executable).parent))
+    executable = shutil.which("moleditpy-job-server", path=sysconfig.get_path("scripts"))
     assert executable, "Missing console entry point"
     subprocess.run([executable, "--help"], check=True, timeout=15)
     with tempfile.TemporaryDirectory(prefix="job-server-wheel-") as temporary:
