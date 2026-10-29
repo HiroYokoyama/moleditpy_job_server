@@ -54,21 +54,33 @@ def start(wrapper, log, windows):
         raise
 
 
+def _signal_group(process, signum):
+    try:
+        os.killpg(process.pid, signum)
+    except PermissionError:
+        # Darwin reports EPERM for a group containing only an unreaped zombie.
+        # Reap our leader and retry; a real permission failure must still escape.
+        if process.poll() is None:
+            raise
+        os.killpg(process.pid, signum)
+
+
 def terminate(process, containment, grace=1):
     if containment:
         containment.terminate()
     else:
         try:
-            os.killpg(process.pid, signal.SIGTERM)
+            _signal_group(process, signal.SIGTERM)
         except ProcessLookupError:
             return
         deadline = time.monotonic() + grace
         # The leader may exit first while a child ignores TERM. Always kill
         # the group after the grace period, even when Popen has reaped its leader.
         while time.monotonic() < deadline:
+            process.poll()
             time.sleep(0.05)
         try:
-            os.killpg(process.pid, signal.SIGKILL)
+            _signal_group(process, signal.SIGKILL)
         except ProcessLookupError:
             pass
     process.wait(timeout=10)
