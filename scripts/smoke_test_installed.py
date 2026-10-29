@@ -5,6 +5,7 @@ import os
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 from importlib.metadata import distribution
@@ -15,6 +16,7 @@ from urllib.request import ProxyHandler, build_opener
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", required=True)
+    parser.add_argument("--manager-version", help="Also exercise the installed Job Manager GUI/CLI")
     args = parser.parse_args()
     package = distribution("moleditpy-job-server")
     assert package.version == args.version
@@ -28,7 +30,7 @@ def main():
     assert Path(job_server.__file__).resolve().is_relative_to(
         Path(package.locate_file("job_server")).resolve()
     ), "Imported the checkout instead of the installed wheel"
-    executable = shutil.which("moleditpy-job-server")
+    executable = shutil.which("moleditpy-job-server", path=str(Path(sys.executable).parent))
     assert executable, "Missing console entry point"
     subprocess.run([executable, "--help"], check=True, timeout=15)
     with tempfile.TemporaryDirectory(prefix="job-server-wheel-") as temporary:
@@ -83,6 +85,10 @@ def main():
                 destination = root / "download.out"
                 client.download(job["id"], "result.out", destination)
                 assert destination.read_text().strip() == "wheel-smoke-ok"
+                if args.manager_version:
+                    from smoke_test_manager import check_manager
+
+                    check_manager(client, root, args.manager_version)
                 client.request("POST", "/admin/shutdown")
                 process.wait(timeout=20)
                 assert process.returncode == 0

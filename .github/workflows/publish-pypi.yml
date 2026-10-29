@@ -28,6 +28,8 @@ jobs:
     permissions:
       contents: write
       id-token: write
+    outputs:
+      version: ${{ steps.distributions.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -36,6 +38,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Download the existing release distributions
+        id: distributions
         env:
           GH_TOKEN: ${{ github.token }}
           INPUT_VERSION: ${{ inputs.version }}
@@ -45,6 +48,7 @@ jobs:
           if [ "$EVENT_NAME" = release ]; then VERSION="${RELEASE_TAG#v}"; else VERSION="$INPUT_VERSION"; fi
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+((a|b|rc)[0-9]+)?$ ]] || exit 1
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           mkdir -p dist
           gh release download "v$VERSION" --dir dist \
             --pattern "moleditpy_job_server-${VERSION}-py3-none-any.whl" \
@@ -53,13 +57,19 @@ jobs:
           test -s "dist/moleditpy_job_server-${VERSION}-py3-none-any.whl"
           test -s "dist/moleditpy_job_server-${VERSION}.tar.gz"
           mv dist/SHA256SUMS "$RUNNER_TEMP/release-SHA256SUMS"
-      - name: Check the installed release wheel
+      - name: Install Qt system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libopengl0
+      - name: Check the release wheel with the published Job Manager
+        env:
+          QT_QPA_PLATFORM: offscreen
         run: |
           python -m venv "$RUNNER_TEMP/wheel-check"
-          "$RUNNER_TEMP/wheel-check/bin/python" -m pip install "dist/moleditpy_job_server-${VERSION}-py3-none-any.whl"
-          cp scripts/smoke_test_installed.py "$RUNNER_TEMP/"
+          "$RUNNER_TEMP/wheel-check/bin/python" -m pip install "dist/moleditpy_job_server-${VERSION}-py3-none-any.whl" moleditpy-job-manager==3.4.0
+          cp scripts/smoke_test_installed.py scripts/smoke_test_manager.py "$RUNNER_TEMP/"
           cd "$RUNNER_TEMP"
-          "$RUNNER_TEMP/wheel-check/bin/python" smoke_test_installed.py --version "$VERSION"
+          "$RUNNER_TEMP/wheel-check/bin/python" smoke_test_installed.py --version "$VERSION" --manager-version 3.4.0
       - name: Publish with Trusted Publishing and PEP 740 attestations
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # release/v1
         with:
@@ -71,3 +81,8 @@ jobs:
           test -s "dist/moleditpy_job_server-${VERSION}-py3-none-any.whl.publish.attestation"
           test -s "dist/moleditpy_job_server-${VERSION}.tar.gz.publish.attestation"
           gh release upload "v$VERSION" dist/*.publish.attestation --clobber
+  test-published:
+    needs: publish
+    uses: ./.github/workflows/manager-integration.yml
+    with:
+      server-version: ${{ needs.publish.outputs.version }}

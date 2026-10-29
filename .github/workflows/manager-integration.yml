@@ -1,0 +1,76 @@
+name: Installed Job Manager integration
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      server-version:
+        description: PyPI Job Server version (blank builds the checkout)
+        type: string
+        default: ''
+  workflow_call:
+    inputs:
+      server-version:
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    name: Manager 3.4.0 / ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python: ['3.11', '3.12', '3.13', '3.14']
+        include:
+          - os: windows-latest
+            python: '3.12'
+          - os: macos-latest
+            python: '3.12'
+    env:
+      QT_QPA_PLATFORM: offscreen
+      SERVER_VERSION: ${{ inputs.server-version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install Qt system libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libopengl0
+      - name: Install the actual distributions
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build moleditpy-job-manager==3.4.0
+          if [ -z "$SERVER_VERSION" ]; then
+            python -m build --wheel --outdir "$RUNNER_TEMP/wheels"
+            python -m pip install "$RUNNER_TEMP"/wheels/*.whl
+          else
+            [[ "$SERVER_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+((a|b|rc)[0-9]+)?$ ]] || exit 1
+            for attempt in 1 2 3 4 5; do
+              if python -m pip install --no-cache-dir "moleditpy-job-server==$SERVER_VERSION"; then break; fi
+              if [ "$attempt" = 5 ]; then exit 1; fi
+              sleep 15
+            done
+          fi
+          python -m pip check
+      - name: GUI, CLI and daemon integration outside the checkout
+        shell: bash
+        run: |
+          cp scripts/smoke_test_installed.py scripts/smoke_test_manager.py "$RUNNER_TEMP/"
+          cd "$RUNNER_TEMP"
+          VERSION=$(python -c 'from importlib.metadata import version; print(version("moleditpy-job-server"))')
+          python smoke_test_installed.py --version "$VERSION" --manager-version 3.4.0

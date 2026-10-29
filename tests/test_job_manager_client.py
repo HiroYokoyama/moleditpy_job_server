@@ -155,3 +155,52 @@ def test_real_manager_results_obey_owner_acl(manager_types, live_server, tmp_pat
     with pytest.raises(RuntimeError) as error:
         other.files(job)
     assert error.value.status == 404
+
+
+def test_real_manager_upload_quoting_and_retry_execute_only_once(
+    manager_types, live_server, tmp_path
+):
+    host, backend, Job, Preset = client_for(manager_types, live_server, tmp_path)
+    source = tmp_path / "fixture ' [1] with spaces.inp"
+    source.write_text("uploaded-input-ok\n")
+    command = (
+        "Get-Content -LiteralPath {input} | Set-Content result.out -Encoding ascii"
+        if os.name == "nt" else "cat {input} > result.out"
+    )
+    preset = Preset(command_template=command, memory="512M", fetch_globs=["*.out"])
+    job = Job(name="retry-upload", scheduler=host.scheduler)
+    backend.submit(preset, job, [str(source)])
+    original_id = job.server_job_id
+    backend.submit(preset, job, [str(source)])
+    assert job.server_job_id == original_id
+    assert wait_state(backend, job, {"DONE", "FAILED", "LOST"}) == "DONE"
+    _, app = live_server
+    assert app.state.db.one("SELECT COUNT(*) AS count FROM jobs")["count"] == 1
+    downloaded = backend.fetch(job, tmp_path / "download", ["*.out"])
+    assert len(downloaded) == 1
+    assert Path(downloaded[0]).read_text().strip() == "uploaded-input-ok"
+
+
+@pytest.mark.parametrize("exit_code,chain_any", [(0, False), (7, True), (7, False)])
+def test_real_manager_dependency_success_failure_and_chain_any(
+    manager_types, live_server, tmp_path, exit_code, chain_any
+):
+    host, backend, Job, Preset = client_for(manager_types, live_server, tmp_path)
+    first = Job(name="predecessor", scheduler=host.scheduler)
+    backend.submit(Preset(command_template=f"exit {exit_code}", memory="512M"), first, [])
+    second = Job(name="dependent", scheduler=host.scheduler, chain_any=chain_any)
+    backend.submit(
+        Preset(command_template="echo dependent", memory="512M"), second, [],
+        after_id=first.server_job_id,
+    )
+    expected = "DONE" if exit_code == 0 else "FAILED"
+    assert wait_state(backend, first, {"DONE", "FAILED", "LOST"}) == expected
+    assert first.rc == exit_code
+    if exit_code == 0 or chain_any:
+        assert wait_state(backend, second, {"DONE", "FAILED", "LOST"}) == "DONE"
+        assert "dependent" in backend.tail(second)
+    else:
+        remote = backend.client.request("GET", "/jobs/" + second.server_job_id)
+        assert remote["state"] == "PENDING" and remote["display_state"] == "BLOCKED"
+        backend.cancel(second)
+        assert wait_state(backend, second, {"CANCELLED"}) == "CANCELLED"
