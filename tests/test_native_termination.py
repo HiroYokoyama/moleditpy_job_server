@@ -34,6 +34,7 @@ def test_permission_error_after_reaping_still_propagates(monkeypatch):
 
 
 def test_live_descendants_still_receive_kill_after_leader_exits(monkeypatch):
+    monkeypatch.setattr(signal, "SIGKILL", 9, raising=False)
     process = SimpleNamespace(pid=12345, poll=Mock(return_value=0), wait=Mock())
     killpg = Mock()
     monkeypatch.setattr(native.os, "killpg", killpg, raising=False)
