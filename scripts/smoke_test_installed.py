@@ -92,6 +92,14 @@ def main():
                 client.request("POST", "/admin/shutdown")
                 process.wait(timeout=20)
                 assert process.returncode == 0
+            except Exception:
+                # CI fixtures contain only synthetic jobs. Preserve supervisor evidence
+                # before TemporaryDirectory removes it, including on another OS.
+                for pattern in ("logs/*.log", "control/*/*.log", "control/*/done.json", "jobs/*/work/job.log"):
+                    for path in settings.root.glob(pattern):
+                        print(f"--- fixture {path.relative_to(settings.root)} ---")
+                        print(path.read_text(errors="replace")[-12000:])
+                raise
             finally:
                 if process.poll() is None:
                     process.terminate()

@@ -126,6 +126,11 @@ def check_manager(server_client, root, expected_version):
                 assert time.monotonic() < deadline, remote
                 time.sleep(0.2)
             assert window.poll() is None
+        except Exception:
+            if api is not None and window.poll() is None:
+                print("Fixture manager jobs:", api.jobs())
+            print("Fixture daemon jobs:", server_client.request("GET", "/jobs"))
+            raise
         finally:
             try:
                 if api is not None and window.poll() is None:
