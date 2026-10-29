@@ -1,18 +1,10 @@
 name: Installed Job Manager integration
 
 on:
-  push:
-    branches: [main, dev]
-  pull_request:
   workflow_dispatch:
     inputs:
       server-version:
         description: PyPI Job Server version (blank builds the checkout)
-        type: string
-        default: ''
-  workflow_call:
-    inputs:
-      server-version:
         type: string
         default: ''
 

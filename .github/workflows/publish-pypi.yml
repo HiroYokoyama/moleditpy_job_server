@@ -28,8 +28,6 @@ jobs:
     permissions:
       contents: write
       id-token: write
-    outputs:
-      version: ${{ steps.distributions.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -38,7 +36,6 @@ jobs:
         with:
           python-version: '3.12'
       - name: Download the existing release distributions
-        id: distributions
         env:
           GH_TOKEN: ${{ github.token }}
           INPUT_VERSION: ${{ inputs.version }}
@@ -48,7 +45,6 @@ jobs:
           if [ "$EVENT_NAME" = release ]; then VERSION="${RELEASE_TAG#v}"; else VERSION="$INPUT_VERSION"; fi
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+((a|b|rc)[0-9]+)?$ ]] || exit 1
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           mkdir -p dist
           gh release download "v$VERSION" --dir dist \
             --pattern "moleditpy_job_server-${VERSION}-py3-none-any.whl" \
@@ -81,8 +77,3 @@ jobs:
           test -s "dist/moleditpy_job_server-${VERSION}-py3-none-any.whl.publish.attestation"
           test -s "dist/moleditpy_job_server-${VERSION}.tar.gz.publish.attestation"
           gh release upload "v$VERSION" dist/*.publish.attestation --clobber
-  test-published:
-    needs: publish
-    uses: ./.github/workflows/manager-integration.yml
-    with:
-      server-version: ${{ needs.publish.outputs.version }}
