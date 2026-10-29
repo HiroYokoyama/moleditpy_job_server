@@ -1,0 +1,73 @@
+name: Publish to PyPI
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Existing GitHub Release version without leading v
+        required: true
+        type: string
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-pypi
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.event_name == 'release' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: pypi
+      url: https://pypi.org/p/moleditpy-job-server
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Download the existing release distributions
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_VERSION: ${{ inputs.version }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT_NAME" = release ]; then VERSION="${RELEASE_TAG#v}"; else VERSION="$INPUT_VERSION"; fi
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+((a|b|rc)[0-9]+)?$ ]] || exit 1
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          mkdir -p dist
+          gh release download "v$VERSION" --dir dist \
+            --pattern "moleditpy_job_server-${VERSION}-py3-none-any.whl" \
+            --pattern "moleditpy_job_server-${VERSION}.tar.gz" --pattern SHA256SUMS
+          (cd dist && sha256sum --check --ignore-missing SHA256SUMS)
+          test -s "dist/moleditpy_job_server-${VERSION}-py3-none-any.whl"
+          test -s "dist/moleditpy_job_server-${VERSION}.tar.gz"
+          mv dist/SHA256SUMS "$RUNNER_TEMP/release-SHA256SUMS"
+      - name: Check the installed release wheel
+        run: |
+          python -m venv "$RUNNER_TEMP/wheel-check"
+          "$RUNNER_TEMP/wheel-check/bin/python" -m pip install "dist/moleditpy_job_server-${VERSION}-py3-none-any.whl"
+          cp scripts/smoke_test_installed.py "$RUNNER_TEMP/"
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/wheel-check/bin/python" smoke_test_installed.py --version "$VERSION"
+      - name: Publish with Trusted Publishing and PEP 740 attestations
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # release/v1
+        with:
+          attestations: true
+      - name: Attach attestations to the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test -s "dist/moleditpy_job_server-${VERSION}-py3-none-any.whl.publish.attestation"
+          test -s "dist/moleditpy_job_server-${VERSION}.tar.gz.publish.attestation"
+          gh release upload "v$VERSION" dist/*.publish.attestation --clobber
