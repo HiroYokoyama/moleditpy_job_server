@@ -49,7 +49,8 @@ def test_refresh_displays_names_status_and_local_access_time(dashboard, monkeypa
     timestamp = 1700000000
     replies = {
         "/health": {"server_version": "fixture"},
-        "/system/resources": {},
+        "/system/resources": {"running": 1, "pending": 2, "reserved_cpus": 2, "cpus": 8,
+                              "reserved_memory_mb": 1024, "memory_mb": 4096, "paused": False},
         "/admin/jobs": [
             {
                 "id": "job-id",
@@ -67,6 +68,12 @@ def test_refresh_displays_names_status_and_local_access_time(dashboard, monkeypa
     monkeypatch.setattr(dashboard, "task", lambda call, display, **kwargs: display(call()))
     dashboard.refresh()
     assert dashboard.jobs.item(0, 1).text() == "alice"
+    assert dashboard.metric_values["cpu"].text() == "2 / 8"
+    assert dashboard.metric_values["memory"].text() == "1024 / 4096 MB"
+    assert dashboard.metric_values["running"].text() == "1"
+    dashboard.jobs.setCurrentCell(0, 0)
+    assert dashboard.selected(dashboard.jobs) == "job-id"
+    assert dashboard.jobs.item(0, 0).text() == "test"
     assert dashboard.users.item(0, 0).text() == "alice"
     assert dashboard.users.item(0, 2).text() == "Enabled"
     assert dashboard.devices.item(0, 1).text() == "alice"
@@ -80,6 +87,10 @@ def test_refresh_displays_names_status_and_local_access_time(dashboard, monkeypa
     dashboard.refresh()
     assert dashboard.users.item(0, 2).text() == "Disabled"
     assert dashboard.devices.item(0, 2).text() == "Revoked"
+    dashboard.client.key_path.unlink()
+    dashboard.refresh()
+    assert dashboard.metric_values["cpu"].text() == "—"
+    assert dashboard.jobs.rowCount() == dashboard.users.rowCount() == dashboard.devices.rowCount() == 0
 
 
 def test_refresh_preserves_selected_identity_after_row_reordering(dashboard):
@@ -136,3 +147,61 @@ def test_invalid_settings_do_not_change_saved_or_active_configuration(dashboard)
     assert dashboard.settings.port != 8888
     assert dashboard.settings.public_url == ""
     assert "HTTPS" in dashboard.message.text()
+
+
+def test_queue_actions_use_stable_job_id_and_explicit_force_confirmation(dashboard, monkeypatch):
+    from PySide6.QtWidgets import QInputDialog, QMessageBox
+
+    dashboard.client.key_path.parent.mkdir(parents=True, exist_ok=True)
+    dashboard.client.key_path.write_text("synthetic placeholder")
+    dashboard.fill(dashboard.jobs, [("friendly name", "alice", "PENDING", 0, "job-id")], ["job-id"])
+    dashboard.jobs.setCurrentCell(0, 0)
+    dashboard.job_records = {"job-id": {"state": "PENDING", "priority": 0, "force_run": False}}
+    dashboard._update_job_actions()
+    assert dashboard.priority_action.isEnabled() and dashboard.force_action.isEnabled()
+    assert not dashboard.unforce_action.isEnabled()
+    calls, confirmations = [], []
+    monkeypatch.setattr(QInputDialog, "getInt", lambda *args: (7, True))
+    monkeypatch.setattr(dashboard.client, "request", lambda *args: calls.append(args))
+    monkeypatch.setattr(dashboard, "task", lambda call, *args, **kwargs: call())
+
+    def confirm(*args):
+        confirmations.append(args[2])
+        return QMessageBox.StandardButton.Yes
+
+    monkeypatch.setattr(QMessageBox, "question", confirm)
+    dashboard.set_priority()
+    dashboard.force_run()
+    dashboard.force_run(False)
+    assert calls == [
+        ("POST", "/admin/jobs/job-id/priority", {"priority": 7}),
+        ("POST", "/admin/jobs/job-id/force-run", {"force_run": True}),
+        ("POST", "/admin/jobs/job-id/force-run", {"force_run": False}),
+    ]
+    assert len(confirmations) == 1
+    assert all(word in confirmations[0] for word in ("paused", "CPU", "memory", "Dependencies"))
+    dashboard.job_records["job-id"]["state"] = "RUNNING"
+    dashboard._update_job_actions()
+    assert not dashboard.priority_action.isEnabled() and not dashboard.force_action.isEnabled()
+
+
+def test_queue_force_cancel_and_priority_dialog_cancel_make_no_request(dashboard, monkeypatch):
+    from PySide6.QtWidgets import QInputDialog, QMessageBox
+
+    monkeypatch.setattr(dashboard, "require_admin_registration", lambda: True)
+    dashboard.fill(dashboard.jobs, [("name", "alice", "PENDING", 0, "job-id")], ["job-id"])
+    dashboard.jobs.setCurrentCell(0, 0)
+    monkeypatch.setattr(QInputDialog, "getInt", lambda *args: (7, False))
+    monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.StandardButton.No)
+    monkeypatch.setattr(dashboard.client, "request", lambda *args: pytest.fail("Cancelled action made a request"))
+    dashboard.set_priority()
+    dashboard.force_run()
+
+
+def test_refresh_preserves_user_column_widths(dashboard):
+    dashboard.jobs.setColumnWidth(1, 175)
+    rows = [("long name" * 20, "alice", "PENDING", 0, "job-id")]
+    dashboard.fill(dashboard.jobs, rows, ["job-id"])
+    dashboard.fill(dashboard.jobs, rows, ["job-id"])
+    assert dashboard.jobs.columnWidth(1) == 175
+    assert not dashboard.jobs.wordWrap()

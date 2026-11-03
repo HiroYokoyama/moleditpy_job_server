@@ -1,6 +1,5 @@
 
 from ._qt_callbacks import connect_queued
-import json
 import os
 import subprocess
 import time
@@ -16,13 +15,18 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
+    QGroupBox,
+    QHeaderView,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QInputDialog,
     QMessageBox,
     QMenuBar,
     QPushButton,
     QSpinBox,
+    QSizePolicy,
+    QAbstractItemView,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -69,6 +73,9 @@ class Dashboard(QDialog):
         self.busy = False
         self.setup_dialog = None
         self._setup_checked = False
+        self.detail_dialog = None
+        self.job_records = {}
+        self.usernames = {}
         layout = QVBoxLayout(self)
         self.menu_bar = QMenuBar(self)
         layout.setMenuBar(self.menu_bar)
@@ -125,6 +132,11 @@ class Dashboard(QDialog):
         queue = self.menu_bar.addMenu("Queue")
         action(queue, "Pause queue", lambda: self.pause(True))
         action(queue, "Resume queue", lambda: self.pause(False))
+        queue.addSeparator()
+        self.detail_action = action(queue, "Job details...", self.open_job_details)
+        self.priority_action = action(queue, "Set priority...", self.set_priority)
+        self.force_action = action(queue, "Force run selected job...", lambda: self.force_run(True))
+        self.unforce_action = action(queue, "Cancel force-run request", lambda: self.force_run(False))
         action(queue, "Cancel selected job", self.cancel)
 
     def open_logs(self):
@@ -137,12 +149,53 @@ class Dashboard(QDialog):
     def _dashboard(self):
         page = QWidget()
         layout = QVBoxLayout(page)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(14)
+        header = QHBoxLayout()
+        title = QLabel("Shared job queue")
+        font = title.font()
+        font.setPointSize(font.pointSize() + 4)
+        font.setBold(True)
+        title.setFont(font)
+        header.addWidget(title)
+        header.addStretch()
+        self.connection_status = QLabel("Not connected")
+        header.addWidget(self.connection_status)
+        layout.addLayout(header)
         self.resources = QLabel("Sign in to view resources and jobs.")
         self.resources.setWordWrap(True)
         layout.addWidget(self.resources)
-        self.jobs = QTableWidget(0, 4)
-        self.jobs.setHorizontalHeaderLabels(["ID", "Owner", "Name", "State"])
+        metrics = QHBoxLayout()
+        metrics.setSpacing(12)
+        self.metric_values = {}
+        for key, title in (("running", "Running jobs"), ("pending", "Waiting jobs"),
+                           ("cpu", "CPU reserved / budget"), ("memory", "Memory reserved / budget")):
+            card = QGroupBox(title)
+            card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+            content = QVBoxLayout(card)
+            value = QLabel("—")
+            font = value.font()
+            font.setPointSize(font.pointSize() + 6)
+            font.setBold(True)
+            value.setFont(font)
+            content.addWidget(value)
+            self.metric_values[key] = value
+            metrics.addWidget(card, 1)
+        layout.addLayout(metrics)
+        layout.addWidget(QLabel("Jobs — select a row, then use the Queue menu for actions."))
+        self.jobs = QTableWidget(0, 5)
+        self.jobs.setHorizontalHeaderLabels(["Name", "Owner", "State", "Priority", "Job ID"])
         self.jobs.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.jobs.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.jobs.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.jobs.verticalHeader().setVisible(False)
+        self.jobs.verticalHeader().setDefaultSectionSize(34)
+        self._table_layout(self.jobs, (220, 110, 110, 70, 270))
+        self.jobs.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.jobs.setShowGrid(False)
+        self.jobs.itemSelectionChanged.connect(self._update_job_actions)
+        self.jobs.cellDoubleClicked.connect(lambda *_: self.open_job_details())
+        self._update_job_actions()
         layout.addWidget(self.jobs)
         self.tabs.addTab(page, "Dashboard")
 
@@ -152,12 +205,23 @@ class Dashboard(QDialog):
         self.users = QTableWidget(0, 3)
         self.users.setHorizontalHeaderLabels(["Username", "Role", "Status"])
         self.users.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._table_layout(self.users, (250, 120, 120))
         layout.addWidget(self.users)
         self.devices = QTableWidget(0, 4)
         self.devices.setHorizontalHeaderLabels(["Device ID", "Username", "Status", "Last access (local)"])
         self.devices.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._table_layout(self.devices, (270, 130, 100, 230))
         layout.addWidget(self.devices)
         self.tabs.addTab(page, "Users & Devices")
+
+    @staticmethod
+    def _table_layout(table, widths):
+        table.setWordWrap(False)
+        table.horizontalHeader().setHighlightSections(False)
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        table.horizontalHeader().setStretchLastSection(True)
+        for column, width in enumerate(widths):
+            table.horizontalHeader().resizeSection(column, width)
 
     def _settings(self):
         page = QWidget()
@@ -264,20 +328,40 @@ class Dashboard(QDialog):
             }
 
         def display(data):
+            self.connection_status.setText("Server online · " + data["health"]["server_version"])
             self.message.setText(
                 f"Running at {self.client.url} — {data['health']['server_version']}"
             )
             if "resources" not in data:
+                self._clear_dashboard()
+                self.resources.setText("Sign in through Account > Sign in to view resources and jobs.")
                 return
-            self.resources.setText(json.dumps(data["resources"]))
+            resource = data["resources"]
+            self.resources.setText(
+                ("Queue paused" if resource.get("paused") else "Queue accepting jobs")
+                + " · CPU and memory reservations are advisory."
+            )
+            for key in ("running", "pending"):
+                self.metric_values[key].setText(str(resource.get(key, "—")))
+            self.metric_values["cpu"].setText(
+                f"{resource.get('reserved_cpus', '—')} / {resource.get('cpus', '—')}"
+            )
+            self.metric_values["memory"].setText(
+                f"{resource.get('reserved_memory_mb', '—')} / {resource.get('memory_mb', '—')} MB"
+            )
             usernames = {u["id"]: u["username"] for u in data["users"]}
+            self.usernames = usernames
+            self.job_records = {job["id"]: job for job in data["jobs"]}
             self.fill(
                 self.jobs,
                 [
-                    (j["id"], usernames.get(j["owner_id"], j["owner_id"]), j["spec"]["name"], j["display_state"])
+                    (j["spec"]["name"], usernames.get(j["owner_id"], j["owner_id"]),
+                     j["display_state"] + (" · force requested" if j.get("force_run") else ""),
+                     j.get("priority", 0), j["id"])
                     for j in data["jobs"]
-                ],
+                ], identifiers=[j["id"] for j in data["jobs"]],
             )
+            self._update_job_actions()
             self.fill(
                 self.users,
                 [(u["username"], u["role"], "Enabled" if u["enabled"] else "Disabled") for u in data["users"]],
@@ -292,7 +376,23 @@ class Dashboard(QDialog):
                 ],
             )
 
-        self.task(work, display, interactive=False)
+        def unavailable(_):
+            self.connection_status.setText("Connection unavailable")
+            self.resources.setText("Check Server > Start or Account > Sign in.")
+            self._clear_dashboard()
+
+        self.task(work, display, interactive=False, on_error=unavailable)
+
+    def _clear_dashboard(self):
+        self.job_records = {}
+        self.usernames = {}
+        for value in self.metric_values.values():
+            value.setText("—")
+        for table in (self.jobs, self.users, self.devices):
+            self.fill(table, [])
+        self._update_job_actions()
+        if self.detail_dialog is not None:
+            self.detail_dialog.invalidate("Connection unavailable. Sign in and refresh to view this job.")
 
     @staticmethod
     def timestamp(value):
@@ -326,7 +426,6 @@ class Dashboard(QDialog):
                 if selected is not None and table.item(row, 0).data(Qt.ItemDataRole.UserRole) == selected:
                     table.setCurrentCell(row, 0)
                     break
-            table.resizeColumnsToContents()
         finally:
             table.setSortingEnabled(sorting)
             table.blockSignals(signals)
@@ -349,21 +448,9 @@ class Dashboard(QDialog):
             return False
 
     def require_own_daemon(self):
-        """Refuse a listener that is not the daemon holding this data directory's lock.
+        from ..daemon_ownership import verify_local_daemon
 
-        Anything can answer /health on the loopback port, including a process of
-        another local account that bound it first; it must never receive a password.
-        """
-        from ..instance import InstanceLock
-
-        try:
-            InstanceLock(self.settings.root).acquire().release()
-        except RuntimeError:
-            return
-        raise RuntimeError(
-            f"Port {self.settings.port} is answered by a process that is not this Job Server; "
-            "stop it or choose another port"
-        )
+        verify_local_daemon(self.settings.root, self.settings.port)
 
     def _start_daemon(self):
         url = f"http://127.0.0.1:{self.settings.port}"
@@ -622,6 +709,59 @@ class Dashboard(QDialog):
         identifier = item.data(Qt.ItemDataRole.UserRole)
         return identifier if identifier is not None else item.text()
 
+    def _update_job_actions(self):
+        identifier = self.selected(self.jobs)
+        record = self.job_records.get(identifier, {})
+        pending = record.get("state", record.get("display_state")) in {"PENDING", "QUEUED", "BLOCKED"}
+        self.detail_action.setEnabled(identifier is not None)
+        self.priority_action.setEnabled(pending)
+        self.force_action.setEnabled(pending and not record.get("force_run", False))
+        self.unforce_action.setEnabled(pending and record.get("force_run", False))
+
+    def open_job_details(self):
+        identifier = self.selected(self.jobs)
+        if identifier is None or not self.require_admin_registration():
+            return
+        from .job_detail import JobDetailDialog
+
+        if self.detail_dialog is None:
+            self.detail_dialog = JobDetailDialog(self)
+        record = self.job_records.get(identifier, {})
+        owner = self.usernames.get(record.get("owner_id"), record.get("owner_id", "—"))
+        self.detail_dialog.show_job(identifier, owner)
+
+    def set_priority(self):
+        identifier = self.selected(self.jobs)
+        if identifier is None or not self.require_admin_registration():
+            return
+        value, accepted = QInputDialog.getInt(
+            self, "Set job priority", "Higher numbers run first; equal priorities keep submission order.",
+            self.job_records.get(identifier, {}).get("priority", 0), -1000, 1000,
+        )
+        if accepted:
+            self.task(
+                lambda: self.client.request("POST", f"/admin/jobs/{identifier}/priority", {"priority": value}),
+                lambda _: self.refresh(),
+                success_message="Job priority updated.",
+            )
+
+    def force_run(self, value=True):
+        identifier = self.selected(self.jobs)
+        if identifier is None or not self.require_admin_registration():
+            return
+        if value and QMessageBox.question(
+            self, "Force run selected job",
+            "Start this waiting job ahead of queue order, even while paused, and override CPU, "
+            "memory and active-job limits? Existing jobs keep running. Dependencies still apply. "
+            "Overcommitting memory can cause jobs to fail.",
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        self.task(
+            lambda: self.client.request("POST", f"/admin/jobs/{identifier}/force-run", {"force_run": value}),
+            lambda _: self.refresh(),
+            success_message="Force-run requested; dependencies still apply." if value else "Force-run request cancelled.",
+        )
+
     def cancel(self):
         job_id = self.selected(self.jobs)
         if job_id:
@@ -660,6 +800,8 @@ class Dashboard(QDialog):
             )
 
     def closeEvent(self, event):
+        if self.detail_dialog is not None:
+            self.detail_dialog.close()
         if self.setup_dialog is not None:
             self.setup_dialog.close()
         self.timer.stop()
