@@ -94,5 +94,10 @@ def test_workflows_validate_before_publication_and_do_not_execute_event_inputs()
         "(github.event_name == 'workflow_dispatch' && inputs.register) || "
         "(github.event_name == 'push' && vars.REGISTER_PLUGIN == 'true')"
     )
+    # PyPI starts by dispatch: a GITHUB_TOKEN release never fires publish-pypi.yml itself.
+    pypi = release["jobs"]["pypi"]
+    assert set(pypi["needs"]) == {"validate", "release"}
+    assert pypi["permissions"] == {"actions": "write"}
+    assert "gh workflow run publish-pypi.yml" in pypi["steps"][0]["run"]
     # Syntax-check the validation script independently of imports.
     ast.parse((ROOT / "scripts/verify_release.py").read_text("utf-8"))

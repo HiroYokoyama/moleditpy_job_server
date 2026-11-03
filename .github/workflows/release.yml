@@ -87,6 +87,20 @@ jobs:
             "dist/moleditpy_job_server-${VERSION}-py3-none-any.whl" \
             "dist/moleditpy_job_server-${VERSION}.tar.gz" dist/SHA256SUMS
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+  pypi:
+    needs: [validate, release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # A release created with GITHUB_TOKEN does not fire publish-pypi.yml's
+    # release trigger, but a workflow_dispatch from GITHUB_TOKEN is allowed.
+    permissions:
+      actions: write
+    steps:
+      - name: Start the PyPI publication workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: gh workflow run publish-pypi.yml --repo "$GITHUB_REPOSITORY" --ref main -f version="$VERSION"
   registry:
     needs: release
     # Registration requires an explicit manual choice or repository opt-in.
