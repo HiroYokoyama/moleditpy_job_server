@@ -72,6 +72,10 @@ def test_web_assets_and_security_headers(client):
     response = client.get("/")
     assert response.status_code == 200
     assert "Submit a job" in response.text
+    assert '<body class="signed-out">' in response.text
+    assert '<script src="/assets/app.js" defer>' in response.text
+    assert 'type="module"' not in response.text
+    assert 'id="login-form" method="dialog"' in response.text
     assert "frame-ancestors 'none'" in response.headers["Content-Security-Policy"]
     assert client.get("/assets/app.js").status_code == 200
     assert client.get("/assets/app.css").status_code == 200
@@ -81,6 +85,15 @@ def test_web_assets_and_security_headers(client):
     assert (
         client.get("/api/v1/health", headers={"Origin": "https://evil.example"}).status_code == 403
     )
+
+
+def test_tailnet_origin_is_permitted_only_after_explicit_configuration(client):
+    origin = "https://compute.example.ts.net"
+    assert client.get("/assets/app.js", headers={"Origin": origin}).status_code == 403
+    client.app.state.settings.public_url = origin
+    assert client.get("/assets/app.js", headers={"Origin": origin}).status_code == 200
+    assert client.get("/api/v1/health", headers={"Origin": origin}).status_code == 200
+    assert client.get("/api/v1/health", headers={"Origin": "https://other.example.ts.net"}).status_code == 403
 
 
 def test_plugin_registration_is_lazy_and_uses_supported_context():

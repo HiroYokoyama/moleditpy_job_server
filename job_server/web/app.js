@@ -1,3 +1,4 @@
+'use strict';
 const $ = selector => document.querySelector(selector);
 const state = {token:null, expires:0, authenticated:0, profile:null, me:null, capabilities:null, paused:false, job:null, offset:0, page:0, busy:false, generation:0, busyGeneration:-1, detailRequest:0, accountsRequest:0};
 const encoder = new TextEncoder();
@@ -7,7 +8,17 @@ function message(text) { $('#notice').textContent = text; $('#notice').hidden = 
 function date(value) { return value ? new Date(value*1000).toLocaleString() : '—'; }
 function cell(row,text,className='') { const td = document.createElement('td'); td.textContent=String(text); td.className=className; row.append(td); return td; }
 function button(parent,text,call) { const element=document.createElement('button'); element.textContent=text; element.addEventListener('click',()=>safe(call)); parent.append(element); return element; }
-async function safe(call) { try { await call(); } catch(error) { if(error.staleSession)return; message(error.message); if($('#login-dialog').open)$('#login-status').textContent=error.message; } }
+async function safe(call) { try { await call(); } catch(error) { if(error.staleSession)return; if(error.status===401&&state.me)clearSession();message(error.message); if($('#login-dialog').open)$('#login-status').textContent=error.message; } }
+function setSignedIn(value) {
+  document.body.classList.toggle('signed-out',!value);
+  $('#close-login').hidden=!value;
+  if(value)$('#login-dialog').close();
+  else if(!$('#login-dialog').open)$('#login-dialog').show();
+}
+function connection(text,online=false) {
+  $('#connection-text').textContent=text;$('#login-connection').textContent=text;
+  $('#connection-dot').classList.toggle('online',online);
+}
 function requireSession(generation) {
   if(generation!==state.generation){const error=new Error('Session changed');error.staleSession=true;throw error;}
 }
@@ -18,7 +29,7 @@ function clearSession() {
   for(const id of ['jobs-body','users-body','devices-body','result-files'])$('#'+id).replaceChildren();
   for(const id of ['log','detail-name','detail-id','detail-spec'])$('#'+id).textContent='';
   for(const id of ['running','pending','cpu','memory'])$('#'+id).textContent='—';
-  panel('overview');return state.generation;
+  panel('overview');setSignedIn(false);return state.generation;
 }
 
 function database() {
@@ -43,16 +54,26 @@ async function api(method,path,body,options={}) {
   let payload;
   if (body instanceof Blob || body instanceof ArrayBuffer) payload=body;
   else if (method==='POST'||method==='PUT') {headers['Content-Type']='application/json';payload=JSON.stringify(body||{});}
-  const response=await fetch('/api/v1'+path,{method,headers,body:payload,credentials:'omit',redirect:'error',cache:'no-store'});
-  requireSession(generation);
-  if (!response.ok) {
-    const error=await response.json().catch(()=>({message:'Server request failed'}));
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),10000);
+  let response;
+  try {
+    response=await fetch('/api/v1'+path,{method,headers,body:payload,credentials:'omit',redirect:'error',cache:'no-store',signal:controller.signal});
     requireSession(generation);
-    if (response.status===401&&!options.public) state.token=null;
-    throw new Error(error.message||'Server request failed');
-  }
-  if (response.headers.get('X-API-Version')!=='1') throw new Error('Unsupported server API version');
-  const result=await response.json();requireSession(generation);return result;
+    if (!response.ok) {
+      const error=await response.json().catch(()=>({message:'Server request failed'}));
+      requireSession(generation);
+      if (response.status===401&&!options.public) state.token=null;
+      const failure=new Error(error.code==='origin_forbidden'
+        ? 'Remote access needs setup on the server PC. In Job Server, open Settings → Web address and paste '+location.origin+'. Save, then choose Server → Restart.'
+        : error.message||'Server request failed');
+      failure.status=response.status;failure.code=error.code;throw failure;
+    }
+    if (response.headers.get('X-API-Version')!=='1') throw new Error('Unsupported server API version');
+    const result=await response.json();requireSession(generation);return result;
+  } catch(error) {
+    if(error.name==='AbortError')throw new Error('Connection timed out. Check the server and Tailscale Serve destination.');
+    throw error;
+  } finally {clearTimeout(timer);}
 }
 async function authenticate(challenge=null) {
   const generation=state.generation;
@@ -89,16 +110,17 @@ $('#login-form').addEventListener('submit',event=>{
       requireSession(generation);
       state.profile=profile;await authenticate(challenge);
     } else {state.profile=profile;await authenticate();}
-    form.elements.password.value='';$('#login-status').textContent='';$('#login-dialog').close();
+    form.elements.password.value='';$('#login-status').textContent='';
     state.me=await api('GET','/me');state.capabilities=await api('GET','/capabilities');
     $('#signin').textContent=state.me.username;$('#signout').hidden=false;
     const admin=state.me.role==='admin';$('#accounts-nav').hidden=!admin;$('#pause').hidden=!admin;
+    setSignedIn(true);
     $('#jobs-caption').textContent=admin?'All jobs on this server.':'Your jobs on this server.';
     message('');await refresh();
   }).finally(()=>{submit.disabled=false;});
 });
 $('#signin').addEventListener('click',()=>{$('#login-dialog').showModal();$('#login-status').textContent='';});
-function cancelLogin(){if($('#login-form').querySelector('[type=submit]').disabled)clearSession();$('#login-form').elements.password.value='';$('#login-dialog').close();}
+function cancelLogin(){if($('#login-form').querySelector('[type=submit]').disabled)clearSession();$('#login-form').elements.password.value='';if(state.me)$('#login-dialog').close();}
 $('#close-login').addEventListener('click',cancelLogin);
 $('#login-dialog').addEventListener('cancel',cancelLogin);
 $('#signout').addEventListener('click',()=>{clearSession();message('Signed out. Your device key remains registered in this browser.');});
@@ -119,7 +141,7 @@ async function refresh() {
   state.busy=true;state.busyGeneration=generation;
   try {
     const health=await api('GET','/health',null,{public:true});
-    $('#connection-dot').classList.add('online');$('#connection-text').textContent='Server online · '+health.server_version;
+    connection('Server online · '+health.server_version,true);
     if(!state.me)return;
     if(state.me.role==='admin'&&!$('#accounts').hidden)await accounts();
     if(state.job){await detail(state.job,false);return;}
@@ -138,6 +160,7 @@ async function refresh() {
     }
     if(!jobs.length){const row=document.createElement('tr');const empty=cell(row,'No jobs on this page.','empty');empty.colSpan=5;$('#jobs-body').append(row);}
     $('#previous-page').disabled=state.page===0;$('#next-page').disabled=jobs.length<50;$('#page-number').textContent='Page '+(state.page+1);
+  } catch(error) {if(!error.staleSession)connection('Connection failed');throw error;
   } finally {if(state.busyGeneration===generation)state.busy=false;}
 }
 $('#refresh').addEventListener('click',()=>safe(refresh));
@@ -211,4 +234,5 @@ async function accounts(){
   for(const device of devices){const row=document.createElement('tr');cell(row,device.id);cell(row,users.find(u=>u.id===device.user_id)?.username||device.user_id);cell(row,date(device.last_access));const action=cell(row,'');if(device.revoked_at)action.textContent='Revoked';else button(action,'Revoke',async()=>{if(confirm('Revoke this device and its current tokens?')){await api('POST','/admin/devices/'+device.id+'/revoke');await accounts();}});$('#devices-body').append(row);}
 }
 $('#user-form').addEventListener('submit',event=>{event.preventDefault();const form=event.currentTarget;safe(async()=>{await api('POST','/admin/users',{username:form.elements.username.value,password:form.elements.password.value,role:form.elements.role.value});form.reset();await accounts();});});
-safe(refresh);setInterval(()=>{if(state.me&&!document.hidden)safe(refresh);},5000);
+setSignedIn(false);$('#login-submit').disabled=false;
+safe(refresh);setInterval(()=>{if(!document.hidden)safe(refresh);},5000);

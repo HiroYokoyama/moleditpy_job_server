@@ -175,7 +175,13 @@ class Dashboard(QDialog):
             form.addRow(label, field)
         self.public_url = QLineEdit(self.settings.public_url)
         self.public_url.setPlaceholderText("https://server.example.ts.net")
-        form.addRow("Remote HTTPS URL (Tailscale/LAN)", self.public_url)
+        form.addRow("Web address (remote access)", self.public_url)
+        address_help = QLabel(
+            "Paste the HTTPS URL you open in your browser (shown by tailscale serve). "
+            "Leave blank for local access only. Save, then choose Server > Restart."
+        )
+        address_help.setWordWrap(True)
+        form.addRow(address_help)
         layout.addLayout(form)
         runtime = QHBoxLayout()
         self.python_path = QLineEdit(self.settings.python_executable)
@@ -330,7 +336,7 @@ class Dashboard(QDialog):
             candidate.validate().save(self.config)
             self.settings = candidate
             self.public_url.setText(candidate.public_url)
-            self.message.setText(f"Saved {self.config}. Restart to apply.")
+            self.message.setText(f"Saved {self.config}. Choose Server > Restart to apply.")
         except Exception as exc:
             self.message.setText(str(exc))
 
@@ -490,8 +496,8 @@ class Dashboard(QDialog):
             return True
         QMessageBox.warning(
             self, "Job Server — Administrator sign-in required",
-            "Use Sign in / register device in this administration window before this operation.\n\n"
-            "If no administrator exists yet, use Users & Devices → Create initial administrator "
+            "Use Account → Sign in / register device in this administration window before this operation.\n\n"
+            "If no administrator exists yet, use Account → Create initial administrator "
             "on the server PC. This works while the daemon is running.\n\n"
             "Signing in through the browser or Job Manager does not register this window.",
         )

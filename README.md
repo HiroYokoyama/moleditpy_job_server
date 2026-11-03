@@ -43,8 +43,9 @@ You can operate the server from MoleditPy dialogs; the command line is optional:
    administrator prevents a second bootstrap account.
 2. Choose **Server → Start** in Server Dashboard.
 3. Choose **Account → Sign in / register device...** once for the administrator.
-4. Use the dashboard to pause/resume the queue, view jobs, or cancel a selected job.
-5. Open **Users & Devices…** to add users, disable accounts, or revoke device keys.
+4. Use **Queue** to pause/resume the queue or cancel a selected job.
+5. Open **Users & Devices** to view accounts and devices; use **Account** to add
+   users, disable the selected user, or revoke the selected device.
 6. Open **Settings…** to configure resource budgets, limits, and the daemon runtime.
 7. Choose **File → Open Web UI** to open the browser interface when you want it.
 
@@ -54,6 +55,11 @@ The administration window, Job Manager, and browser each register their own devi
 signing in to one does not sign in the others. **Stop** and **Add user** require
 signing in within the administration window first. If its credential file is
 missing, the dialog explains how to register instead of reporting "File not found".
+
+The browser shows only sign-in before authentication. Connection failures and
+an unconfigured remote HTTPS origin appear on that screen instead of leaving
+the page at Connecting. The administration GUI remains available locally for
+initial account setup and explicit server start.
 
 For a remote server, create the initial account on that server PC (for example,
 through a remote desktop session), then register Job Manager on the client PC using
@@ -169,10 +175,9 @@ certificates and forwards connections to the local Job Server.
 4. Copy the **HTTPS URL printed by Tailscale Serve** into Job Manager's
    **Hosts → Server URL**, then use **Sign in / register device**. Use the printed
    hostname, not the server's LAN IP, and do not append `:8766` to that HTTPS URL.
-5. To use the browser UI, enter that exact HTTPS origin in Job Server's
-   **Settings → Remote HTTPS URL (Tailscale/LAN)**, save the configuration, then
-   choose **Server → Restart**. The JSON setting is `public_url`. This permits
-   that browser origin; other origins remain rejected.
+5. To use the browser UI, paste that same HTTPS URL in Job Server's
+   **Settings → Web address (remote access)**, save the configuration, then
+   choose **Server → Restart**. The JSON setting is `public_url`. This enables browser access at that address. Other website addresses remain rejected.
 
 The daemon stays on loopback and ignores forwarded headers. HTTP on
 `127.0.0.1:8766` is the local connection from Tailscale Serve to Job Server; remote

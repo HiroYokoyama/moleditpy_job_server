@@ -13,13 +13,15 @@ function response(data) {
   return {ok:true, status:200, headers:{get:()=> '1'}, json:async()=>data};
 }
 function element() {
+  const classes=new Set();
   return {
     textContent:'', hidden:false, disabled:false, open:false, dataset:{}, children:[], listeners:{},
-    classList:{add(){}, toggle(){}},
+    classList:{add(name){classes.add(name);},remove(name){classes.delete(name);},contains(name){return classes.has(name);},toggle(name,value){if(value===undefined)value=!classes.has(name);if(value)classes.add(name);else classes.delete(name);}},
     addEventListener(name, callback) { this.listeners[name] = callback; },
     append(value) { this.children.push(value); },
     replaceChildren(...values) { this.children = values; this.textContent = ''; },
     querySelector() { return element(); },
+    show(){this.open=true;},showModal(){this.open=true;},close(){this.open=false;},
   };
 }
 async function application(fetch) {
@@ -29,12 +31,12 @@ async function application(fetch) {
     return elements.get(name);
   };
   const context = vm.createContext({
-    TextEncoder, Uint8Array, ArrayBuffer, Blob, URL, Date, console,
+    TextEncoder, Uint8Array, ArrayBuffer, Blob, URL, Date, console, AbortController,
     btoa: value=>Buffer.from(value,'binary').toString('base64'),
     crypto:{randomUUID, subtle:{sign:async()=>new Uint8Array(64), digest:webcrypto.subtle.digest.bind(webcrypto.subtle)}},
-    document:{querySelector:get, querySelectorAll:()=>[], createElement:element},
+    document:{querySelector:get, querySelectorAll:()=>[], createElement:element,body:element()},
     location:{origin:'http://127.0.0.1:8766'},
-    setInterval(){}, setTimeout(){},
+    setInterval(){}, setTimeout(){},clearTimeout(){},
     fetch:async(url, options)=>url==='/api/v1/health' ? response({server_version:'synthetic'}) : fetch(url, options),
   });
   vm.runInContext(fs.readFileSync(process.argv[2], 'utf8'), context);
@@ -48,6 +50,7 @@ function signedIn(app) {
   app.state.token='existing-token';
   app.state.expires=Date.now()/1000+3600;
   app.state.authenticated=Date.now()/1000;
+  app.call('setSignedIn')(true);
 }
 function job(id) {
   return {id,owner_id:'alice',state:'RUNNING',display_state:'RUNNING',created_at:1,exit_code:null,
@@ -138,5 +141,37 @@ async function accountsOrdering() {
   await app.call('accounts')();late.resolve(response([user('stale-user')]));await pending;
   assert.equal(app.get('#users-body').children[0].children[0].textContent,'new-user');
 }
-const cases={authentication,refresh,details,accountsPolling,accountsOrdering};
+async function loginView() {
+  const app=await application(async url=>{throw new Error('Unexpected URL '+url);});
+  assert.ok(app.context.document.body.classList.contains('signed-out'));
+  assert.equal(app.get('#login-dialog').open,true);
+  assert.equal(app.get('#close-login').hidden,true);
+  signedIn(app);
+  assert.equal(app.context.document.body.classList.contains('signed-out'),false);
+  assert.equal(app.get('#login-dialog').open,false);
+  app.call('clearSession')();
+  assert.ok(app.context.document.body.classList.contains('signed-out'));
+  assert.equal(app.get('#login-dialog').open,true);
+}
+async function connectionFailure() {
+  const app=await application(async url=>{throw new Error('Unexpected URL '+url);});
+  app.context.fetch=async()=>({ok:false,status:403,json:async()=>({code:'origin_forbidden',message:'Browser origins are not permitted'})});
+  await app.call('safe')(()=>app.call('refresh')());
+  assert.equal(app.get('#connection-text').textContent,'Connection failed');
+  assert.match(app.get('#login-status').textContent,/Settings → Web address/);
+  assert.ok(app.get('#login-status').textContent.includes(app.context.location.origin));
+  assert.ok(app.context.document.body.classList.contains('signed-out'));
+}
+async function connectionTimeout() {
+  const app=await application(async url=>{throw new Error('Unexpected URL '+url);});
+  app.context.setTimeout=call=>{call();return 1;};
+  app.context.fetch=async(url,options)=>{
+    assert.equal(options.signal.aborted,true);
+    const error=new Error('aborted');error.name='AbortError';throw error;
+  };
+  await app.call('safe')(()=>app.call('refresh')());
+  assert.equal(app.get('#connection-text').textContent,'Connection failed');
+  assert.match(app.get('#login-status').textContent,/timed out/);
+}
+const cases={authentication,refresh,details,accountsPolling,accountsOrdering,loginView,connectionFailure,connectionTimeout};
 cases[process.argv[3]]().then(()=>console.log('PASS '+process.argv[3])).catch(error=>{console.error(error);process.exitCode=1;});
