@@ -12,7 +12,7 @@ class Model(BaseModel):
 class Resources(Model):
     cpus_per_task: StrictInt = Field(default=1, ge=1)
     memory_mb: StrictInt = Field(default=512, ge=1)
-    walltime_seconds: StrictInt = Field(default=3600, ge=1, le=30 * 86400)
+    walltime_seconds: StrictInt = Field(default=0, ge=0, le=30 * 86400)
 
 
 class FileSpec(Model):

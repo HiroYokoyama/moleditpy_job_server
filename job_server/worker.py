@@ -54,11 +54,12 @@ def main(config, job_id):
                 if settings.execution_os == "wsl"
                 else native.start(wrapper, log, windows)
             )
-            deadline = time.monotonic() + spec["resources"]["walltime_seconds"]
+            walltime = spec["resources"]["walltime_seconds"]
+            deadline = time.monotonic() + walltime if walltime else None
             while process.poll() is None:
                 cancel = (control / "cancel").exists()
                 too_large = native.directory_size(work) > settings.storage_quota_mb * 1024 * 1024
-                timed_out = time.monotonic() > deadline
+                timed_out = deadline is not None and time.monotonic() > deadline
                 if cancel or too_large or timed_out:
                     reason = (
                         "cancelled"
