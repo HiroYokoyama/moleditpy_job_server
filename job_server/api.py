@@ -20,7 +20,7 @@ from .files import contained, is_link, open_regular, sha256
 from .instance import InstanceLock
 from .jobs import Jobs
 from .scheduler import Scheduler
-from .schemas import Challenge, Enrollment, JobSpec, Login, Pause, Token, UserCreate
+from .schemas import Challenge, Enrollment, ForceRun, JobSpec, Login, Pause, Priority, Token, UserCreate
 from .settings import Settings
 
 
@@ -29,7 +29,7 @@ def create_app(settings=None, dispatch=True):
     db = Database(settings.root)
     auth, jobs = Auth(db, settings), Jobs(db, settings)
     scheduler = Scheduler(db, jobs, settings)
-    lock = InstanceLock(settings.root)
+    lock = InstanceLock(settings.root, port=settings.port)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -177,6 +177,8 @@ def create_app(settings=None, dispatch=True):
                 "range_download",
                 "ed25519",
                 "dependencies",
+                "queue_priority",
+                "force_run",
             ],
             "max_chunk_bytes": settings.max_chunk_bytes,
             "resources": scheduler.resources(),
@@ -425,6 +427,30 @@ def create_app(settings=None, dispatch=True):
             c.execute("UPDATE metadata SET value=? WHERE key='paused'", (json.dumps(body.paused),))
             db.event(c, "queue_pause", p["user_id"], paused=body.paused)
         return scheduler.resources()
+
+    @app.post(prefix + "/admin/jobs/{job_id}/priority")
+    def priority(job_id: str, body: Priority, p=Depends(admin)):
+        with db.transaction() as c:
+            auth.admin(p)
+            job = jobs.authorize(job_id, p)
+            if job["state"] != "PENDING":
+                reject(409, "job_not_pending", "Only committed pending jobs can change priority")
+            c.execute("UPDATE jobs SET priority=? WHERE id=?", (body.priority, job_id))
+            db.event(c, "job_priority_changed", p["user_id"], job_id,
+                     previous=job["priority"], priority=body.priority)
+        return jobs.public(jobs.authorize(job_id, p))
+
+    @app.post(prefix + "/admin/jobs/{job_id}/force-run")
+    def force_run(job_id: str, body: ForceRun, p=Depends(admin)):
+        with db.transaction() as c:
+            auth.admin(p)
+            job = jobs.authorize(job_id, p)
+            if job["state"] != "PENDING":
+                reject(409, "job_not_pending", "Only committed pending jobs can request force run")
+            c.execute("UPDATE jobs SET force_run=?,force_actor=? WHERE id=?",
+                      (int(body.force_run), p["user_id"] if body.force_run else None, job_id))
+            db.event(c, "job_force_run_requested", p["user_id"], job_id, force_run=body.force_run)
+        return jobs.public(jobs.authorize(job_id, p))
 
     @app.get(prefix + "/admin/events")
     def events(p=Depends(admin), after: int = Query(0, ge=0, le=2**63 - 1)):

@@ -23,7 +23,8 @@ CREATE TABLE IF NOT EXISTS jobs (
  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES users(id), spec TEXT NOT NULL,
  state TEXT NOT NULL, created_at REAL NOT NULL, started_at REAL, ended_at REAL,
  exit_code INTEGER, pid INTEGER, process_started REAL, cancel_requested INTEGER DEFAULT 0,
- reason TEXT NOT NULL DEFAULT '');
+ reason TEXT NOT NULL DEFAULT '', priority INTEGER NOT NULL DEFAULT 0,
+ force_run INTEGER NOT NULL DEFAULT 0, force_actor TEXT);
 CREATE TABLE IF NOT EXISTS job_files (
  job_id TEXT NOT NULL REFERENCES jobs(id), path TEXT NOT NULL, size INTEGER NOT NULL,
  sha256 TEXT NOT NULL, complete INTEGER DEFAULT 0, PRIMARY KEY(job_id,path));
@@ -48,6 +49,20 @@ class Database:
             self.connection.execute("PRAGMA foreign_keys=ON")
             self.connection.execute("PRAGMA busy_timeout=5000")
             self.connection.executescript(SCHEMA)
+            # Serialize additive migrations across GUI/daemon connections. Inspect
+            # only after the write lock is held so concurrent opens cannot both ALTER.
+            self.connection.execute("BEGIN IMMEDIATE")
+            columns = {row[1] for row in self.connection.execute("PRAGMA table_info(jobs)")}
+            for name, statement in (
+                ("priority", "ALTER TABLE jobs ADD COLUMN priority INTEGER NOT NULL DEFAULT 0"),
+                ("force_run", "ALTER TABLE jobs ADD COLUMN force_run INTEGER NOT NULL DEFAULT 0"),
+                ("force_actor", "ALTER TABLE jobs ADD COLUMN force_actor TEXT"),
+            ):
+                if name not in columns:
+                    self.connection.execute(statement)
+            self.connection.execute(
+                "CREATE INDEX IF NOT EXISTS job_queue ON jobs(state,force_run DESC,priority DESC,created_at,id)"
+            )
             self.connection.execute(
                 "INSERT OR IGNORE INTO metadata VALUES ('server_id',?)", (str(uuid.uuid4()),)
             )

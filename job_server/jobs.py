@@ -37,7 +37,8 @@ class Jobs:
         return job
 
     def public(self, job):
-        result = {k: v for k, v in job.items() if k not in {"pid", "process_started"}}
+        result = {k: v for k, v in job.items() if k not in {"pid", "process_started", "force_actor"}}
+        result["force_run"] = bool(result["force_run"])
         result["spec"] = json.loads(result["spec"])
         if result["state"] == "PENDING" and result["spec"]["after_job"]:
             predecessor = self.db.one(
@@ -221,7 +222,7 @@ class Jobs:
                 return self.public(job)
             if job["state"] != "RUNNING":
                 c.execute(
-                    "UPDATE jobs SET state='CANCELLED',ended_at=?,cancel_requested=1 WHERE id=?",
+                    "UPDATE jobs SET state='CANCELLED',ended_at=?,cancel_requested=1,force_run=0,force_actor=NULL WHERE id=?",
                     (time.time(), job_id),
                 )
             else:
