@@ -92,3 +92,11 @@ class UserCreate(Login):
 
 class Pause(Model):
     paused: StrictBool = True
+
+
+class Priority(Model):
+    priority: StrictInt = Field(ge=-1000, le=1000)
+
+
+class ForceRun(Model):
+    force_run: StrictBool

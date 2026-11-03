@@ -1,25 +1,32 @@
 
 from ._qt_callbacks import connect_queued
-import json
 import os
 import subprocess
 import time
+from datetime import datetime
+from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal
-from PySide6.QtGui import QIcon
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal, Qt
+from PySide6.QtGui import QIcon, QAction
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
+    QGroupBox,
+    QHeaderView,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QInputDialog,
     QMessageBox,
+    QMenuBar,
     QPushButton,
     QSpinBox,
+    QSizePolicy,
+    QAbstractItemView,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -51,7 +58,7 @@ class Task(QRunnable):
 class Dashboard(QDialog):
     def __init__(self, parent=None, config=None):
         super().__init__(parent)
-        self.setWindowTitle("Job Server — LAN computational helper")
+        self.setWindowTitle("Job Server")
         self.setWindowIcon(QIcon(str(Path(__file__).resolve().parents[1] / "web" / "icon.png")))
         self.resize(900, 600)
         self.config = Path(config) if config else Settings().root / "settings.json"
@@ -64,7 +71,15 @@ class Dashboard(QDialog):
         self.pool.setMaxThreadCount(1)
         self._tasks = set()
         self.busy = False
+        self.setup_dialog = None
+        self._setup_checked = False
+        self.detail_dialog = None
+        self.job_records = {}
+        self.usernames = {}
         layout = QVBoxLayout(self)
+        self.menu_bar = QMenuBar(self)
+        layout.setMenuBar(self.menu_bar)
+        self._menus()
         notice = QLabel(
             "Trusted users only. Jobs share the service OS account; CPU/RAM reservations are advisory.\n"
             "WARNING: Never expose to the public internet. Localhost, private LAN or private Tailscale only; "
@@ -85,61 +100,128 @@ class Dashboard(QDialog):
         self.timer.timeout.connect(self.refresh)
         self.timer.start()
 
-    def _button(self, text, callback, row):
-        button = QPushButton(text)
-        button.clicked.connect(callback)
-        row.addWidget(button)
-        return button
+    def _menus(self):
+        def action(menu, text, callback):
+            item = QAction(text, self)
+            item.triggered.connect(callback)
+            menu.addAction(item)
+            return item
+
+        files = self.menu_bar.addMenu("File")
+        action(files, "Setup guide...", self.open_setup)
+        files.addSeparator()
+        action(files, "Open Web UI", self.open_web_ui)
+        action(files, "Open Logs...", self.open_logs)
+        files.addSeparator()
+        action(files, "Close", self.close)
+        server = self.menu_bar.addMenu("Server")
+        action(server, "Start", self.start_daemon)
+        action(server, "Stop (preserve jobs)", self.stop_daemon)
+        action(server, "Restart", self.restart_daemon)
+        server.addSeparator()
+        action(server, "Refresh", self.refresh)
+        action(server, "Copy Tailscale Serve command", lambda: QApplication.clipboard().setText(
+            f"tailscale serve --bg http://127.0.0.1:{self.settings.port}"))
+        account = self.menu_bar.addMenu("Account")
+        self.sign_in_action = action(account, "Sign in / register device...", self.sign_in)
+        account.addSeparator()
+        action(account, "Create initial administrator...", self.bootstrap)
+        action(account, "Add user...", self.add_user)
+        action(account, "Disable selected user...", self.disable_user)
+        action(account, "Revoke selected device...", self.revoke_device)
+        queue = self.menu_bar.addMenu("Queue")
+        action(queue, "Pause queue", lambda: self.pause(True))
+        action(queue, "Resume queue", lambda: self.pause(False))
+        queue.addSeparator()
+        self.detail_action = action(queue, "Job details...", self.open_job_details)
+        self.priority_action = action(queue, "Set priority...", self.set_priority)
+        self.force_action = action(queue, "Force run selected job...", lambda: self.force_run(True))
+        self.unforce_action = action(queue, "Cancel force-run request", lambda: self.force_run(False))
+        action(queue, "Cancel selected job", self.cancel)
+
+    def open_logs(self):
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        directory = self.settings.root / "logs"
+        directory.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(directory)))
 
     def _dashboard(self):
         page = QWidget()
         layout = QVBoxLayout(page)
-        row = QHBoxLayout()
-        self._button("Start", self.start_daemon, row)
-        self._button("Stop (preserve jobs)", self.stop_daemon, row)
-        self._button("Restart", self.restart_daemon, row)
-        self._button("Sign in / register device", self.sign_in, row)
-        self._button("Refresh", self.refresh, row)
-        self._button("Open Web UI", self.open_web_ui, row)
-        layout.addLayout(row)
-        row = QHBoxLayout()
-        self._button("Pause queue", lambda: self.pause(True), row)
-        self._button("Resume queue", lambda: self.pause(False), row)
-        self._button("Cancel selected job", self.cancel, row)
-        self._button(
-            "Copy Tailscale Serve command",
-            lambda: QApplication.clipboard().setText(
-                f"tailscale serve --bg http://127.0.0.1:{self.settings.port}"
-            ),
-            row,
-        )
-        layout.addLayout(row)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(14)
+        header = QHBoxLayout()
+        title = QLabel("Shared job queue")
+        font = title.font()
+        font.setPointSize(font.pointSize() + 4)
+        font.setBold(True)
+        title.setFont(font)
+        header.addWidget(title)
+        header.addStretch()
+        self.connection_status = QLabel("Not connected")
+        header.addWidget(self.connection_status)
+        layout.addLayout(header)
         self.resources = QLabel("Sign in to view resources and jobs.")
+        self.resources.setWordWrap(True)
         layout.addWidget(self.resources)
-        self.jobs = QTableWidget(0, 4)
-        self.jobs.setHorizontalHeaderLabels(["ID", "Owner", "Name", "State"])
+        metrics = QHBoxLayout()
+        metrics.setSpacing(12)
+        self.metric_values = {}
+        for key, title in (("running", "Running jobs"), ("pending", "Waiting jobs"),
+                           ("cpu", "CPU reserved / budget"), ("memory", "Memory reserved / budget")):
+            card = QGroupBox(title)
+            card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+            content = QVBoxLayout(card)
+            value = QLabel("—")
+            font = value.font()
+            font.setPointSize(font.pointSize() + 6)
+            font.setBold(True)
+            value.setFont(font)
+            content.addWidget(value)
+            self.metric_values[key] = value
+            metrics.addWidget(card, 1)
+        layout.addLayout(metrics)
+        layout.addWidget(QLabel("Jobs — select a row, then use the Queue menu for actions."))
+        self.jobs = QTableWidget(0, 5)
+        self.jobs.setHorizontalHeaderLabels(["Name", "Owner", "State", "Priority", "Job ID"])
         self.jobs.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.jobs.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.jobs.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.jobs.verticalHeader().setVisible(False)
+        self.jobs.verticalHeader().setDefaultSectionSize(34)
+        self._table_layout(self.jobs, (220, 110, 110, 70, 270))
+        self.jobs.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.jobs.setShowGrid(False)
+        self.jobs.itemSelectionChanged.connect(self._update_job_actions)
+        self.jobs.cellDoubleClicked.connect(lambda *_: self.open_job_details())
+        self._update_job_actions()
         layout.addWidget(self.jobs)
         self.tabs.addTab(page, "Dashboard")
 
     def _users(self):
         page = QWidget()
         layout = QVBoxLayout(page)
-        row = QHBoxLayout()
-        self._button("Create initial administrator", self.bootstrap, row)
-        self._button("Add user", self.add_user, row)
-        self._button("Disable selected user", self.disable_user, row)
-        self._button("Revoke selected device", self.revoke_device, row)
-        layout.addLayout(row)
-        self.users = QTableWidget(0, 4)
-        self.users.setHorizontalHeaderLabels(["ID", "Username", "Role", "Enabled"])
+        self.users = QTableWidget(0, 3)
+        self.users.setHorizontalHeaderLabels(["Username", "Role", "Status"])
         self.users.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._table_layout(self.users, (250, 120, 120))
         layout.addWidget(self.users)
         self.devices = QTableWidget(0, 4)
-        self.devices.setHorizontalHeaderLabels(["ID", "User", "Revoked", "Last access"])
+        self.devices.setHorizontalHeaderLabels(["Device ID", "Username", "Status", "Last access (local)"])
         self.devices.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._table_layout(self.devices, (270, 130, 100, 230))
         layout.addWidget(self.devices)
         self.tabs.addTab(page, "Users & Devices")
+
+    @staticmethod
+    def _table_layout(table, widths):
+        table.setWordWrap(False)
+        table.horizontalHeader().setHighlightSections(False)
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        table.horizontalHeader().setStretchLastSection(True)
+        for column, width in enumerate(widths):
+            table.horizontalHeader().resizeSection(column, width)
 
     def _settings(self):
         page = QWidget()
@@ -159,6 +241,15 @@ class Dashboard(QDialog):
             field.setValue(getattr(self.settings, key))
             self.fields[key] = field
             form.addRow(label, field)
+        self.public_url = QLineEdit(self.settings.public_url)
+        self.public_url.setPlaceholderText("https://server.example.ts.net")
+        form.addRow("Web address (remote access)", self.public_url)
+        address_help = QLabel(
+            "Paste the HTTPS URL you open in your browser (shown by tailscale serve). "
+            "Leave blank for local access only. Save, then choose Server > Restart."
+        )
+        address_help.setWordWrap(True)
+        form.addRow(address_help)
         layout.addLayout(form)
         runtime = QHBoxLayout()
         self.python_path = QLineEdit(self.settings.python_executable)
@@ -195,7 +286,7 @@ class Dashboard(QDialog):
         layout.addStretch()
         self.tabs.addTab(page, "Settings")
 
-    def task(self, call, on_ok=None, *, interactive=True, success_message=None):
+    def task(self, call, on_ok=None, *, interactive=True, success_message=None, on_error=None):
         if self.busy:
             return
         self.busy = True
@@ -214,6 +305,8 @@ class Dashboard(QDialog):
             self._tasks.discard(task)
             self.busy = False
             self.message.setText(message)
+            if on_error:
+                on_error(message)
             if interactive:
                 QMessageBox.warning(self, "Job Server", message)
 
@@ -235,117 +328,184 @@ class Dashboard(QDialog):
             }
 
         def display(data):
+            self.connection_status.setText("Server online · " + data["health"]["server_version"])
             self.message.setText(
                 f"Running at {self.client.url} — {data['health']['server_version']}"
             )
             if "resources" not in data:
+                self._clear_dashboard()
+                self.resources.setText("Sign in through Account > Sign in to view resources and jobs.")
                 return
-            self.resources.setText(json.dumps(data["resources"]))
+            resource = data["resources"]
+            self.resources.setText(
+                ("Queue paused" if resource.get("paused") else "Queue accepting jobs")
+                + " · CPU and memory reservations are advisory."
+            )
+            for key in ("running", "pending"):
+                self.metric_values[key].setText(str(resource.get(key, "—")))
+            self.metric_values["cpu"].setText(
+                f"{resource.get('reserved_cpus', '—')} / {resource.get('cpus', '—')}"
+            )
+            self.metric_values["memory"].setText(
+                f"{resource.get('reserved_memory_mb', '—')} / {resource.get('memory_mb', '—')} MB"
+            )
+            usernames = {u["id"]: u["username"] for u in data["users"]}
+            self.usernames = usernames
+            self.job_records = {job["id"]: job for job in data["jobs"]}
             self.fill(
                 self.jobs,
                 [
-                    (j["id"], j["owner_id"], j["spec"]["name"], j["display_state"])
+                    (j["spec"]["name"], usernames.get(j["owner_id"], j["owner_id"]),
+                     j["display_state"] + (" · force requested" if j.get("force_run") else ""),
+                     j.get("priority", 0), j["id"])
                     for j in data["jobs"]
-                ],
+                ], identifiers=[j["id"] for j in data["jobs"]],
             )
+            self._update_job_actions()
             self.fill(
                 self.users,
-                [(u["id"], u["username"], u["role"], u["enabled"]) for u in data["users"]],
+                [(u["username"], u["role"], "Enabled" if u["enabled"] else "Disabled") for u in data["users"]],
+                identifiers=[u["id"] for u in data["users"]],
             )
             self.fill(
                 self.devices,
                 [
-                    (d["id"], d["user_id"], d["revoked_at"], d["last_access"])
+                    (d["id"], usernames.get(d["user_id"], d["user_id"]),
+                     "Revoked" if d["revoked_at"] is not None else "Active", self.timestamp(d["last_access"]))
                     for d in data["devices"]
                 ],
             )
 
-        self.task(work, display, interactive=False)
+        def unavailable(_):
+            self.connection_status.setText("Connection unavailable")
+            self.resources.setText("Check Server > Start or Account > Sign in.")
+            self._clear_dashboard()
+
+        self.task(work, display, interactive=False, on_error=unavailable)
+
+    def _clear_dashboard(self):
+        self.job_records = {}
+        self.usernames = {}
+        for value in self.metric_values.values():
+            value.setText("—")
+        for table in (self.jobs, self.users, self.devices):
+            self.fill(table, [])
+        self._update_job_actions()
+        if self.detail_dialog is not None:
+            self.detail_dialog.invalidate("Connection unavailable. Sign in and refresh to view this job.")
 
     @staticmethod
-    def fill(table, rows):
-        table.setRowCount(len(rows))
-        for row, values in enumerate(rows):
-            for column, value in enumerate(values):
-                table.setItem(row, column, QTableWidgetItem(str(value)))
-        table.resizeColumnsToContents()
+    def timestamp(value):
+        if value is None:
+            return "Never"
+        try:
+            return datetime.fromtimestamp(value).astimezone().strftime("%Y-%m-%d %H:%M:%S %z")
+        except (ValueError, TypeError, OSError, OverflowError):
+            return "—"
+
+    @staticmethod
+    def fill(table, rows, identifiers=None):
+        selected = Dashboard.selected(table)
+        sorting = table.isSortingEnabled()
+        signals = table.blockSignals(True)
+        try:
+            table.setSortingEnabled(False)
+            table.clearContents()
+            table.setRowCount(len(rows))
+            for row, values in enumerate(rows):
+                identifier = identifiers[row] if identifiers is not None else str(values[0])
+                for column, value in enumerate(values):
+                    item = QTableWidgetItem(str(value))
+                    if column == 0:
+                        item.setData(Qt.ItemDataRole.UserRole, identifier)
+                    table.setItem(row, column, item)
+            table.setSortingEnabled(sorting)
+            table.clearSelection()
+            table.setCurrentCell(-1, -1)
+            for row in range(table.rowCount()):
+                if selected is not None and table.item(row, 0).data(Qt.ItemDataRole.UserRole) == selected:
+                    table.setCurrentCell(row, 0)
+                    break
+        finally:
+            table.setSortingEnabled(sorting)
+            table.blockSignals(signals)
 
     def save_settings(self):
         try:
-            self.settings.python_executable = self.python_path.text().strip()
-            for key, field in self.fields.items():
-                setattr(self.settings, key, field.value())
-            self.settings.validate().save(self.config)
-            self.message.setText(f"Saved {self.config}. Restart to apply.")
+            candidate = replace(
+                self.settings,
+                python_executable=self.python_path.text().strip(),
+                public_url=self.public_url.text().strip(),
+                **{key: field.value() for key, field in self.fields.items()},
+            )
+            candidate.validate().save(self.config)
+            self.settings = candidate
+            self.public_url.setText(candidate.public_url)
+            self.message.setText(f"Saved {self.config}. Choose Server > Restart to apply.")
+            return True
         except Exception as exc:
             self.message.setText(str(exc))
+            return False
 
     def require_own_daemon(self):
-        """Refuse a listener that is not the daemon holding this data directory's lock.
+        from ..daemon_ownership import verify_local_daemon
 
-        Anything can answer /health on the loopback port, including a process of
-        another local account that bound it first; it must never receive a password.
-        """
-        from ..instance import InstanceLock
+        verify_local_daemon(self.settings.root, self.settings.port)
 
+    def _start_daemon(self):
+        url = f"http://127.0.0.1:{self.settings.port}"
+        if self.client.url != url:
+            self.client = JobServerClient(
+                url, self.settings.root / "identity" / "admin-device.key",
+            )
         try:
-            InstanceLock(self.settings.root).acquire().release()
-        except RuntimeError:
-            return
-        raise RuntimeError(
-            f"Port {self.settings.port} is answered by a process that is not this Job Server; "
-            "stop it or choose another port"
+            self.client.request("GET", "/health", authenticated=False)
+            running = True
+        except Exception:
+            running = False
+        if running:
+            self.require_own_daemon()
+            return "Daemon is already running; reusing it."
+        self.settings.save(self.config)
+        log_dir = self.settings.root / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        environment = os.environ.copy()
+        environment["PYTHONPATH"] = (
+            str(Path(__file__).resolve().parents[2])
+            + os.pathsep
+            + environment.get("PYTHONPATH", "")
         )
+        with (log_dir / "startup.log").open("ab") as log:
+            from ..runtime import python_executable
+
+            subprocess.Popen(
+                [
+                    python_executable(self.settings),
+                    "-m",
+                    "job_server",
+                    "serve",
+                    "--config",
+                    str(self.config),
+                ],
+                stdin=subprocess.DEVNULL,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                env=environment,
+                start_new_session=os.name != "nt",
+                creationflags=0x08000000 | 0x00000008 if os.name == "nt" else 0,
+            )
+        self.client = JobServerClient(
+            f"http://127.0.0.1:{self.settings.port}",
+            self.settings.root / "identity" / "admin-device.key",
+        )
+        return "Start requested; see startup.log if the health check stays offline."
 
     def start_daemon(self):
-        def work():
-            try:
-                self.client.request("GET", "/health", authenticated=False)
-                running = True
-            except Exception:
-                running = False
-            if running:
-                self.require_own_daemon()
-                return "Daemon is already running; reusing it."
-            self.settings.save(self.config)
-            log_dir = self.settings.root / "logs"
-            log_dir.mkdir(parents=True, exist_ok=True)
-            environment = os.environ.copy()
-            environment["PYTHONPATH"] = (
-                str(Path(__file__).resolve().parents[2])
-                + os.pathsep
-                + environment.get("PYTHONPATH", "")
-            )
-            with (log_dir / "startup.log").open("ab") as log:
-                from ..runtime import python_executable
-
-                subprocess.Popen(
-                    [
-                        python_executable(self.settings),
-                        "-m",
-                        "job_server",
-                        "serve",
-                        "--config",
-                        str(self.config),
-                    ],
-                    stdin=subprocess.DEVNULL,
-                    stdout=log,
-                    stderr=subprocess.STDOUT,
-                    env=environment,
-                    start_new_session=os.name != "nt",
-                    creationflags=0x08000000 | 0x00000008 if os.name == "nt" else 0,
-                )
-            self.client = JobServerClient(
-                f"http://127.0.0.1:{self.settings.port}",
-                self.settings.root / "identity" / "admin-device.key",
-            )
-            return "Start requested; see startup.log if the health check stays offline."
-
         def started(message):
             self.message.setText(message)
             QMessageBox.information(self, "Success", message)
 
-        self.task(work, started)
+        self.task(self._start_daemon, started)
 
     def stop_daemon(self):
         if not self.require_admin_registration():
@@ -398,7 +558,7 @@ class Dashboard(QDialog):
         password.setObjectName("password")
         password.setEchoMode(QLineEdit.EchoMode.Password)
         layout.addRow("Username", username)
-        layout.addRow("Password (12+ characters)", password)
+        layout.addRow("Password", password)
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
             parent=dialog,
@@ -436,38 +596,95 @@ class Dashboard(QDialog):
             return True
         QMessageBox.warning(
             self, "Job Server — Administrator sign-in required",
-            "Use Sign in / register device in this administration window before this operation.\n\n"
-            "If no administrator exists yet, use Users & Devices → Create initial administrator "
+            "Use Account → Sign in / register device in this administration window before this operation.\n\n"
+            "If no administrator exists yet, use Account → Create initial administrator "
             "on the server PC. This works while the daemon is running.\n\n"
             "Signing in through the browser or Job Manager does not register this window.",
         )
         return False
 
+    def has_administrator(self):
+        import sqlite3
+
+        database = self.settings.root / "server.db"
+        if not database.exists():
+            return False
+        connection = sqlite3.connect(database.as_uri() + "?mode=ro", uri=True, timeout=2)
+        try:
+            return connection.execute(
+                "SELECT 1 FROM users WHERE role='admin' AND enabled=1 LIMIT 1"
+            ).fetchone() is not None
+        finally:
+            connection.close()
+
+    def open_setup(self):
+        from .setup import SetupDialog
+
+        if self.setup_dialog is None or not self.setup_dialog.isVisible():
+            self.setup_dialog = SetupDialog(self)
+        self.timer.stop()
+        self.setup_dialog.show()
+        self.setup_dialog.raise_()
+        self.setup_dialog.activateWindow()
+
+    def _first_setup(self):
+        if not self.isVisible():
+            return
+        try:
+            if not self.has_administrator():
+                self.open_setup()
+        except Exception as exc:
+            self.message.setText("Unable to check setup: " + str(exc))
+
+    def _start_and_sign_in(self, credentials=None):
+        self._start_daemon()
+        health = JobServerClient(f"http://127.0.0.1:{self.settings.port}", timeout=1)
+        deadline = time.monotonic() + 20
+        while True:
+            try:
+                health.request("GET", "/health", authenticated=False)
+                break
+            except Exception:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("Server did not start; open File > Open Logs and check the Python runtime") from None
+                time.sleep(0.2)
+        self.require_own_daemon()
+        if self.client.key_path.exists():
+            self.client.authenticate()
+        elif credentials:
+            self.client.enroll(*credentials)
+        else:
+            raise ValueError("Sign in with the existing administrator username and password")
+        me = self.client.request("GET", "/me")
+        if me["role"] != "admin":
+            raise ValueError("An administrator account is required for this window")
+
+    def create_administrator(self, credentials):
+        from ..auth import Auth
+        from ..db import Database
+
+        db = Database(self.settings.root)
+        try:
+            Auth(db, self.settings).create_initial_admin(*credentials)
+        finally:
+            db.close()
+
+    def create_and_sign_in(self, credentials):
+        self.create_administrator(credentials)
+        self._start_and_sign_in(credentials)
+
     def bootstrap(self):
-        credentials = self.credentials("Create initial administrator on this server PC")
+        credentials = self.credentials("Create administrator, start server and sign in")
         if not credentials:
             return
 
-        def work():
-            from ..auth import Auth
-            from ..db import Database
-            db = Database(self.settings.root)
-            try:
-                return Auth(db, self.settings).create_initial_admin(*credentials)
-            finally:
-                db.close()
-
         def created(_):
-            message = (
-                "Administrator created. Start the server if needed, then use "
-                "Sign in / register device in this window with the new administrator account."
-            )
-            self.message.setText(message)
-            QMessageBox.information(self, "Success", message)
+            self.message.setText("Administrator created. This window is signed in.")
+            self.refresh()
 
         self.task(
-            work,
-            created,
+            lambda: self.create_and_sign_in(credentials), created,
+            success_message="Administrator created. The server is running and this window is signed in.",
         )
 
     def add_user(self):
@@ -483,9 +700,67 @@ class Dashboard(QDialog):
                 success_message="User created.",
             )
 
-    def selected(self, table):
+    @staticmethod
+    def selected(table):
         row = table.currentRow()
-        return table.item(row, 0).text() if row >= 0 and table.item(row, 0) else None
+        item = table.item(row, 0) if row >= 0 else None
+        if item is None:
+            return None
+        identifier = item.data(Qt.ItemDataRole.UserRole)
+        return identifier if identifier is not None else item.text()
+
+    def _update_job_actions(self):
+        identifier = self.selected(self.jobs)
+        record = self.job_records.get(identifier, {})
+        pending = record.get("state", record.get("display_state")) in {"PENDING", "QUEUED", "BLOCKED"}
+        self.detail_action.setEnabled(identifier is not None)
+        self.priority_action.setEnabled(pending)
+        self.force_action.setEnabled(pending and not record.get("force_run", False))
+        self.unforce_action.setEnabled(pending and record.get("force_run", False))
+
+    def open_job_details(self):
+        identifier = self.selected(self.jobs)
+        if identifier is None or not self.require_admin_registration():
+            return
+        from .job_detail import JobDetailDialog
+
+        if self.detail_dialog is None:
+            self.detail_dialog = JobDetailDialog(self)
+        record = self.job_records.get(identifier, {})
+        owner = self.usernames.get(record.get("owner_id"), record.get("owner_id", "—"))
+        self.detail_dialog.show_job(identifier, owner)
+
+    def set_priority(self):
+        identifier = self.selected(self.jobs)
+        if identifier is None or not self.require_admin_registration():
+            return
+        value, accepted = QInputDialog.getInt(
+            self, "Set job priority", "Higher numbers run first; equal priorities keep submission order.",
+            self.job_records.get(identifier, {}).get("priority", 0), -1000, 1000,
+        )
+        if accepted:
+            self.task(
+                lambda: self.client.request("POST", f"/admin/jobs/{identifier}/priority", {"priority": value}),
+                lambda _: self.refresh(),
+                success_message="Job priority updated.",
+            )
+
+    def force_run(self, value=True):
+        identifier = self.selected(self.jobs)
+        if identifier is None or not self.require_admin_registration():
+            return
+        if value and QMessageBox.question(
+            self, "Force run selected job",
+            "Start this waiting job ahead of queue order, even while paused, and override CPU, "
+            "memory and active-job limits? Existing jobs keep running. Dependencies still apply. "
+            "Overcommitting memory can cause jobs to fail.",
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        self.task(
+            lambda: self.client.request("POST", f"/admin/jobs/{identifier}/force-run", {"force_run": value}),
+            lambda _: self.refresh(),
+            success_message="Force-run requested; dependencies still apply." if value else "Force-run request cancelled.",
+        )
 
     def cancel(self):
         job_id = self.selected(self.jobs)
@@ -525,6 +800,10 @@ class Dashboard(QDialog):
             )
 
     def closeEvent(self, event):
+        if self.detail_dialog is not None:
+            self.detail_dialog.close()
+        if self.setup_dialog is not None:
+            self.setup_dialog.close()
         self.timer.stop()
         # Window disposal never shuts down the separately owned daemon.
         super().closeEvent(event)
@@ -532,3 +811,6 @@ class Dashboard(QDialog):
     def showEvent(self, event):
         self.timer.start()
         super().showEvent(event)
+        if not self._setup_checked:
+            self._setup_checked = True
+            QTimer.singleShot(0, self._first_setup)

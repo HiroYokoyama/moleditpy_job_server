@@ -19,7 +19,7 @@ def test_missing_libraries_show_dialog_and_allow_retry(monkeypatch):
     monkeypatch.setattr(QMessageBox, "warning", lambda *args: messages.append(args))
 
     class Context:
-        def add_plugin_menu(self, path, callback, **kwargs):
+        def add_menu_action(self, path, callback, **kwargs):
             actions.append(callback)
 
         def get_window(self, name):
@@ -72,6 +72,10 @@ def test_web_assets_and_security_headers(client):
     response = client.get("/")
     assert response.status_code == 200
     assert "Submit a job" in response.text
+    assert '<body class="signed-out">' in response.text
+    assert '<script src="/assets/app.js" defer>' in response.text
+    assert 'type="module"' not in response.text
+    assert 'id="login-form" method="dialog"' in response.text
     assert "frame-ancestors 'none'" in response.headers["Content-Security-Policy"]
     assert client.get("/assets/app.js").status_code == 200
     assert client.get("/assets/app.css").status_code == 200
@@ -83,19 +87,28 @@ def test_web_assets_and_security_headers(client):
     )
 
 
+def test_tailnet_origin_is_permitted_only_after_explicit_configuration(client):
+    origin = "https://compute.example.ts.net"
+    assert client.get("/assets/app.js", headers={"Origin": origin}).status_code == 403
+    client.app.state.settings.public_url = origin
+    assert client.get("/assets/app.js", headers={"Origin": origin}).status_code == 200
+    assert client.get("/api/v1/health", headers={"Origin": origin}).status_code == 200
+    assert client.get("/api/v1/health", headers={"Origin": "https://other.example.ts.net"}).status_code == 403
+
+
 def test_plugin_registration_is_lazy_and_uses_supported_context():
     class Context:
         def __init__(self):
             self.actions = []
 
-        def add_plugin_menu(self, path, callback, **kwargs):
+        def add_menu_action(self, path, callback, **kwargs):
             assert kwargs["icon"].endswith("icon.png")
             self.actions.append((path, callback))
 
     context = Context()
     initialize(context)
     assert len(context.actions) == 4
-    assert all(path.startswith("Job Server/") for path, _ in context.actions)
+    assert all(path.startswith("Extensions/Job Server/") for path, _ in context.actions)
 
 
 def test_gui_construction_has_no_listener(tmp_path):
@@ -201,11 +214,12 @@ def test_gui_refuses_listener_that_does_not_hold_daemon_lock(tmp_path, monkeypat
     assert "not this Job Server" in dialog.message.text()
     assert not any(path == "/auth/login" for _, path, _ in sent)
 
-    # The genuine daemon holds the lock and is reused.
+    # A held lock alone is not proof that this HTTP port belongs to the daemon.
     lock = InstanceLock(tmp_path).acquire()
     try:
         run(dialog.start_daemon)
-        assert "reusing it" in dialog.message.text()
+        assert "not this Job Server" in dialog.message.text()
+        assert not any(path == "/auth/login" for _, path, _ in sent)
     finally:
         lock.release()
     dialog.close()

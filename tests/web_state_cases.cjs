@@ -13,40 +13,43 @@ function response(data) {
   return {ok:true, status:200, headers:{get:()=> '1'}, json:async()=>data};
 }
 function element() {
+  const classes=new Set();
   return {
     textContent:'', hidden:false, disabled:false, open:false, dataset:{}, children:[], listeners:{},
-    classList:{add(){}, toggle(){}},
+    classList:{add(name){classes.add(name);},remove(name){classes.delete(name);},contains(name){return classes.has(name);},toggle(name,value){if(value===undefined)value=!classes.has(name);if(value)classes.add(name);else classes.delete(name);}},
     addEventListener(name, callback) { this.listeners[name] = callback; },
     append(value) { this.children.push(value); },
     replaceChildren(...values) { this.children = values; this.textContent = ''; },
     querySelector() { return element(); },
+    show(){this.open=true;},showModal(){this.open=true;},close(){this.open=false;},
   };
 }
 async function application(fetch) {
-  const elements = new Map();
+  const elements = new Map(), events={};
   const get = name => {
     if (!elements.has(name)) elements.set(name, element());
     return elements.get(name);
   };
   const context = vm.createContext({
-    TextEncoder, Uint8Array, ArrayBuffer, Blob, URL, Date, console,
+    TextEncoder, Uint8Array, ArrayBuffer, Blob, URL, Date, console, AbortController,
     btoa: value=>Buffer.from(value,'binary').toString('base64'),
     crypto:{randomUUID, subtle:{sign:async()=>new Uint8Array(64), digest:webcrypto.subtle.digest.bind(webcrypto.subtle)}},
-    document:{querySelector:get, querySelectorAll:()=>[], createElement:element},
+    document:{querySelector:get, querySelectorAll:()=>[], createElement:element,body:element()},
     location:{origin:'http://127.0.0.1:8766'},
-    setInterval(){}, setTimeout(){},
+    setInterval(){}, setTimeout(){},clearTimeout(){},addEventListener(name,callback){events[name]=callback;},
     fetch:async(url, options)=>url==='/api/v1/health' ? response({server_version:'synthetic'}) : fetch(url, options),
   });
   vm.runInContext(fs.readFileSync(process.argv[2], 'utf8'), context);
   await new Promise(done=>setImmediate(done));
   const state = vm.runInContext('state', context);
-  return {context, state, get, call:name=>vm.runInContext(name, context)};
+  return {context, state, get, events, call:name=>vm.runInContext(name, context)};
 }
 function signedIn(app) {
-  app.state.profile={deviceId:'device-a',serverId:'server',privateKey:{}};
   app.state.me={role:'user',username:'alice',user_id:'alice'};
   app.state.token='existing-token';
   app.state.expires=Date.now()/1000+3600;
+  app.state.authenticated=Date.now()/1000;
+  app.call('setSignedIn')(true);
 }
 function job(id) {
   return {id,owner_id:'alice',state:'RUNNING',display_state:'RUNNING',created_at:1,exit_code:null,
@@ -55,16 +58,17 @@ function job(id) {
 async function authentication() {
   const entered=deferred(), reply=deferred();
   const app=await application(async url=>{
-    assert.equal(url,'/api/v1/auth/token'); entered.resolve(); return reply.promise;
+    if(url==='/api/v1/auth/logout')return response({signed_out:true});
+    assert.equal(url,'/api/v1/auth/web-login'); entered.resolve(); return reply.promise;
   });
   signedIn(app);
-  const pending=app.call('authenticate')({server_id:'server',protocol_version:'1',nonce:'synthetic'}).catch(error=>error);
+  const pending=app.call('login')('alice','x').catch(error=>error);
   await entered.promise;
   app.get('#signout').listeners.click();
   reply.resolve(response({token:'late-token',expires_at:Date.now()/1000+3600}));
   await pending;
   assert.equal(app.state.token,null,'Late authentication must not restore a signed-out session');
-  assert.equal(app.state.profile,null);
+  assert.equal(app.state.me,null);
 }
 async function refresh() {
   const entered=deferred(), reply=deferred();
@@ -97,5 +101,137 @@ async function details() {
   assert.equal(app.state.job,'second','Late details must not replace a newer selection');
   assert.ok(app.get('#detail-name').textContent.startsWith('second'));
 }
-const cases={authentication,refresh,details};
+async function accountsPolling() {
+  let users=[{id:'alice',username:'alice',role:'admin',enabled:1}],devices=[];
+  const app=await application(async url=>{
+    if(url==='/api/v1/admin/users')return response(users);
+    if(url==='/api/v1/admin/devices')return response(devices);
+    if(url==='/api/v1/system/resources')return response({paused:false});
+    if(url.startsWith('/api/v1/admin/jobs?'))return response([]);
+    throw new Error('Unexpected URL '+url);
+  });
+  signedIn(app);app.state.me.role='admin';app.get('#accounts').hidden=false;
+  await app.call('refresh')();
+  assert.equal(app.get('#users-body').children.length,1);
+  // Another client (the GUI) creates a user/device, then disables/revokes it.
+  users=[...users,{id:'bob',username:'bob',role:'user',enabled:1}];
+  devices=[{id:'bob-device',user_id:'bob',last_access:1,revoked_at:null}];
+  await app.call('refresh')();
+  assert.equal(app.get('#users-body').children.length,2);
+  assert.equal(app.get('#devices-body').children.length,1);
+  users=users.map(u=>u.id==='bob'?{...u,enabled:0}:u);
+  devices=devices.map(d=>({...d,revoked_at:2}));
+  await app.call('refresh')();
+  assert.equal(app.get('#users-body').children[1].children[2].textContent,'Disabled');
+  assert.equal(app.get('#devices-body').children[0].children[3].textContent,'Revoked');
+}
+async function accountsOrdering() {
+  const entered=deferred(),late=deferred();let requests=0;
+  const user=name=>({id:name,username:name,role:'user',enabled:1});
+  const app=await application(async url=>{
+    if(url==='/api/v1/admin/users'){
+      if(++requests===1){entered.resolve();return late.promise;}
+      return response([user('new-user')]);
+    }
+    if(url==='/api/v1/admin/devices')return response([]);
+    throw new Error('Unexpected URL '+url);
+  });
+  signedIn(app);app.state.me.role='admin';
+  const pending=app.call('accounts')();await entered.promise;
+  await app.call('accounts')();late.resolve(response([user('stale-user')]));await pending;
+  assert.equal(app.get('#users-body').children[0].children[0].textContent,'new-user');
+}
+async function loginView() {
+  const app=await application(async url=>{throw new Error('Unexpected URL '+url);});
+  assert.ok(app.context.document.body.classList.contains('signed-out'));
+  assert.equal(app.get('#login-dialog').open,true);
+  assert.equal(app.get('#close-login').hidden,true);
+  signedIn(app);
+  assert.equal(app.context.document.body.classList.contains('signed-out'),false);
+  assert.equal(app.get('#login-dialog').open,false);
+  app.call('clearSession')();
+  assert.ok(app.context.document.body.classList.contains('signed-out'));
+  assert.equal(app.get('#login-dialog').open,true);
+}
+async function connectionFailure() {
+  const app=await application(async url=>{throw new Error('Unexpected URL '+url);});
+  app.context.fetch=async()=>({ok:false,status:403,json:async()=>({code:'origin_forbidden',message:'Browser origins are not permitted'})});
+  await app.call('safe')(()=>app.call('refresh')());
+  assert.equal(app.get('#connection-text').textContent,'Connection failed');
+  assert.match(app.get('#login-status').textContent,/Settings → Web address/);
+  assert.ok(app.get('#login-status').textContent.includes(app.context.location.origin));
+  assert.ok(app.context.document.body.classList.contains('signed-out'));
+}
+async function connectionTimeout() {
+  const app=await application(async url=>{throw new Error('Unexpected URL '+url);});
+  app.context.setTimeout=call=>{call();return 1;};
+  app.context.fetch=async(url,options)=>{
+    assert.equal(options.signal.aborted,true);
+    const error=new Error('aborted');error.name='AbortError';throw error;
+  };
+  await app.call('safe')(()=>app.call('refresh')());
+  assert.equal(app.get('#connection-text').textContent,'Connection failed');
+  assert.match(app.get('#login-status').textContent,/timed out/);
+}
+async function keylessLogin() {
+  const calls=[];
+  const app=await application(async(url,options)=>{
+    calls.push([url,options]);
+    if(url==='/api/v1/auth/web-login'){
+      assert.deepEqual(JSON.parse(options.body),{username:'alice',password:'x'});
+      assert.equal(options.credentials,'omit');
+      return response({token:'web-token',expires_at:Date.now()/1000+900});
+    }
+    if(url==='/api/v1/me')return response({username:'alice',role:'user'});
+    if(url==='/api/v1/capabilities')return response({});
+    if(url==='/api/v1/system/resources')return response({});
+    if(url.startsWith('/api/v1/jobs?'))return response([]);
+    if(url==='/api/v1/auth/logout')return response({signed_out:true});
+    throw new Error('Unexpected URL '+url);
+  });
+  await app.call('login')('alice','x');
+  assert.equal(app.state.token,'web-token');
+  assert.equal(app.context.document.body.classList.contains('signed-out'),false);
+  const reloaded=await application(async()=>{throw new Error('Unexpected authenticated request');});
+  assert.equal(reloaded.state.token,null,'Reloading must require a new password sign-in');
+  app.events.pagehide();
+  assert.equal(app.state.token,null);
+  assert.equal(app.state.me,null);
+  assert.ok(calls.some(([url])=>url==='/api/v1/auth/logout'));
+  assert.ok(calls.every(([url])=>!url.includes('challenge')&&!url.includes('/auth/devices')));
+}
+async function queueControls() {
+  const calls=[];let priority=0,forced=false;
+  const app=await application(async(url,options)=>{
+    if(url==='/api/v1/jobs/pending')return response({...job('pending'),state:'PENDING',display_state:'PENDING',priority,force_run:forced});
+    if(url.includes('/log?'))return response({text:'',next_offset:0});
+    if(url==='/api/v1/admin/jobs/pending/priority'){priority=JSON.parse(options.body).priority;calls.push(url);return response({});}
+    if(url==='/api/v1/admin/jobs/pending/force-run'){forced=JSON.parse(options.body).force_run;calls.push(url);return response({});}
+    throw new Error('Unexpected URL '+url);
+  });
+  signedIn(app);app.state.me.role='admin';
+  await app.call('detail')('pending');
+  assert.equal(app.get('#job-controls').hidden,false);
+  app.get('#job-priority').value='25';await app.call('queueControl')('priority');
+  assert.equal(priority,25);
+  app.get('#job-priority').value='1.5';await assert.rejects(()=>app.call('queueControl')('priority'),/integer/);
+  const confirms=[];app.context.confirm=text=>{confirms.push(text);return true;};
+  await app.call('queueControl')('force');assert.equal(forced,true);
+  assert.match(confirms[0],/CPU\/memory budgets/);
+  assert.match(confirms[0],/Dependency conditions/);
+  await app.call('queueControl')('force');assert.equal(forced,false);
+  assert.equal(confirms.length,1,'Cancelling force does not ask to overcommit');
+  app.state.me.role='user';const count=calls.length;
+  await app.call('queueControl')('force');assert.equal(calls.length,count);
+  await app.call('detail')('pending');assert.equal(app.get('#job-controls').hidden,true);
+}
+async function expiredDownload() {
+  const app=await application(async url=>{throw new Error('Unexpected URL '+url);});
+  signedIn(app);app.state.expires=0;
+  await app.call('safe')(()=>app.call('download')('job',{}));
+  assert.equal(app.state.token,null);
+  assert.equal(app.state.me,null);
+  assert.match(app.get('#login-status').textContent,/Sign in again/);
+}
+const cases={queueControls,expiredDownload,keylessLogin,authentication,refresh,details,accountsPolling,accountsOrdering,loginView,connectionFailure,connectionTimeout};
 cases[process.argv[3]]().then(()=>console.log('PASS '+process.argv[3])).catch(error=>{console.error(error);process.exitCode=1;});

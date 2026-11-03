@@ -49,17 +49,18 @@ def test_initial_admin_is_atomic_across_connections(client):
             db.close()
 
 
-def test_cli_bootstrap_works_while_daemon_is_running(client, monkeypatch):
+@pytest.mark.parametrize("password", ["synthetic-password", "x"])
+def test_cli_bootstrap_works_while_daemon_is_running(client, monkeypatch, password):
     import sys
     from job_server.__main__ import main
 
     monkeypatch.setattr(sys, "argv", ["job-server", "create-admin"])
     monkeypatch.setattr("job_server.__main__.Settings.load", lambda path: client.app.state.settings)
     monkeypatch.setattr("builtins.input", lambda prompt: "admin")
-    monkeypatch.setattr("getpass.getpass", lambda prompt: "synthetic-password")
+    monkeypatch.setattr("getpass.getpass", lambda prompt: password)
     assert main() == 0
     assert client.post(
-        "/api/v1/auth/login", json={"username": "admin", "password": "synthetic-password"}
+        "/api/v1/auth/login", json={"username": "admin", "password": password}
     ).status_code == 200
 
 
@@ -100,7 +101,8 @@ def test_stop_and_add_user_without_key_show_registration_help(dashboard, monkeyp
 
 
 @pytest.mark.parametrize("accepted", [True, False])
-def test_username_and_password_share_one_dialog(dashboard, monkeypatch, accepted):
+@pytest.mark.parametrize("password_value", ["synthetic-password", "x"])
+def test_username_and_password_share_one_dialog(dashboard, monkeypatch, accepted, password_value):
     from PySide6.QtWidgets import QDialog, QLineEdit
 
     dialog, app = dashboard
@@ -112,11 +114,11 @@ def test_username_and_password_share_one_dialog(dashboard, monkeypatch, accepted
         password = form.findChild(QLineEdit, "password")
         assert password.echoMode() == QLineEdit.EchoMode.Password
         username.setText(" alice ")
-        password.setText("synthetic-password")
+        password.setText(password_value)
         return QDialog.DialogCode.Accepted if accepted else QDialog.DialogCode.Rejected
 
     monkeypatch.setattr(QDialog, "exec", enter)
-    assert dialog.credentials("Sign in") == (("alice", "synthetic-password") if accepted else None)
+    assert dialog.credentials("Sign in") == (("alice", password_value) if accepted else None)
     assert len(calls) == 1
     assert calls[0].findChild(QLineEdit, "password").text() == ""
 

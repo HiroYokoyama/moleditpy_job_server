@@ -1,9 +1,154 @@
 import base64
 import time
 
+import pytest
+
 from job_server.auth import signing_message
 from job_server import PLUGIN_VERSION
 from .conftest import enroll
+
+
+def test_web_login_needs_no_device_and_logout_revokes_only_its_session(client):
+    client.app.state.auth.create_initial_admin("admin", "x")
+    sessions = [client.post("/api/v1/auth/web-login", json={"username": "admin", "password": "x"}).json() for _ in range(2)]
+    headers = [{"Authorization": "Bearer " + session["token"]} for session in sessions]
+    assert client.get("/api/v1/admin/users", headers=headers[0]).status_code == 200
+    assert client.app.state.db.rows("SELECT id FROM devices") == []
+    assert all(session["scope"] == "web" for session in sessions)
+    assert client.post("/api/v1/auth/logout", headers=headers[0]).status_code == 200
+    assert client.get("/api/v1/me", headers=headers[0]).status_code == 401
+    assert client.get("/api/v1/me", headers=headers[1]).status_code == 200
+    assert client.post("/api/v1/auth/web-login", json={"username": "admin", "password": "wrong"}).status_code == 401
+
+
+def test_web_session_expiry_freshness_and_disabled_user(client):
+    user = client.app.state.auth.create_initial_admin("admin", "x")
+    session = client.post("/api/v1/auth/web-login", json={"username": "admin", "password": "x"}).json()
+    headers = {"Authorization": "Bearer " + session["token"]}
+    assert 0 < session["expires_at"] - time.time() <= client.app.state.settings.token_seconds
+    with client.app.state.db.transaction() as c:
+        c.execute("UPDATE sessions SET authenticated_at=?", (time.time() - 301,))
+    assert client.get("/api/v1/admin/users", headers=headers).status_code == 401
+    assert client.get("/api/v1/me", headers=headers).status_code == 200
+    with client.app.state.db.transaction() as c:
+        c.execute("UPDATE users SET enabled=0 WHERE id=?", (user["id"],))
+    assert client.get("/api/v1/me", headers=headers).status_code == 401
+    assert client.post("/api/v1/auth/web-login", json={"username": "admin", "password": "x"}).status_code == 401
+
+
+def test_web_login_still_rejects_unconfigured_browser_origin(client):
+    client.app.state.auth.create_initial_admin("admin", "x")
+    assert client.post(
+        "/api/v1/auth/web-login", json={"username": "admin", "password": "x"},
+        headers={"Origin": "https://other.example.ts.net"},
+    ).status_code == 403
+
+
+def test_web_user_cannot_escalate_or_register_persistent_device(client):
+    from uuid import uuid4
+
+    client.app.state.auth.create_user("web-user", "x")
+    session = client.post("/api/v1/auth/web-login", json={"username": "web-user", "password": "x"}).json()
+    headers = {"Authorization": "Bearer " + session["token"]}
+    for path in ["/admin/users", "/admin/devices", "/admin/jobs"]:
+        assert client.get("/api/v1" + path, headers=headers).status_code == 403
+    for path, payload in [
+        ("/admin/users", {"username": "intruder", "password": "x", "role": "admin"}),
+        ("/admin/shutdown", {}),
+        ("/admin/queue/pause", {"paused": True}),
+    ]:
+        assert client.post("/api/v1" + path, headers=headers, json=payload).status_code == 403
+    assert client.post(
+        "/api/v1/me/devices", headers=headers,
+        json={"device_id": str(uuid4()), "public_key": "AAAA"},
+    ).status_code == 403
+    assert client.app.state.db.rows("SELECT id FROM users WHERE role='admin'") == []
+    assert client.app.state.db.rows("SELECT id FROM devices") == []
+    with client.app.state.db.transaction() as c:
+        c.execute("UPDATE sessions SET expires=?", (time.time() - 1,))
+    assert client.get("/api/v1/me", headers=headers).status_code == 401
+
+
+def test_web_login_schema_does_not_accept_an_asserted_role(client):
+    client.app.state.auth.create_user("web-user", "x")
+    assert client.post(
+        "/api/v1/auth/web-login", json={"username": "web-user", "password": "x", "role": "admin"},
+    ).status_code == 400
+
+
+def test_web_login_disabled_with_web_ui_and_lifetime_is_capped(client):
+    client.app.state.auth.create_user("web-user", "x")
+    client.app.state.settings.token_seconds = 3600
+    session = client.post("/api/v1/auth/web-login", json={"username": "web-user", "password": "x"}).json()
+    assert 0 < session["expires_at"] - time.time() <= 900
+    client.app.state.settings.web_ui = False
+    headers = {"Authorization": "Bearer " + session["token"]}
+    assert client.get("/api/v1/me", headers=headers).status_code == 401
+    assert client.get("/api/v1/jobs", headers=headers).status_code == 401
+    assert client.post(
+        "/api/v1/auth/web-login", json={"username": "web-user", "password": "x"},
+    ).status_code == 404
+
+
+def test_disabling_web_access_does_not_disable_desktop_devices(client, alice):
+    client.app.state.settings.web_ui = False
+    assert client.get("/api/v1/me", headers=alice["headers"]).status_code == 200
+
+
+def test_web_user_cannot_read_or_cancel_another_users_job(client, alice):
+    from uuid import uuid4
+
+    response = client.post(
+        "/api/v1/jobs", headers={**alice["headers"], "Idempotency-Key": str(uuid4())},
+        json={"name": "Synthetic private job", "command": "echo synthetic"},
+    )
+    assert response.status_code == 201
+    identifier = response.json()["id"]
+    client.app.state.auth.create_user("web-other", "x")
+    session = client.post(
+        "/api/v1/auth/web-login", json={"username": "web-other", "password": "x"},
+    ).json()
+    headers = {"Authorization": "Bearer " + session["token"]}
+    for suffix in ("", "/log", "/files", "/uploads"):
+        assert client.get(f"/api/v1/jobs/{identifier}" + suffix, headers=headers).status_code == 404
+    assert client.post(f"/api/v1/jobs/{identifier}/cancel", headers=headers).status_code == 404
+    assert client.get("/api/v1/jobs", headers=headers).json() == []
+    assert client.app.state.db.one("SELECT state FROM jobs WHERE id=?", (identifier,))["state"] == "UPLOADING"
+
+
+@pytest.mark.parametrize("password", ["x", "short"])
+def test_short_password_initial_admin_and_login(client, password):
+    client.app.state.auth.create_initial_admin("short-admin", password)
+    response = client.post(
+        "/api/v1/auth/login", json={"username": "short-admin", "password": password}
+    )
+    assert response.status_code == 200
+    assert response.json()["scope"] == "enrollment"
+    assert client.post(
+        "/api/v1/auth/login", json={"username": "short-admin", "password": "wrong"}
+    ).status_code == 401
+
+
+@pytest.mark.parametrize("password", ["x", "short"])
+def test_short_password_api_user_creation(client, password):
+    admin = enroll(client, "admin", "admin")
+    response = client.post(
+        "/api/v1/admin/users", headers=admin["headers"],
+        json={"username": "short-user", "password": password, "role": "user"},
+    )
+    assert response.status_code == 201
+    assert client.post(
+        "/api/v1/auth/login", json={"username": "short-user", "password": password}
+    ).status_code == 200
+
+
+@pytest.mark.parametrize("password", ["", "x" * 1025, None])
+def test_password_empty_type_and_upper_bound_still_rejected(password):
+    from job_server.auth import password_hash
+    from job_server.errors import ServerError
+    with pytest.raises(ServerError) as error:
+        password_hash(password)
+    assert error.value.code == "password_policy"
 
 
 def test_login_enrollment_cannot_run_jobs(client, alice):

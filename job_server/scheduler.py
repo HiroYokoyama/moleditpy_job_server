@@ -109,14 +109,27 @@ class Scheduler:
     def tick(self):
         self.reconcile()
         with self.db.transaction() as c:
-            if self.db.metadata("paused") == "true":
-                return
+            # A durable force request may wait for a dependency. Losing the
+            # requesting administrator's authority must revoke the override
+            # before priority ordering or resource checks are evaluated.
+            for revoked in c.execute(
+                """SELECT j.id,j.force_actor FROM jobs j LEFT JOIN users u ON u.id=j.force_actor
+                   WHERE j.state='PENDING' AND j.force_run=1
+                   AND (u.id IS NULL OR u.enabled<>1 OR u.role<>'admin')"""
+            ).fetchall():
+                c.execute("UPDATE jobs SET force_run=0,force_actor=NULL WHERE id=?", (revoked["id"],))
+                self.db.event(c, "job_force_run_revoked", job_id=revoked["id"],
+                              requested_by=revoked["force_actor"], reason="administrator_unavailable")
+            paused = self.db.metadata("paused") == "true"
             running = self.db.rows("SELECT * FROM jobs WHERE state='RUNNING'")
             used_cpu = sum(json.loads(j["spec"])["resources"]["cpus_per_task"] for j in running)
             used_memory = sum(json.loads(j["spec"])["resources"]["memory_mb"] for j in running)
             for job in self.db.rows(
-                "SELECT * FROM jobs WHERE state='PENDING' ORDER BY created_at,id"
+                "SELECT * FROM jobs WHERE state='PENDING' ORDER BY force_run DESC,priority DESC,created_at,id"
             ):
+                forced = bool(job["force_run"])
+                if paused and not forced:
+                    continue
                 spec = json.loads(job["spec"])
                 predecessor_id = spec["after_job"]
                 if predecessor_id:
@@ -129,9 +142,9 @@ class Scheduler:
                         continue
                 active = sum(j["owner_id"] == job["owner_id"] for j in running)
                 resources = spec["resources"]
-                if active >= self.settings.max_active_per_user:
+                if not forced and active >= self.settings.max_active_per_user:
                     continue
-                if (
+                if not forced and (
                     used_cpu + resources["cpus_per_task"] > self.settings.cpus
                     or used_memory + resources["memory_mb"] > self.settings.memory_mb
                 ):
@@ -141,10 +154,11 @@ class Scheduler:
                 self.settings.save(control / "settings.json")
                 atomic_json(control / "request.json", {"spec": spec})
                 c.execute(
-                    "UPDATE jobs SET state='RUNNING',started_at=? WHERE id=? AND state='PENDING'",
+                    "UPDATE jobs SET state='RUNNING',started_at=?,force_run=0,force_actor=NULL WHERE id=? AND state='PENDING'",
                     (time.time(), job["id"]),
                 )
-                self.db.event(c, "dispatch_claimed", job_id=job["id"])
+                self.db.event(c, "dispatch_claimed", actor=job["force_actor"] if forced else None,
+                              job_id=job["id"], forced=forced, priority=job["priority"])
                 claimed = job
                 break
             else:

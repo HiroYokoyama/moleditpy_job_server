@@ -16,8 +16,8 @@ from .errors import reject
 
 
 def password_hash(password):
-    if not isinstance(password, str) or not 12 <= len(password) <= 1024:
-        reject(400, "password_policy", "Password must contain 12–1024 characters")
+    if not isinstance(password, str) or not 1 <= len(password) <= 1024:
+        reject(400, "password_policy", "Password must contain 1–1024 characters")
     salt = secrets.token_bytes(16)
     digest = hashlib.scrypt(
         password.encode(), salt=salt, n=32768, r=8, p=1, maxmem=64 * 1024 * 1024
@@ -121,7 +121,7 @@ class Auth:
         )
         return {"token": token, "expires_at": expires, "scope": scope}
 
-    def login(self, username, password):
+    def login(self, username, password, *, web=False):
         user = self.db.one("SELECT * FROM users WHERE username=?", (username,))
         if (
             not verify_password(password, user["password_hash"] if user else self.dummy_hash)
@@ -138,18 +138,26 @@ class Auth:
             ).fetchone():
                 reject(401, "invalid_credentials", "Invalid credentials")
             self.db.event(c, "login", user["id"])
+            c.execute("DELETE FROM sessions WHERE expires<?", (time.time(),))
+            if web:
+                return self.issue(c, user["id"], scope="web", lifetime=min(self.settings.token_seconds, 900))
             return self.issue(c, user["id"], scope="enrollment", lifetime=300)
 
-    def principal(self, token, scope="access"):
+    def logout(self, principal):
+        with self.db.transaction() as c:
+            principal = self.current(principal)
+            c.execute("DELETE FROM sessions WHERE digest=?", (principal["digest"],))
+
+    def principal(self, token, scope="access", *, allow_web=False):
         if not isinstance(token, str) or len(token) > 256:
             reject(401, "unauthenticated", "Authentication required")
-        return self._session(hashlib.sha256(token.encode()).hexdigest(), scope)
+        return self._session(hashlib.sha256(token.encode()).hexdigest(), scope, allow_web=allow_web)
 
     def current(self, principal):
         """Revalidate a snapshot under the caller's mutation transaction."""
         return self._session(principal["digest"], principal["scope"])
 
-    def _session(self, digest, scope):
+    def _session(self, digest, scope, *, allow_web=False):
         result = self.db.one(
             """SELECT s.*,u.role,u.username,u.enabled,d.revoked_at FROM sessions s
                               JOIN users u ON u.id=s.user_id LEFT JOIN devices d ON d.id=s.device_id
@@ -160,7 +168,8 @@ class Auth:
             not result
             or not result["enabled"]
             or result["expires"] <= time.time()
-            or result["scope"] != scope
+            or (result["scope"] != scope and not (allow_web and scope == "access" and result["scope"] == "web"))
+            or (result["scope"] == "web" and not self.settings.web_ui)
             or result["revoked_at"]
         ):
             reject(401, "unauthenticated", "Credential expired or revoked")
@@ -175,9 +184,11 @@ class Auth:
 
     def fresh(self, principal):
         if time.time() - principal["authenticated_at"] > 300:
-            reject(401, "reauthenticate", "Repeat device authentication for this operation")
+            reject(401, "reauthenticate", "Sign in again for this operation")
 
     def enroll(self, principal, device_id, public_key):
+        if principal["scope"] == "web":
+            reject(403, "device_registration_forbidden", "Register persistent devices from the desktop client")
         self.fresh(principal)
         try:
             uuid.UUID(device_id)

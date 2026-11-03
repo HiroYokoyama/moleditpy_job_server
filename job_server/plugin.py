@@ -55,10 +55,10 @@ def initialize(context):
         dialog.tabs.setCurrentIndex(index)
         dialog.show()
 
-    context.add_plugin_menu("Job Server/Server Dashboard...", lambda: open_tab(0), icon=icon)
-    context.add_plugin_menu("Job Server/Users & Devices...", lambda: open_tab(1), icon=icon)
-    context.add_plugin_menu("Job Server/Settings...", lambda: open_tab(2), icon=icon)
-    context.add_plugin_menu("Job Server/Open Logs...", lambda: open_logs(), icon=icon)
+    context.add_menu_action("Extensions/Job Server/Server Dashboard...", lambda: open_tab(0), icon=icon)
+    context.add_menu_action("Extensions/Job Server/Users & Devices...", lambda: open_tab(1), icon=icon)
+    context.add_menu_action("Extensions/Job Server/Settings...", lambda: open_tab(2), icon=icon)
+    context.add_menu_action("Extensions/Job Server/Open Logs...", lambda: open_logs(), icon=icon)
 
 
 def open_logs():

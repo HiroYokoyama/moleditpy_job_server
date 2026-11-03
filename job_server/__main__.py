@@ -45,7 +45,7 @@ def main():
                         "An administrator already exists; use the authenticated admin API"
                     )
                 username = input("Administrator username: ").strip()
-                password = getpass.getpass("Initial password (12+ characters): ")
+                password = getpass.getpass("Initial password: ")
                 if password != getpass.getpass("Repeat password: "):
                     raise ValueError("Passwords differ")
                 print(json.dumps(Auth(db, settings).create_initial_admin(username, password)))

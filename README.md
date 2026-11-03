@@ -3,20 +3,22 @@
 [![Tests](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/test.yml/badge.svg)](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/test.yml)
 [![Security](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/security.yml/badge.svg)](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/security.yml)
 [![Release](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/release.yml/badge.svg)](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/release.yml)
-[![Version](https://img.shields.io/badge/version-0.3.3-blue)](pyproject.toml)
+[![Version](https://img.shields.io/badge/version-0.4.0-blue)](pyproject.toml)
 [![Downloads](https://img.shields.io/github/downloads/HiroYokoyama/moleditpy_job_server/total)](https://github.com/HiroYokoyama/moleditpy_job_server/releases)
 [![License: GPL v3](https://img.shields.io/badge/License-LGPLv3-blue.svg)](LICENSE)
 [![MoleditPy](https://img.shields.io/badge/MoleditPy-5.x-3577F7)](https://github.com/HiroYokoyama/python_molecular_editor)
 
 A LAN computational helper for MoleditPy Job Manager, with an authenticated shared
 job queue, headless daemon, MoleditPy administration plugin, and browser UI.
-Version **0.3.3**. Access is for trusted users on a private network.
+Version **0.4.0**. Access is for trusted users on a private network.
 
 > [!WARNING]
 > **Never expose Job Server to the public internet. Use localhost, a private LAN over HTTPS, or a private Tailscale tailnet only.**
 > Do not use Tailscale Funnel, router port forwarding, a public reverse proxy, or an internet tunnel.
 > Jobs execute arbitrary commands under the service OS account. Only admit trusted users,
 > restrict tailnet access, and run under a low-privilege account. Authentication is not an OS sandbox.
+
+![Job Server desktop dashboard with synthetic jobs](docs/gui-dashboard.png)
 
 ![Job Server browser dashboard at desktop size (1440 × 1000)](docs/web-ui.jpg)
 
@@ -27,8 +29,8 @@ Job Manager source dependency, rather than a second maintained copy.
 
 ## Use from MoleditPy (plugin workflow)
 
-Install **`job_server_0.3.3.zip`** using MoleditPy's Plugin Installer. Then open
-**Plugin → Job Server → Server Dashboard…**.
+Install **`job_server_0.4.0.zip`** using MoleditPy's Plugin Installer. Then open
+**Extensions → Job Server → Server Dashboard…**.
 If required Python libraries are missing, opening a Job Server dialog shows their
 names and installation guidance. Install them in MoleditPy's Python environment
 and retry; no daemon is started by this check.
@@ -38,22 +40,55 @@ Extract the artifact download and install the inner plugin ZIP, or build it from
 
 You can operate the server from MoleditPy dialogs; the command line is optional:
 
-1. On the **server PC**, open **Users & Devices… → Create initial administrator**.
-   This also works if the daemon is already running. An existing enabled
-   administrator prevents a second bootstrap account.
-2. Click **Start** in Server Dashboard.
-3. Click **Sign in / register device** once for the administrator.
-4. Use the dashboard to pause/resume the queue, view jobs, or cancel a selected job.
-5. Open **Users & Devices…** to add users, disable accounts, or revoke device keys.
-6. Open **Settings…** to configure resource budgets, limits, and the daemon runtime.
-7. Click **Open Web UI** to open the browser interface when you want it.
+1. On the **server PC**, open Server Dashboard. If no administrator exists, the
+   **Job Server setup** screen opens. You can reopen it with **File → Setup guide…**.
+2. Set the optional remote Web address and resource budget. Leave the Web address
+   blank for local access. For Tailscale, copy its printed HTTPS URL into the field.
+3. Enter the initial administrator username and password, then choose
+   **Create, start and sign in**. This explicitly saves the configuration, creates
+   the account, starts the daemon and signs in this GUI. No second password prompt
+   is needed. An existing administrator prevents a second bootstrap account.
+4. Use **Queue** to pause/resume the queue or cancel a selected job.
+5. Open **Users & Devices** to view accounts and devices; use **Account** to add
+   users, disable the selected user, or revoke the selected device.
+6. Open **Settings** to configure resource budgets, limits, and the daemon runtime.
+   Save changes, then choose **Server → Restart** to apply them.
+7. Choose **File → Open Web UI** to open the browser interface when you want it.
+
+For an already configured server, the setup screen does not open automatically.
+Use **Account → Sign in / register device…** for its desktop administration window.
+The desktop keeps its registered device credential and can authenticate on later
+uses without saving the administrator password. Initial setup can also be run from
+**Account → Create initial administrator…**; its dialog states that this starts the
+server and signs in the GUI. Closing the guide without applying it creates no
+account and starts no server.
+
+![Job Server first-run setup](docs/gui-setup.png)
 
 Username and password are entered together in one dialog. Successful actions show
 a **Success** dialog, and interactive errors remain visible until dismissed.
-The administration window, Job Manager, and browser each register their own device:
-signing in to one does not sign in the others. **Stop** and **Add user** require
+The administration window and Job Manager register desktop devices. Browser sign-in
+uses a separate temporary session and does not register a device or store a private
+key. Signing in to one does not sign in the others. **Stop** and **Add user** require
 signing in within the administration window first. If its credential file is
 missing, the dialog explains how to register instead of reporting "File not found".
+
+The browser shows only sign-in before authentication. Connection failures and
+an unconfigured remote HTTPS origin appear on that screen instead of leaving
+the page at Connecting. The administration GUI remains available locally for
+initial account setup and explicit server start.
+
+For pending jobs, administrators can set **Priority** from -1000 to 1000; higher
+values run first, with FIFO order for ties. **Force run** explicitly overrides
+queue pause, queue order, CPU/memory budgets and per-user active-job limits. It can
+overcommit this PC and requires confirmation. Dependency completion/success rules,
+input validation and one-time dispatch still apply. A forced running job counts
+against the capacity available to subsequent ordinary jobs. These controls operate
+on the server queue through the administration GUI and Web job details.
+Double-click a GUI job, or choose **Queue → Job details…**, to inspect its state,
+command, resource request, dependency, latest output and result file metadata.
+
+![Job Server desktop job details with synthetic output](docs/gui-job-details.png)
 
 For a remote server, create the initial account on that server PC (for example,
 through a remote desktop session), then register Job Manager on the client PC using
@@ -97,10 +132,14 @@ python -m job_server serve
 ```
 
 Open **http://127.0.0.1:8766/** on the same machine. Sign in with the administrator
-you created. The browser registers an Ed25519 device key; subsequent sign-ins need
-only the username in that browser. Private keys are non-exportable Web Crypto keys
-in IndexedDB. Bearer tokens stay in page memory. Clearing browser storage requires
-registering a new device and revoking the old one.
+you created. Web sign-in requires the username and password each time the page is
+opened or reloaded. The short-lived access token stays only in page memory; no
+application credentials are written to cookies, local storage or IndexedDB. Signing
+out invalidates that session on the server. Closing or leaving the page clears the
+client state and requests server-side sign-out on a best-effort basis; otherwise
+the server session expires within 15 minutes (or the configured token lifetime
+if shorter). Administrator operations require a sign-in within the last five minutes.
+Desktop device credentials remain available for GUI and Job Manager use.
 
 CLI commands accept `--config /path/to/settings.json` before or after the command.
 Persistent data defaults to `~/.moleditpy/job_server/`, outside installed plugin code.
@@ -112,8 +151,8 @@ The listener starts only on explicit `serve` or GUI Start and binds **127.0.0.1*
 python scripts/build_plugin.py
 ```
 
-Install `dist/job_server_0.3.3.zip` using MoleditPy's Plugin Installer. Open
-**Plugin → Job Server → Server Dashboard…**. The GUI can bootstrap the first
+Install `dist/job_server_0.4.0.zip` using MoleditPy's Plugin Installer. Open
+**Extensions → Job Server → Server Dashboard…**. The GUI can bootstrap the first
 administrator, start/stop/restart the daemon, pause/resume the queue, manage accounts
 and device keys, and cancel jobs. Reloading or closing the plugin does not stop the daemon.
 For a frozen/portable MoleditPy application, install the server in a Python environment
@@ -169,9 +208,9 @@ certificates and forwards connections to the local Job Server.
 4. Copy the **HTTPS URL printed by Tailscale Serve** into Job Manager's
    **Hosts → Server URL**, then use **Sign in / register device**. Use the printed
    hostname, not the server's LAN IP, and do not append `:8766` to that HTTPS URL.
-5. To use the browser UI, also set Job Server's `public_url` to that exact HTTPS
-   origin and restart the daemon. This permits that browser origin; other origins
-   remain rejected.
+5. To use the browser UI, paste that same HTTPS URL in Job Server's
+   **Settings → Web address (remote access)**, save the configuration, then
+   choose **Server → Restart**. The JSON setting is `public_url`. This enables browser access at that address. Other website addresses remain rejected.
 
 The daemon stays on loopback and ignores forwarded headers. HTTP on
 `127.0.0.1:8766` is the local connection from Tailscale Serve to Job Server; remote
