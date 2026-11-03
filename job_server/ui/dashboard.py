@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..client import JobServerClient
+from .units import GBSpinBox, gb
 from ..settings import Settings
 
 
@@ -306,14 +307,18 @@ class Dashboard(QDialog):
         for key, label, maximum in (
             ("port", "Private loopback port", 65535),
             ("cpus", "CPU budget", 4096),
-            ("memory_mb", "Memory budget (MB)", 2147483647),
+            ("memory_mb", "Memory budget", 2147483647),
             ("max_active_per_user", "Active jobs per user", 10000),
             ("max_queued_per_user", "Queued jobs per user", 100000),
-            ("storage_quota_mb", "Storage per user/job (MB)", 2147483647),
+            ("storage_quota_mb", "Storage per user/job", 2147483647),
         ):
-            field = QSpinBox()
-            field.setRange(1, maximum)
-            field.setValue(getattr(self.settings, key))
+            if key.endswith("_mb"):
+                field = GBSpinBox(maximum)
+                field.set_mb(getattr(self.settings, key))
+            else:
+                field = QSpinBox()
+                field.setRange(1, maximum)
+                field.setValue(getattr(self.settings, key))
             self.fields[key] = field
             form.addRow(label, field)
         self.public_url = QLineEdit(self.settings.public_url)
@@ -440,7 +445,7 @@ class Dashboard(QDialog):
                 f"{resource.get('reserved_cpus', '—')} / {resource.get('cpus', '—')}"
             )
             self.metric_values["memory"].setText(
-                f"{resource.get('reserved_memory_mb', '—')} / {resource.get('memory_mb', '—')} MB"
+                f"{gb(resource.get('reserved_memory_mb'))} / {gb(resource.get('memory_mb'))} GB"
             )
             self._set_usage("cpu", resource.get("reserved_cpus"), resource.get("cpus"))
             self._set_usage("memory", resource.get("reserved_memory_mb"), resource.get("memory_mb"))
@@ -560,7 +565,8 @@ class Dashboard(QDialog):
                 self.settings,
                 python_executable=self.python_path.text().strip(),
                 public_url=self.public_url.text().strip(),
-                **{key: field.value() for key, field in self.fields.items()},
+                **{key: field.mb() if isinstance(field, GBSpinBox) else field.value()
+                   for key, field in self.fields.items()},
             )
             candidate.validate().save(self.config)
             self.settings = candidate

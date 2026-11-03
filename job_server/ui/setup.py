@@ -5,6 +5,8 @@ from PySide6.QtWidgets import (
     QDialog, QDialogButtonBox, QFormLayout, QLabel, QLineEdit, QSpinBox, QVBoxLayout,
 )
 
+from .units import GBSpinBox
+
 
 class SetupDialog(QDialog):
     def __init__(self, dashboard):
@@ -40,13 +42,12 @@ class SetupDialog(QDialog):
         self.cpus = QSpinBox()
         self.cpus.setRange(1, 4096)
         self.cpus.setValue(dashboard.fields["cpus"].value())
-        self.memory = QSpinBox()
-        self.memory.setRange(1, 2147483647)
-        self.memory.setValue(dashboard.fields["memory_mb"].value())
+        self.memory = GBSpinBox(2147483647)
+        self.memory.set_mb(dashboard.fields["memory_mb"].mb())
         self.python = QLineEdit(dashboard.python_path.text())
         self.python.setPlaceholderText("Automatic; select a Python executable for portable builds")
         resources.addRow("CPU budget", self.cpus)
-        resources.addRow("Memory budget (MB)", self.memory)
+        resources.addRow("Memory budget", self.memory)
         resources.addRow("Daemon Python", self.python)
         layout.addLayout(resources)
         self.username, self.password, self.confirm = QLineEdit(), QLineEdit(), QLineEdit()
@@ -99,7 +100,7 @@ class SetupDialog(QDialog):
             return
         dashboard.public_url.setText(self.address.text().strip())
         dashboard.fields["cpus"].setValue(self.cpus.value())
-        dashboard.fields["memory_mb"].setValue(self.memory.value())
+        dashboard.fields["memory_mb"].set_mb(self.memory.mb())
         dashboard.python_path.setText(self.python.text().strip())
         if not dashboard.save_settings():
             self.status.setText(dashboard.message.text())

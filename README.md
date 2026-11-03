@@ -29,7 +29,7 @@ Job Manager source dependency, rather than a second maintained copy.
 
 ## Use from MoleditPy (plugin workflow)
 
-Install **`job_server_0.4.1.zip`** using MoleditPy's Plugin Installer. Then open
+Install **`job_server_0.4.3.zip`** using MoleditPy's Plugin Installer. Then open
 **Extensions → Job Server…**.
 If required Python libraries are missing, opening a Job Server dialog shows their
 names and installation guidance. Install them in MoleditPy's Python environment
@@ -152,7 +152,7 @@ The listener starts only on explicit `serve` or GUI Start and binds **127.0.0.1*
 python scripts/build_plugin.py
 ```
 
-Install `dist/job_server_0.4.1.zip` using MoleditPy's Plugin Installer. Open
+Install `dist/job_server_0.4.3.zip` using MoleditPy's Plugin Installer. Open
 **Extensions → Job Server…**. The GUI can bootstrap the first
 administrator, start/stop/restart the daemon, pause/resume the queue, manage accounts
 and device keys, and cancel jobs. Reloading or closing the plugin does not stop the daemon.
