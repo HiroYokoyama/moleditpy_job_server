@@ -95,6 +95,27 @@ def test_disabling_web_access_does_not_disable_desktop_devices(client, alice):
     assert client.get("/api/v1/me", headers=alice["headers"]).status_code == 200
 
 
+def test_web_user_cannot_read_or_cancel_another_users_job(client, alice):
+    from uuid import uuid4
+
+    response = client.post(
+        "/api/v1/jobs", headers={**alice["headers"], "Idempotency-Key": str(uuid4())},
+        json={"name": "Synthetic private job", "command": "echo synthetic"},
+    )
+    assert response.status_code == 201
+    identifier = response.json()["id"]
+    client.app.state.auth.create_user("web-other", "x")
+    session = client.post(
+        "/api/v1/auth/web-login", json={"username": "web-other", "password": "x"},
+    ).json()
+    headers = {"Authorization": "Bearer " + session["token"]}
+    for suffix in ("", "/log", "/files", "/uploads"):
+        assert client.get(f"/api/v1/jobs/{identifier}" + suffix, headers=headers).status_code == 404
+    assert client.post(f"/api/v1/jobs/{identifier}/cancel", headers=headers).status_code == 404
+    assert client.get("/api/v1/jobs", headers=headers).json() == []
+    assert client.app.state.db.one("SELECT state FROM jobs WHERE id=?", (identifier,))["state"] == "UPLOADING"
+
+
 @pytest.mark.parametrize("password", ["x", "short"])
 def test_short_password_initial_admin_and_login(client, password):
     client.app.state.auth.create_initial_admin("short-admin", password)
