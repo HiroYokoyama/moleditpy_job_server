@@ -18,6 +18,8 @@ Version **0.4.0**. Access is for trusted users on a private network.
 > Jobs execute arbitrary commands under the service OS account. Only admit trusted users,
 > restrict tailnet access, and run under a low-privilege account. Authentication is not an OS sandbox.
 
+![Job Server desktop dashboard with synthetic jobs](docs/gui-dashboard.png)
+
 ![Job Server browser dashboard at desktop size (1440 × 1000)](docs/web-ui.jpg)
 
 The daemon owns CPU/RAM reservations and a durable SQLite job ledger. Jobs run in
@@ -61,6 +63,8 @@ uses without saving the administrator password. Initial setup can also be run fr
 server and signs in the GUI. Closing the guide without applying it creates no
 account and starts no server.
 
+![Job Server first-run setup](docs/gui-setup.png)
+
 Username and password are entered together in one dialog. Successful actions show
 a **Success** dialog, and interactive errors remain visible until dismissed.
 The administration window and Job Manager register desktop devices. Browser sign-in
@@ -73,6 +77,18 @@ The browser shows only sign-in before authentication. Connection failures and
 an unconfigured remote HTTPS origin appear on that screen instead of leaving
 the page at Connecting. The administration GUI remains available locally for
 initial account setup and explicit server start.
+
+For pending jobs, administrators can set **Priority** from -1000 to 1000; higher
+values run first, with FIFO order for ties. **Force run** explicitly overrides
+queue pause, queue order, CPU/memory budgets and per-user active-job limits. It can
+overcommit this PC and requires confirmation. Dependency completion/success rules,
+input validation and one-time dispatch still apply. A forced running job counts
+against the capacity available to subsequent ordinary jobs. These controls operate
+on the server queue through the administration GUI and Web job details.
+Double-click a GUI job, or choose **Queue → Job details…**, to inspect its state,
+command, resource request, dependency, latest output and result file metadata.
+
+![Job Server desktop job details with synthetic output](docs/gui-job-details.png)
 
 For a remote server, create the initial account on that server PC (for example,
 through a remote desktop session), then register Job Manager on the client PC using

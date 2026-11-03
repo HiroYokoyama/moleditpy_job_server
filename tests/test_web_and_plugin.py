@@ -214,11 +214,12 @@ def test_gui_refuses_listener_that_does_not_hold_daemon_lock(tmp_path, monkeypat
     assert "not this Job Server" in dialog.message.text()
     assert not any(path == "/auth/login" for _, path, _ in sent)
 
-    # The genuine daemon holds the lock and is reused.
+    # A held lock alone is not proof that this HTTP port belongs to the daemon.
     lock = InstanceLock(tmp_path).acquire()
     try:
         run(dialog.start_daemon)
-        assert "reusing it" in dialog.message.text()
+        assert "not this Job Server" in dialog.message.text()
+        assert not any(path == "/auth/login" for _, path, _ in sent)
     finally:
         lock.release()
     dialog.close()
