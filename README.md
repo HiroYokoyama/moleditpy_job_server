@@ -3,14 +3,14 @@
 [![Tests](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/test.yml/badge.svg)](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/test.yml)
 [![Security](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/security.yml/badge.svg)](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/security.yml)
 [![Release](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/release.yml/badge.svg)](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/release.yml)
-[![Version](https://img.shields.io/badge/version-0.4.0-blue)](pyproject.toml)
+[![Version](https://img.shields.io/badge/version-0.4.1-blue)](pyproject.toml)
 [![Downloads](https://img.shields.io/github/downloads/HiroYokoyama/moleditpy_job_server/total)](https://github.com/HiroYokoyama/moleditpy_job_server/releases)
 [![License: GPL v3](https://img.shields.io/badge/License-LGPLv3-blue.svg)](LICENSE)
 [![MoleditPy](https://img.shields.io/badge/MoleditPy-5.x-3577F7)](https://github.com/HiroYokoyama/python_molecular_editor)
 
 A LAN computational helper for MoleditPy Job Manager, with an authenticated shared
 job queue, headless daemon, MoleditPy administration plugin, and browser UI.
-Version **0.4.0**. Access is for trusted users on a private network.
+Version **0.4.1**. Access is for trusted users on a private network.
 
 > [!WARNING]
 > **Never expose Job Server to the public internet. Use localhost, a private LAN over HTTPS, or a private Tailscale tailnet only.**
@@ -29,7 +29,7 @@ Job Manager source dependency, rather than a second maintained copy.
 
 ## Use from MoleditPy (plugin workflow)
 
-Install **`job_server_0.4.0.zip`** using MoleditPy's Plugin Installer. Then open
+Install **`job_server_0.4.1.zip`** using MoleditPy's Plugin Installer. Then open
 **Extensions → Job Server → Server Dashboard…**.
 If required Python libraries are missing, opening a Job Server dialog shows their
 names and installation guidance. Install them in MoleditPy's Python environment
@@ -132,14 +132,13 @@ python -m job_server serve
 ```
 
 Open **http://127.0.0.1:8766/** on the same machine. Sign in with the administrator
-you created. Web sign-in requires the username and password each time the page is
-opened or reloaded. The short-lived access token stays only in page memory; no
-application credentials are written to cookies, local storage or IndexedDB. Signing
-out invalidates that session on the server. Closing or leaving the page clears the
-client state and requests server-side sign-out on a best-effort basis; otherwise
-the server session expires within 15 minutes (or the configured token lifetime
-if shorter). Administrator operations require a sign-in within the last five minutes.
-Desktop device credentials remain available for GUI and Job Manager use.
+you created. Web sign-in survives reloading the same tab. Its short-lived token is
+kept in tab-scoped session storage, with no password or device private key saved.
+Reloading validates the session with the server before showing the dashboard.
+Signing out removes the saved token and invalidates the server session. Storage
+is scoped to the tab; the server token expires within 15 minutes
+(or the configured lifetime if shorter). Administrator operations require a sign-in
+within the last five minutes. Desktop device credentials remain separate.
 
 CLI commands accept `--config /path/to/settings.json` before or after the command.
 Persistent data defaults to `~/.moleditpy/job_server/`, outside installed plugin code.
@@ -151,7 +150,7 @@ The listener starts only on explicit `serve` or GUI Start and binds **127.0.0.1*
 python scripts/build_plugin.py
 ```
 
-Install `dist/job_server_0.4.0.zip` using MoleditPy's Plugin Installer. Open
+Install `dist/job_server_0.4.1.zip` using MoleditPy's Plugin Installer. Open
 **Extensions → Job Server → Server Dashboard…**. The GUI can bootstrap the first
 administrator, start/stop/restart the daemon, pause/resume the queue, manage accounts
 and device keys, and cancel jobs. Reloading or closing the plugin does not stop the daemon.

@@ -30,10 +30,12 @@ The daemon binds loopback and refuses elevated execution except an explicit isol
 override. Private LAN/Tailscale clients must use validated HTTPS terminating on the same host.
 Forwarded headers are ignored. Only exact configured browser origins are accepted;
 there is no permissive CORS response. Web sign-in uses password verification and a short-lived opaque token held only in
-page memory. It does not generate or persist browser device keys. Web sessions
+tab-scoped session storage for reload recovery. It does not save passwords or
+generate browser device keys. Restored sessions are checked against the server. Web sessions
 cannot enroll persistent devices; desktop enrollment remains a separate scope.
 Tokens are hashed server-side, expire, and are invalidated by logout or user disable.
-No access token is placed in a URL, cookie or persistent browser storage.
+No access token is placed in a URL, cookie or localStorage. Explicit logout clears
+the tab token and invalidates it server-side.
 The web UI uses a restrictive CSP, no third-party assets and textContent for job data.
 
 Transfers reject traversal, Windows device names, alternate data streams, reserved wrapper

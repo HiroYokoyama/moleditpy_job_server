@@ -24,7 +24,7 @@ function element() {
     show(){this.open=true;},showModal(){this.open=true;},close(){this.open=false;},
   };
 }
-async function application(fetch) {
+async function application(fetch, storage=new Map()) {
   const elements = new Map(), events={};
   const get = name => {
     if (!elements.has(name)) elements.set(name, element());
@@ -34,7 +34,8 @@ async function application(fetch) {
     TextEncoder, Uint8Array, ArrayBuffer, Blob, URL, Date, console, AbortController,
     btoa: value=>Buffer.from(value,'binary').toString('base64'),
     crypto:{randomUUID, subtle:{sign:async()=>new Uint8Array(64), digest:webcrypto.subtle.digest.bind(webcrypto.subtle)}},
-    document:{querySelector:get, querySelectorAll:()=>[], createElement:element,body:element()},
+    document:{querySelector:get, querySelectorAll:()=>[], createElement:element,body:element(),addEventListener(name,callback){events[name]=callback;}},
+    sessionStorage:{getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,String(value)),removeItem:key=>storage.delete(key)},
     location:{origin:'http://127.0.0.1:8766'},
     setInterval(){}, setTimeout(){},clearTimeout(){},addEventListener(name,callback){events[name]=callback;},
     fetch:async(url, options)=>url==='/api/v1/health' ? response({server_version:'synthetic'}) : fetch(url, options),
@@ -42,7 +43,7 @@ async function application(fetch) {
   vm.runInContext(fs.readFileSync(process.argv[2], 'utf8'), context);
   await new Promise(done=>setImmediate(done));
   const state = vm.runInContext('state', context);
-  return {context, state, get, events, call:name=>vm.runInContext(name, context)};
+  return {context, state, get, events, storage, call:name=>vm.runInContext(name, context)};
 }
 function signedIn(app) {
   app.state.me={role:'user',username:'alice',user_id:'alice'};
@@ -192,9 +193,7 @@ async function keylessLogin() {
   await app.call('login')('alice','x');
   assert.equal(app.state.token,'web-token');
   assert.equal(app.context.document.body.classList.contains('signed-out'),false);
-  const reloaded=await application(async()=>{throw new Error('Unexpected authenticated request');});
-  assert.equal(reloaded.state.token,null,'Reloading must require a new password sign-in');
-  app.events.pagehide();
+  app.call('signOut')();
   assert.equal(app.state.token,null);
   assert.equal(app.state.me,null);
   assert.ok(calls.some(([url])=>url==='/api/v1/auth/logout'));
@@ -233,5 +232,70 @@ async function expiredDownload() {
   assert.equal(app.state.me,null);
   assert.match(app.get('#login-status').textContent,/Sign in again/);
 }
-const cases={queueControls,expiredDownload,keylessLogin,authentication,refresh,details,accountsPolling,accountsOrdering,loginView,connectionFailure,connectionTimeout};
+async function sessionRestore() {
+  const storage=new Map();
+  const saved={token:'saved-token',expires:Date.now()/1000+900,authenticated:Date.now()/1000};
+  storage.set('job-server-web-session',JSON.stringify(saved));
+  let passwordRequests=0;
+  const restored=await application(async(url,options)=>{
+    if(url==='/api/v1/auth/web-login')passwordRequests++;
+    assert.equal(options.headers.Authorization,'Bearer saved-token');
+    if(url==='/api/v1/me')return response({username:'alice',role:'user'});
+    if(url==='/api/v1/capabilities'||url==='/api/v1/system/resources')return response({});
+    if(url.startsWith('/api/v1/jobs?'))return response([]);
+    if(url==='/api/v1/auth/logout')return response({});
+    throw new Error('Unexpected URL '+url);
+  },storage);
+  assert.equal(restored.state.me.username,'alice');assert.equal(passwordRequests,0);
+  assert.equal(restored.context.document.body.classList.contains('signed-out'),false);
+  const rejected=await application(async()=>({ok:false,status:401,json:async()=>({message:'Revoked'})}),new Map(storage));
+  assert.equal(rejected.state.token,null);assert.equal(rejected.state.me,null);
+  assert.equal(rejected.storage.has('job-server-web-session'),false);
+  restored.call('signOut')();assert.equal(storage.has('job-server-web-session'),false);
+  const expired=new Map([['job-server-web-session',JSON.stringify({...saved,expires:1})]]);
+  const signedOut=await application(async()=>{throw new Error('Expired session must not authenticate');},expired);
+  assert.equal(signedOut.state.token,null);assert.equal(expired.size,0);
+}
+async function submittedAndCompleted() {
+  let status='PENDING';
+  const app=await application(async(url)=>{
+    if(url==='/api/v1/jobs')return response({id:'submitted'});
+    if(url.endsWith('/uploads'))return response([]);
+    if(url.endsWith('/commit'))return response({});
+    if(url==='/api/v1/system/resources')return response({running:status==='DONE'?0:1,pending:0});
+    const record={...job('submitted'),state:status,display_state:status};
+    if(url.startsWith('/api/v1/jobs?'))return response([record]);
+    if(url==='/api/v1/jobs/submitted')return response(record);
+    if(url.includes('/log?'))return response({text:'',next_offset:0});
+    if(url.endsWith('/files'))return response([]);
+    throw new Error('Unexpected URL '+url);
+  });
+  signedIn(app);app.state.page=3;
+  const field=value=>({value});
+  const form={querySelector:()=>({disabled:false}),elements:{files:{files:[]},name:field('submitted'),command:field('echo synthetic'),cpus:field('1'),memory:field('512'),walltime:field('60'),after:field(''),chain_any:{checked:false},globs:field('*.out')}};
+  await app.get('#submit-form').listeners.submit({preventDefault(){},currentTarget:form});
+  assert.equal(app.state.page,0);assert.equal(app.state.job,'submitted');
+  assert.equal(app.get('#jobs-body').children[0].children[1].children[0].textContent,'PENDING');
+  status='DONE';await app.call('refresh')();
+  assert.equal(app.get('#jobs-body').children[0].children[1].children[0].textContent,'DONE');
+  assert.equal(app.get('#running').textContent,0);
+  assert.match(app.get('#detail-name').textContent,/DONE/);
+  app.call('panel')('overview');await new Promise(done=>setImmediate(done));
+  assert.equal(app.state.job,null);
+}
+async function queuedRefresh() {
+  const entered=deferred(),late=deferred();let requests=0;
+  const app=await application(async url=>{
+    if(url==='/api/v1/system/resources')return response({});
+    assert.ok(url.startsWith('/api/v1/jobs?'));
+    if(++requests===1){entered.resolve();return late.promise;}
+    return response([{...job('updated'),state:'DONE',display_state:'DONE'}]);
+  });
+  signedIn(app);const first=app.call('refresh')();await entered.promise;
+  await app.call('refresh')();late.resolve(response([job('old')]));await first;
+  await new Promise(done=>setImmediate(done));
+  assert.equal(requests,2);
+  assert.equal(app.get('#jobs-body').children[0].children[1].children[0].textContent,'DONE');
+}
+const cases={sessionRestore,submittedAndCompleted,queuedRefresh,queueControls,expiredDownload,keylessLogin,authentication,refresh,details,accountsPolling,accountsOrdering,loginView,connectionFailure,connectionTimeout};
 cases[process.argv[3]]().then(()=>console.log('PASS '+process.argv[3])).catch(error=>{console.error(error);process.exitCode=1;});

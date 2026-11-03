@@ -1,6 +1,6 @@
 'use strict';
 const $ = selector => document.querySelector(selector);
-const state = {token:null, expires:0, authenticated:0,  me:null, capabilities:null, paused:false, job:null, jobInfo:null, queueBusy:false, offset:0, page:0, busy:false, generation:0, busyGeneration:-1, detailRequest:0, accountsRequest:0};
+const state = {token:null, expires:0, authenticated:0,  me:null, capabilities:null, paused:false, job:null, jobInfo:null, queueBusy:false, offset:0, page:0, busy:false, refreshPending:false, generation:0, busyGeneration:-1, detailRequest:0, accountsRequest:0};
 const encoder = new TextEncoder();
 const digest = async value => [...new Uint8Array(await crypto.subtle.digest('SHA-256',value))].map(v=>v.toString(16).padStart(2,'0')).join('');
 function message(text) { $('#notice').textContent = text; $('#notice').hidden = !text; }
@@ -21,9 +21,14 @@ function connection(text,online=false) {
 function requireSession(generation) {
   if(generation!==state.generation){const error=new Error('Session changed');error.staleSession=true;throw error;}
 }
+const SESSION_KEY='job-server-web-session';
+function saveSession() {
+  try {sessionStorage.setItem(SESSION_KEY,JSON.stringify({token:state.token,expires:state.expires,authenticated:state.authenticated}));} catch {}
+}
 function clearSession() {
+  try {sessionStorage.removeItem(SESSION_KEY);} catch {}
   state.generation++;state.detailRequest++;state.accountsRequest++;
-  Object.assign(state,{token:null,expires:0,authenticated:0,me:null,capabilities:null,job:null,jobInfo:null,queueBusy:false,offset:0,page:0,paused:false});
+  Object.assign(state,{token:null,expires:0,authenticated:0,me:null,capabilities:null,job:null,jobInfo:null,queueBusy:false,offset:0,page:0,paused:false,refreshPending:false});
   $('#signin').textContent='Sign in';$('#signout').hidden=true;$('#accounts-nav').hidden=true;$('#pause').hidden=true;
   for(const id of ['jobs-body','users-body','devices-body','result-files'])$('#'+id).replaceChildren();
   for(const id of ['log','detail-name','detail-id','detail-spec'])$('#'+id).textContent='';
@@ -69,13 +74,28 @@ async function login(username,password) {
     const session=await api('POST','/auth/web-login',{username,password},{public:true});
     requireSession(generation);
     state.token=session.token;state.expires=session.expires_at;state.authenticated=Date.now()/1000;
-    state.me=await api('GET','/me');state.capabilities=await api('GET','/capabilities');
-    $('#signin').textContent=state.me.username;$('#signout').hidden=false;
-    const admin=state.me.role==='admin';$('#accounts-nav').hidden=!admin;$('#pause').hidden=!admin;
-    $('#login-status').textContent='';setSignedIn(true);
-    $('#jobs-caption').textContent=admin?'All jobs on this server.':'Your jobs on this server.';
-    message('');await refresh();
+    await openSession();
   } catch(error) {if(generation===state.generation)clearSession();throw error;}
+}
+async function openSession() {
+  state.me=await api('GET','/me');state.capabilities=await api('GET','/capabilities');
+  $('#signin').textContent=state.me.username;$('#signout').hidden=false;
+  const admin=state.me.role==='admin';$('#accounts-nav').hidden=!admin;$('#pause').hidden=!admin;
+  $('#login-status').textContent='';setSignedIn(true);
+  $('#jobs-caption').textContent=admin?'All jobs on this server.':'Your jobs on this server.';
+  saveSession();message('');await refresh();
+}
+async function restoreSession() {
+  let saved;
+  try {saved=JSON.parse(sessionStorage.getItem(SESSION_KEY)||'null');} catch {}
+  const generation=clearSession();
+  if(!saved||typeof saved.token!=='string'||!saved.token||saved.token.length>256||
+     !Number.isFinite(saved.expires)||saved.expires<Date.now()/1000+10||
+     !Number.isFinite(saved.authenticated)||saved.authenticated>Date.now()/1000+30) {
+    await refresh();return;
+  }
+  state.token=saved.token;state.expires=saved.expires;state.authenticated=saved.authenticated;
+  try {await openSession();} catch(error) {if(generation===state.generation)clearSession();throw error;}
 }
 $('#login-form').addEventListener('submit',event=>{
   event.preventDefault();const form=event.currentTarget,submit=form.querySelector('[type=submit]');
@@ -93,7 +113,7 @@ function signOut() {
   if(token)fetch('/api/v1/auth/logout',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:'{}',credentials:'omit',redirect:'error',cache:'no-store',keepalive:true}).catch(()=>{});
 }
 $('#signout').addEventListener('click',signOut);
-globalThis.addEventListener?.('pagehide',signOut);
+
 // Remove credentials stored by older browser clients; never read or reuse them.
 try {globalThis.indexedDB?.deleteDatabase('moleditpy-job-server');} catch {}
 
@@ -104,25 +124,27 @@ function panel(name) {
   $('#page-title').textContent={overview:'Overview',submit:'Submit a job',accounts:'Users & devices',detail:'Job details'}[name];
   if (name!=='detail') {state.job=null;state.detailRequest++;}
   if (name==='accounts') safe(accounts);
+  if (name==='overview'&&state.me) safe(refresh);
 }
 document.querySelectorAll('[data-panel]').forEach(element=>element.addEventListener('click',()=>panel(element.dataset.panel)));
 $('#back').addEventListener('click',()=>panel('overview'));
 async function refresh() {
   const generation=state.generation;
-  if(state.busy&&state.busyGeneration===generation) return;
+  if(state.busy&&state.busyGeneration===generation){state.refreshPending=true;return;}
   state.busy=true;state.busyGeneration=generation;
   try {
     const health=await api('GET','/health',null,{public:true});
     connection('Server online · '+health.server_version,true);
     if(!state.me)return;
     if(state.me.role==='admin'&&!$('#accounts').hidden)await accounts();
-    if(state.job){await detail(state.job,false);return;}
     const resource=await api('GET','/system/resources');
     $('#running').textContent=resource.running;$('#pending').textContent=resource.pending;
     $('#cpu').textContent=resource.reserved_cpus+' / '+resource.cpus;
     $('#memory').textContent=resource.reserved_memory_mb+' / '+resource.memory_mb;
     state.paused=resource.paused;$('#queue-label').textContent=resource.paused?'Queue paused':'Shared queue';$('#pause').textContent=resource.paused?'Resume queue':'Pause queue';
-    const jobs=await api('GET',(state.me.role==='admin'?'/admin/jobs':'/jobs')+'?limit=50&offset='+state.page*50);
+    const page=state.page;
+    const jobs=await api('GET',(state.me.role==='admin'?'/admin/jobs':'/jobs')+'?limit=50&offset='+page*50);
+    if(page!==state.page){state.refreshPending=true;return;}
     $('#jobs-body').replaceChildren();
     for(const job of jobs){
       const row=document.createElement('tr');const name=cell(row,job.spec.name,'job-name');
@@ -132,8 +154,14 @@ async function refresh() {
     }
     if(!jobs.length){const row=document.createElement('tr');const empty=cell(row,'No jobs on this page.','empty');empty.colSpan=5;$('#jobs-body').append(row);}
     $('#previous-page').disabled=state.page===0;$('#next-page').disabled=jobs.length<50;$('#page-number').textContent='Page '+(state.page+1);
+    if(state.job)await detail(state.job,false);
   } catch(error) {if(!error.staleSession)connection('Connection failed');throw error;
-  } finally {if(state.busyGeneration===generation)state.busy=false;}
+  } finally {
+    if(state.busyGeneration===generation){
+      state.busy=false;
+      if(state.refreshPending){state.refreshPending=false;safe(refresh);}
+    }
+  }
 }
 $('#refresh').addEventListener('click',()=>safe(refresh));
 $('#previous-page').addEventListener('click',()=>{state.page=Math.max(0,state.page-1);safe(refresh);});
@@ -141,7 +169,7 @@ $('#next-page').addEventListener('click',()=>{state.page++;safe(refresh);});
 $('#pause').addEventListener('click',()=>safe(async()=>{await api('POST','/admin/queue/pause',{paused:!state.paused});await refresh();}));
 
 $('#submit-form').addEventListener('submit',event=>{
-  event.preventDefault();const form=event.currentTarget;safe(async()=>{
+  event.preventDefault();const form=event.currentTarget;return safe(async()=>{
     if(!state.me)throw new Error('Sign in before submitting a job.');
     const generation=state.generation;
     const submit=form.querySelector('[type=submit]');submit.disabled=true;
@@ -160,7 +188,7 @@ $('#submit-form').addEventListener('submit',event=>{
         while(offset<file.size){const end=Math.min(file.size,offset+state.capabilities.max_chunk_bytes);$('#upload-progress').textContent='Uploading '+file.name+' · '+Math.floor(offset/file.size*100)+'%';const result=await api('PUT','/jobs/'+reservation.id+'/files/'+encodeURIComponent(file.name),file.slice(offset,end),{headers:{'Content-Range':`bytes ${offset}-${end-1}/${file.size}`}});offset=result.offset;}
         if(!file.size)await api('PUT','/jobs/'+reservation.id+'/files/'+encodeURIComponent(file.name),new Blob([]));
       }
-      await api('POST','/jobs/'+reservation.id+'/commit');sessionStorage.removeItem('pending-submit');$('#upload-progress').textContent='Job accepted.';message('');await detail(reservation.id);
+      await api('POST','/jobs/'+reservation.id+'/commit');sessionStorage.removeItem('pending-submit');$('#upload-progress').textContent='Job accepted.';message('');state.page=0;await refresh();await detail(reservation.id);
     }finally{submit.disabled=false;}
   });
 });
@@ -235,4 +263,5 @@ async function accounts(){
 }
 $('#user-form').addEventListener('submit',event=>{event.preventDefault();const form=event.currentTarget;safe(async()=>{await api('POST','/admin/users',{username:form.elements.username.value,password:form.elements.password.value,role:form.elements.role.value});form.reset();await accounts();});});
 setSignedIn(false);$('#login-submit').disabled=false;
-safe(refresh);setInterval(()=>{if(!document.hidden)safe(refresh);},5000);
+safe(restoreSession);setInterval(()=>{if(!document.hidden)safe(refresh);},5000);
+document.addEventListener?.('visibilitychange',()=>{if(!document.hidden)safe(refresh);});
