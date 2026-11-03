@@ -169,6 +169,7 @@ class Auth:
             or not result["enabled"]
             or result["expires"] <= time.time()
             or (result["scope"] != scope and not (allow_web and scope == "access" and result["scope"] == "web"))
+            or (result["scope"] == "web" and not self.settings.web_ui)
             or result["revoked_at"]
         ):
             reject(401, "unauthenticated", "Credential expired or revoked")

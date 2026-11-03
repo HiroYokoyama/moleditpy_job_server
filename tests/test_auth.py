@@ -82,9 +82,17 @@ def test_web_login_disabled_with_web_ui_and_lifetime_is_capped(client):
     session = client.post("/api/v1/auth/web-login", json={"username": "web-user", "password": "x"}).json()
     assert 0 < session["expires_at"] - time.time() <= 900
     client.app.state.settings.web_ui = False
+    headers = {"Authorization": "Bearer " + session["token"]}
+    assert client.get("/api/v1/me", headers=headers).status_code == 401
+    assert client.get("/api/v1/jobs", headers=headers).status_code == 401
     assert client.post(
         "/api/v1/auth/web-login", json={"username": "web-user", "password": "x"},
     ).status_code == 404
+
+
+def test_disabling_web_access_does_not_disable_desktop_devices(client, alice):
+    client.app.state.settings.web_ui = False
+    assert client.get("/api/v1/me", headers=alice["headers"]).status_code == 200
 
 
 @pytest.mark.parametrize("password", ["x", "short"])
