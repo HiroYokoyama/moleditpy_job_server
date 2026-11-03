@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-gui = ["PySide6-Essentials>=6.9,<6.12"]
+gui = ["PySide6-Essentials>=6.9,<6.13"]
 test = ["pytest>=8", "httpx>=0.27", "ruff>=0.9", "build>=1", "pytest-xdist>=3", "pytest-cov>=6", "pytest-timeout>=2", "PyYAML>=6"]
 security = ["bandit>=1.8", "pip-audit>=2.9", "pip>=26.2"]
 
