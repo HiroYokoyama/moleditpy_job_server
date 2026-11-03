@@ -95,7 +95,7 @@ function signOut() {
 $('#signout').addEventListener('click',signOut);
 globalThis.addEventListener?.('pagehide',signOut);
 // Remove credentials stored by older browser clients; never read or reuse them.
-if(globalThis.indexedDB)indexedDB.deleteDatabase('moleditpy-job-server');
+try {globalThis.indexedDB?.deleteDatabase('moleditpy-job-server');} catch {}
 
 function panel(name) {
   if (name==='accounts'&&state.me?.role!=='admin') return;

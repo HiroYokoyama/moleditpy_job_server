@@ -121,8 +121,8 @@ opened or reloaded. The short-lived access token stays only in page memory; no
 application credentials are written to cookies, local storage or IndexedDB. Signing
 out invalidates that session on the server. Closing or leaving the page clears the
 client state and requests server-side sign-out on a best-effort basis; otherwise
-the server session expires after the configured token lifetime (15 minutes by
-default). Administrator operations require a sign-in within the last five minutes.
+the server session expires within 15 minutes (or the configured token lifetime
+if shorter). Administrator operations require a sign-in within the last five minutes.
 Desktop device credentials remain available for GUI and Job Manager use.
 
 CLI commands accept `--config /path/to/settings.json` before or after the command.

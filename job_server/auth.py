@@ -140,7 +140,7 @@ class Auth:
             self.db.event(c, "login", user["id"])
             c.execute("DELETE FROM sessions WHERE expires<?", (time.time(),))
             if web:
-                return self.issue(c, user["id"], scope="web", lifetime=self.settings.token_seconds)
+                return self.issue(c, user["id"], scope="web", lifetime=min(self.settings.token_seconds, 900))
             return self.issue(c, user["id"], scope="enrollment", lifetime=300)
 
     def logout(self, principal):

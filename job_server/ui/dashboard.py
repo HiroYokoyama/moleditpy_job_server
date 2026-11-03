@@ -366,10 +366,11 @@ class Dashboard(QDialog):
         )
 
     def _start_daemon(self):
-        self.client = JobServerClient(
-            f"http://127.0.0.1:{self.settings.port}",
-            self.settings.root / "identity" / "admin-device.key",
-        )
+        url = f"http://127.0.0.1:{self.settings.port}"
+        if self.client.url != url:
+            self.client = JobServerClient(
+                url, self.settings.root / "identity" / "admin-device.key",
+            )
         try:
             self.client.request("GET", "/health", authenticated=False)
             running = True
