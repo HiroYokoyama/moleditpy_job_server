@@ -78,14 +78,37 @@ def live_server(tmp_path):
         assert not thread.is_alive()
 
 
-def wait_state(backend, job, expected, timeout=20):
+def wait_state(backend, job, expected, timeout=None, diagnostics=None):
+    # Windows CI starts a detached Python supervisor and cold PowerShell process.
+    # This is an execution/verification test, not a 20-second latency contract.
+    if timeout is None:
+        timeout = 60 if os.name == "nt" else 20
     deadline = time.monotonic() + timeout
+    state = None
     while time.monotonic() < deadline:
         state = backend.poll([job])[job.id]
         if state in expected:
             return state
         time.sleep(0.1)
-    pytest.fail(f"Job did not reach {expected}; last state {state}")
+    details = diagnostics() if diagnostics else None
+    pytest.fail(f"Job did not reach {expected}; last state {state}; diagnostics: {details}")
+
+
+def worker_diagnostics(app, job_id):
+    """Only synthetic test job state/logs, never device keys or credentials."""
+    root = app.state.settings.root
+    result = {"job": app.state.db.one("SELECT state,reason,exit_code,pid FROM jobs WHERE id=?", (job_id,))}
+    for name in ["worker.json", "result.json"]:
+        path = root / "control" / job_id / name
+        if path.exists():
+            with path.open("rb") as source:
+                result[name] = source.read(4096).decode("utf-8", errors="replace")
+    log = root / "jobs" / job_id / "work" / "job.log"
+    if log.exists():
+        with log.open("rb") as source:
+            source.seek(max(0, log.stat().st_size - 4096))
+            result["job.log"] = source.read(4096).decode("utf-8", errors="replace")
+    return result
 
 
 def client_for(manager_types, live_server, tmp_path):
@@ -117,7 +140,8 @@ def test_real_manager_enrollment_execution_logs_and_verified_results(
     backend.submit(
         Preset(command_template=command, memory="512M", fetch_globs=["*.out"]), job, [str(source)]
     )
-    assert wait_state(backend, job, {"DONE", "FAILED", "LOST"}) == "DONE"
+    assert wait_state(backend, job, {"DONE", "FAILED", "LOST"},
+                      diagnostics=lambda: worker_diagnostics(live_server[1], job.server_job_id)) == "DONE"
     assert job.rc == 0
     assert "manager-client-ok" in backend.tail(job)
     assert "manager-client-ok" in backend.tail_file(job, "job.log")
