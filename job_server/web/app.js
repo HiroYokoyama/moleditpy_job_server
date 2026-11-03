@@ -1,5 +1,5 @@
 const $ = selector => document.querySelector(selector);
-const state = {token:null, expires:0, authenticated:0, profile:null, me:null, capabilities:null, paused:false, job:null, offset:0, page:0, busy:false, generation:0, busyGeneration:-1, detailRequest:0};
+const state = {token:null, expires:0, authenticated:0, profile:null, me:null, capabilities:null, paused:false, job:null, offset:0, page:0, busy:false, generation:0, busyGeneration:-1, detailRequest:0, accountsRequest:0};
 const encoder = new TextEncoder();
 const b64 = value => btoa(String.fromCharCode(...new Uint8Array(value)));
 const digest = async value => [...new Uint8Array(await crypto.subtle.digest('SHA-256',value))].map(v=>v.toString(16).padStart(2,'0')).join('');
@@ -12,7 +12,7 @@ function requireSession(generation) {
   if(generation!==state.generation){const error=new Error('Session changed');error.staleSession=true;throw error;}
 }
 function clearSession() {
-  state.generation++;state.detailRequest++;
+  state.generation++;state.detailRequest++;state.accountsRequest++;
   Object.assign(state,{token:null,expires:0,authenticated:0,profile:null,me:null,capabilities:null,job:null,offset:0,page:0,paused:false});
   $('#signin').textContent='Sign in';$('#signout').hidden=true;$('#accounts-nav').hidden=true;$('#pause').hidden=true;
   for(const id of ['jobs-body','users-body','devices-body','result-files'])$('#'+id).replaceChildren();
@@ -121,6 +121,7 @@ async function refresh() {
     const health=await api('GET','/health',null,{public:true});
     $('#connection-dot').classList.add('online');$('#connection-text').textContent='Server online · '+health.server_version;
     if(!state.me)return;
+    if(state.me.role==='admin'&&!$('#accounts').hidden)await accounts();
     if(state.job){await detail(state.job,false);return;}
     const resource=await api('GET','/system/resources');
     $('#running').textContent=resource.running;$('#pending').textContent=resource.pending;
@@ -200,9 +201,13 @@ async function download(id,entry){
   const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=entry.path.split('/').pop();link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
 async function accounts(){
-  const users=await api('GET','/admin/users');$('#users-body').replaceChildren();
+  const request=++state.accountsRequest,generation=state.generation;
+  const users=await api('GET','/admin/users');
+  const devices=await api('GET','/admin/devices');
+  if(request!==state.accountsRequest||generation!==state.generation)return;
+  $('#users-body').replaceChildren();
   for(const user of users){const row=document.createElement('tr');cell(row,user.username);cell(row,user.role);cell(row,user.enabled?'Enabled':'Disabled');const action=cell(row,'');if(user.enabled&&user.id!==state.me.user_id)button(action,'Disable',async()=>{if(confirm('Disable '+user.username+' and its active credentials?')){await api('POST','/admin/users/'+user.id+'/disable');await accounts();}});$('#users-body').append(row);}
-  const devices=await api('GET','/admin/devices');$('#devices-body').replaceChildren();
+  $('#devices-body').replaceChildren();
   for(const device of devices){const row=document.createElement('tr');cell(row,device.id);cell(row,users.find(u=>u.id===device.user_id)?.username||device.user_id);cell(row,date(device.last_access));const action=cell(row,'');if(device.revoked_at)action.textContent='Revoked';else button(action,'Revoke',async()=>{if(confirm('Revoke this device and its current tokens?')){await api('POST','/admin/devices/'+device.id+'/revoke');await accounts();}});$('#devices-body').append(row);}
 }
 $('#user-form').addEventListener('submit',event=>{event.preventDefault();const form=event.currentTarget;safe(async()=>{await api('POST','/admin/users',{username:form.elements.username.value,password:form.elements.password.value,role:form.elements.role.value});form.reset();await accounts();});});

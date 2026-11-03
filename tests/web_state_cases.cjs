@@ -47,6 +47,7 @@ function signedIn(app) {
   app.state.me={role:'user',username:'alice',user_id:'alice'};
   app.state.token='existing-token';
   app.state.expires=Date.now()/1000+3600;
+  app.state.authenticated=Date.now()/1000;
 }
 function job(id) {
   return {id,owner_id:'alice',state:'RUNNING',display_state:'RUNNING',created_at:1,exit_code:null,
@@ -97,5 +98,45 @@ async function details() {
   assert.equal(app.state.job,'second','Late details must not replace a newer selection');
   assert.ok(app.get('#detail-name').textContent.startsWith('second'));
 }
-const cases={authentication,refresh,details};
+async function accountsPolling() {
+  let users=[{id:'alice',username:'alice',role:'admin',enabled:1}],devices=[];
+  const app=await application(async url=>{
+    if(url==='/api/v1/admin/users')return response(users);
+    if(url==='/api/v1/admin/devices')return response(devices);
+    if(url==='/api/v1/system/resources')return response({paused:false});
+    if(url.startsWith('/api/v1/admin/jobs?'))return response([]);
+    throw new Error('Unexpected URL '+url);
+  });
+  signedIn(app);app.state.me.role='admin';app.get('#accounts').hidden=false;
+  await app.call('refresh')();
+  assert.equal(app.get('#users-body').children.length,1);
+  // Another client (the GUI) creates a user/device, then disables/revokes it.
+  users=[...users,{id:'bob',username:'bob',role:'user',enabled:1}];
+  devices=[{id:'bob-device',user_id:'bob',last_access:1,revoked_at:null}];
+  await app.call('refresh')();
+  assert.equal(app.get('#users-body').children.length,2);
+  assert.equal(app.get('#devices-body').children.length,1);
+  users=users.map(u=>u.id==='bob'?{...u,enabled:0}:u);
+  devices=devices.map(d=>({...d,revoked_at:2}));
+  await app.call('refresh')();
+  assert.equal(app.get('#users-body').children[1].children[2].textContent,'Disabled');
+  assert.equal(app.get('#devices-body').children[0].children[3].textContent,'Revoked');
+}
+async function accountsOrdering() {
+  const entered=deferred(),late=deferred();let requests=0;
+  const user=name=>({id:name,username:name,role:'user',enabled:1});
+  const app=await application(async url=>{
+    if(url==='/api/v1/admin/users'){
+      if(++requests===1){entered.resolve();return late.promise;}
+      return response([user('new-user')]);
+    }
+    if(url==='/api/v1/admin/devices')return response([]);
+    throw new Error('Unexpected URL '+url);
+  });
+  signedIn(app);app.state.me.role='admin';
+  const pending=app.call('accounts')();await entered.promise;
+  await app.call('accounts')();late.resolve(response([user('stale-user')]));await pending;
+  assert.equal(app.get('#users-body').children[0].children[0].textContent,'new-user');
+}
+const cases={authentication,refresh,details,accountsPolling,accountsOrdering};
 cases[process.argv[3]]().then(()=>console.log('PASS '+process.argv[3])).catch(error=>{console.error(error);process.exitCode=1;});
