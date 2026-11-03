@@ -19,7 +19,7 @@ def test_missing_libraries_show_dialog_and_allow_retry(monkeypatch):
     monkeypatch.setattr(QMessageBox, "warning", lambda *args: messages.append(args))
 
     class Context:
-        def add_plugin_menu(self, path, callback, **kwargs):
+        def add_menu_action(self, path, callback, **kwargs):
             actions.append(callback)
 
         def get_window(self, name):
@@ -88,14 +88,14 @@ def test_plugin_registration_is_lazy_and_uses_supported_context():
         def __init__(self):
             self.actions = []
 
-        def add_plugin_menu(self, path, callback, **kwargs):
+        def add_menu_action(self, path, callback, **kwargs):
             assert kwargs["icon"].endswith("icon.png")
             self.actions.append((path, callback))
 
     context = Context()
     initialize(context)
     assert len(context.actions) == 4
-    assert all(path.startswith("Job Server/") for path, _ in context.actions)
+    assert all(path.startswith("Extensions/Job Server/") for path, _ in context.actions)
 
 
 def test_gui_construction_has_no_listener(tmp_path):

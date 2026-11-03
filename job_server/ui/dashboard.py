@@ -4,10 +4,12 @@ import json
 import os
 import subprocess
 import time
+from datetime import datetime
+from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal
-from PySide6.QtGui import QIcon
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal, Qt
+from PySide6.QtGui import QIcon, QAction
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -18,6 +20,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
+    QMenuBar,
     QPushButton,
     QSpinBox,
     QTabWidget,
@@ -51,7 +54,7 @@ class Task(QRunnable):
 class Dashboard(QDialog):
     def __init__(self, parent=None, config=None):
         super().__init__(parent)
-        self.setWindowTitle("Job Server — LAN computational helper")
+        self.setWindowTitle("Job Server")
         self.setWindowIcon(QIcon(str(Path(__file__).resolve().parents[1] / "web" / "icon.png")))
         self.resize(900, 600)
         self.config = Path(config) if config else Settings().root / "settings.json"
@@ -65,6 +68,9 @@ class Dashboard(QDialog):
         self._tasks = set()
         self.busy = False
         layout = QVBoxLayout(self)
+        self.menu_bar = QMenuBar(self)
+        layout.setMenuBar(self.menu_bar)
+        self._menus()
         notice = QLabel(
             "Trusted users only. Jobs share the service OS account; CPU/RAM reservations are advisory.\n"
             "WARNING: Never expose to the public internet. Localhost, private LAN or private Tailscale only; "
@@ -85,36 +91,50 @@ class Dashboard(QDialog):
         self.timer.timeout.connect(self.refresh)
         self.timer.start()
 
-    def _button(self, text, callback, row):
-        button = QPushButton(text)
-        button.clicked.connect(callback)
-        row.addWidget(button)
-        return button
+    def _menus(self):
+        def action(menu, text, callback):
+            item = QAction(text, self)
+            item.triggered.connect(callback)
+            menu.addAction(item)
+            return item
+
+        files = self.menu_bar.addMenu("File")
+        action(files, "Open Web UI", self.open_web_ui)
+        action(files, "Open Logs...", self.open_logs)
+        files.addSeparator()
+        action(files, "Close", self.close)
+        server = self.menu_bar.addMenu("Server")
+        action(server, "Start", self.start_daemon)
+        action(server, "Stop (preserve jobs)", self.stop_daemon)
+        action(server, "Restart", self.restart_daemon)
+        server.addSeparator()
+        action(server, "Refresh", self.refresh)
+        action(server, "Copy Tailscale Serve command", lambda: QApplication.clipboard().setText(
+            f"tailscale serve --bg http://127.0.0.1:{self.settings.port}"))
+        account = self.menu_bar.addMenu("Account")
+        self.sign_in_action = action(account, "Sign in / register device...", self.sign_in)
+        account.addSeparator()
+        action(account, "Create initial administrator...", self.bootstrap)
+        action(account, "Add user...", self.add_user)
+        action(account, "Disable selected user...", self.disable_user)
+        action(account, "Revoke selected device...", self.revoke_device)
+        queue = self.menu_bar.addMenu("Queue")
+        action(queue, "Pause queue", lambda: self.pause(True))
+        action(queue, "Resume queue", lambda: self.pause(False))
+        action(queue, "Cancel selected job", self.cancel)
+
+    def open_logs(self):
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        directory = self.settings.root / "logs"
+        directory.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(directory)))
 
     def _dashboard(self):
         page = QWidget()
         layout = QVBoxLayout(page)
-        row = QHBoxLayout()
-        self._button("Start", self.start_daemon, row)
-        self._button("Stop (preserve jobs)", self.stop_daemon, row)
-        self._button("Restart", self.restart_daemon, row)
-        self._button("Sign in / register device", self.sign_in, row)
-        self._button("Refresh", self.refresh, row)
-        self._button("Open Web UI", self.open_web_ui, row)
-        layout.addLayout(row)
-        row = QHBoxLayout()
-        self._button("Pause queue", lambda: self.pause(True), row)
-        self._button("Resume queue", lambda: self.pause(False), row)
-        self._button("Cancel selected job", self.cancel, row)
-        self._button(
-            "Copy Tailscale Serve command",
-            lambda: QApplication.clipboard().setText(
-                f"tailscale serve --bg http://127.0.0.1:{self.settings.port}"
-            ),
-            row,
-        )
-        layout.addLayout(row)
         self.resources = QLabel("Sign in to view resources and jobs.")
+        self.resources.setWordWrap(True)
         layout.addWidget(self.resources)
         self.jobs = QTableWidget(0, 4)
         self.jobs.setHorizontalHeaderLabels(["ID", "Owner", "Name", "State"])
@@ -125,18 +145,12 @@ class Dashboard(QDialog):
     def _users(self):
         page = QWidget()
         layout = QVBoxLayout(page)
-        row = QHBoxLayout()
-        self._button("Create initial administrator", self.bootstrap, row)
-        self._button("Add user", self.add_user, row)
-        self._button("Disable selected user", self.disable_user, row)
-        self._button("Revoke selected device", self.revoke_device, row)
-        layout.addLayout(row)
-        self.users = QTableWidget(0, 4)
-        self.users.setHorizontalHeaderLabels(["ID", "Username", "Role", "Enabled"])
+        self.users = QTableWidget(0, 3)
+        self.users.setHorizontalHeaderLabels(["Username", "Role", "Status"])
         self.users.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         layout.addWidget(self.users)
         self.devices = QTableWidget(0, 4)
-        self.devices.setHorizontalHeaderLabels(["ID", "User", "Revoked", "Last access"])
+        self.devices.setHorizontalHeaderLabels(["Device ID", "Username", "Status", "Last access (local)"])
         self.devices.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         layout.addWidget(self.devices)
         self.tabs.addTab(page, "Users & Devices")
@@ -159,6 +173,9 @@ class Dashboard(QDialog):
             field.setValue(getattr(self.settings, key))
             self.fields[key] = field
             form.addRow(label, field)
+        self.public_url = QLineEdit(self.settings.public_url)
+        self.public_url.setPlaceholderText("https://server.example.ts.net")
+        form.addRow("Remote HTTPS URL (Tailscale/LAN)", self.public_url)
         layout.addLayout(form)
         runtime = QHBoxLayout()
         self.python_path = QLineEdit(self.settings.python_executable)
@@ -241,21 +258,24 @@ class Dashboard(QDialog):
             if "resources" not in data:
                 return
             self.resources.setText(json.dumps(data["resources"]))
+            usernames = {u["id"]: u["username"] for u in data["users"]}
             self.fill(
                 self.jobs,
                 [
-                    (j["id"], j["owner_id"], j["spec"]["name"], j["display_state"])
+                    (j["id"], usernames.get(j["owner_id"], j["owner_id"]), j["spec"]["name"], j["display_state"])
                     for j in data["jobs"]
                 ],
             )
             self.fill(
                 self.users,
-                [(u["id"], u["username"], u["role"], u["enabled"]) for u in data["users"]],
+                [(u["username"], u["role"], "Enabled" if u["enabled"] else "Disabled") for u in data["users"]],
+                identifiers=[u["id"] for u in data["users"]],
             )
             self.fill(
                 self.devices,
                 [
-                    (d["id"], d["user_id"], d["revoked_at"], d["last_access"])
+                    (d["id"], usernames.get(d["user_id"], d["user_id"]),
+                     "Revoked" if d["revoked_at"] is not None else "Active", self.timestamp(d["last_access"]))
                     for d in data["devices"]
                 ],
             )
@@ -263,19 +283,53 @@ class Dashboard(QDialog):
         self.task(work, display, interactive=False)
 
     @staticmethod
-    def fill(table, rows):
-        table.setRowCount(len(rows))
-        for row, values in enumerate(rows):
-            for column, value in enumerate(values):
-                table.setItem(row, column, QTableWidgetItem(str(value)))
-        table.resizeColumnsToContents()
+    def timestamp(value):
+        if value is None:
+            return "Never"
+        try:
+            return datetime.fromtimestamp(value).astimezone().strftime("%Y-%m-%d %H:%M:%S %z")
+        except (ValueError, TypeError, OSError, OverflowError):
+            return "—"
+
+    @staticmethod
+    def fill(table, rows, identifiers=None):
+        selected = Dashboard.selected(table)
+        sorting = table.isSortingEnabled()
+        signals = table.blockSignals(True)
+        try:
+            table.setSortingEnabled(False)
+            table.clearContents()
+            table.setRowCount(len(rows))
+            for row, values in enumerate(rows):
+                identifier = identifiers[row] if identifiers is not None else str(values[0])
+                for column, value in enumerate(values):
+                    item = QTableWidgetItem(str(value))
+                    if column == 0:
+                        item.setData(Qt.ItemDataRole.UserRole, identifier)
+                    table.setItem(row, column, item)
+            table.setSortingEnabled(sorting)
+            table.clearSelection()
+            table.setCurrentCell(-1, -1)
+            for row in range(table.rowCount()):
+                if selected is not None and table.item(row, 0).data(Qt.ItemDataRole.UserRole) == selected:
+                    table.setCurrentCell(row, 0)
+                    break
+            table.resizeColumnsToContents()
+        finally:
+            table.setSortingEnabled(sorting)
+            table.blockSignals(signals)
 
     def save_settings(self):
         try:
-            self.settings.python_executable = self.python_path.text().strip()
-            for key, field in self.fields.items():
-                setattr(self.settings, key, field.value())
-            self.settings.validate().save(self.config)
+            candidate = replace(
+                self.settings,
+                python_executable=self.python_path.text().strip(),
+                public_url=self.public_url.text().strip(),
+                **{key: field.value() for key, field in self.fields.items()},
+            )
+            candidate.validate().save(self.config)
+            self.settings = candidate
+            self.public_url.setText(candidate.public_url)
             self.message.setText(f"Saved {self.config}. Restart to apply.")
         except Exception as exc:
             self.message.setText(str(exc))
@@ -483,9 +537,14 @@ class Dashboard(QDialog):
                 success_message="User created.",
             )
 
-    def selected(self, table):
+    @staticmethod
+    def selected(table):
         row = table.currentRow()
-        return table.item(row, 0).text() if row >= 0 and table.item(row, 0) else None
+        item = table.item(row, 0) if row >= 0 else None
+        if item is None:
+            return None
+        identifier = item.data(Qt.ItemDataRole.UserRole)
+        return identifier if identifier is not None else item.text()
 
     def cancel(self):
         job_id = self.selected(self.jobs)
