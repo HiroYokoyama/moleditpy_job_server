@@ -30,7 +30,7 @@ Job Manager source dependency, rather than a second maintained copy.
 ## Use from MoleditPy (plugin workflow)
 
 Install **`job_server_0.4.1.zip`** using MoleditPy's Plugin Installer. Then open
-**Extensions → Job Server → Server Dashboard…**.
+**Extensions → Job Server…**.
 If required Python libraries are missing, opening a Job Server dialog shows their
 names and installation guidance. Install them in MoleditPy's Python environment
 and retry; no daemon is started by this check.
@@ -40,7 +40,7 @@ Extract the artifact download and install the inner plugin ZIP, or build it from
 
 You can operate the server from MoleditPy dialogs; the command line is optional:
 
-1. On the **server PC**, open Server Dashboard. If no administrator exists, the
+1. On the **server PC**, open Job Server. If no administrator exists, the
    **Job Server setup** screen opens. You can reopen it with **File → Setup guide…**.
 2. Set the optional remote Web address and resource budget. Leave the Web address
    blank for local access. For Tailscale, copy its printed HTTPS URL into the field.
@@ -96,7 +96,9 @@ that account and the server's HTTPS URL. Initial-account creation is not exposed
 as an unauthenticated network operation.
 
 **Start, Stop, Restart, Users & Devices, Settings, and Open Logs** are available from
-the plugin's dialogs/menu. Closing or reloading the dialog does not stop the daemon;
+the Job Server window's menus and tabs. The banner at the top of the Dashboard tab shows
+the server state at a glance: green when online and accepting jobs, amber when the queue
+is paused or this window is not signed in, and red when no daemon answers. Closing or reloading the dialog does not stop the daemon;
 running jobs continue when MoleditPy closes. Stop preserves running supervisors.
 
 For ordinary Python-based MoleditPy, the plugin uses the application's Python runtime.
@@ -151,7 +153,7 @@ python scripts/build_plugin.py
 ```
 
 Install `dist/job_server_0.4.1.zip` using MoleditPy's Plugin Installer. Open
-**Extensions → Job Server → Server Dashboard…**. The GUI can bootstrap the first
+**Extensions → Job Server…**. The GUI can bootstrap the first
 administrator, start/stop/restart the daemon, pause/resume the queue, manage accounts
 and device keys, and cancel jobs. Reloading or closing the plugin does not stop the daemon.
 For a frozen/portable MoleditPy application, install the server in a Python environment

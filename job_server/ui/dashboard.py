@@ -8,13 +8,14 @@ from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal, Qt
-from PySide6.QtGui import QIcon, QAction
+from PySide6.QtGui import QIcon, QAction, QBrush, QColor
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
+    QFrame,
     QGroupBox,
     QHeaderView,
     QHBoxLayout,
@@ -23,6 +24,7 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QMessageBox,
     QMenuBar,
+    QProgressBar,
     QPushButton,
     QSpinBox,
     QSizePolicy,
@@ -53,6 +55,27 @@ class Task(QRunnable):
             self.signals.finished.emit(self.call())
         except Exception as exc:
             self.signals.failed.emit(str(exc))
+
+
+#: Banner colours per server status: indicator dot and a translucent tint that
+#: reads on both light and dark palettes.
+STATUS_COLORS = {
+    "online": ("#2e7d32", "rgba(46, 125, 50, 0.14)"),
+    "warning": ("#e08600", "rgba(224, 134, 0, 0.16)"),
+    "offline": ("#c62828", "rgba(198, 40, 40, 0.14)"),
+    "unknown": ("#757575", "rgba(117, 117, 117, 0.14)"),
+}
+
+#: Job state colours in the queue table.
+STATE_COLORS = {
+    "RUNNING": "#2e7d32",
+    "PENDING": "#e08600",
+    "QUEUED": "#e08600",
+    "BLOCKED": "#e08600",
+    "FAILED": "#c62828",
+    "CANCELLED": "#757575",
+    "CANCELED": "#757575",
+}
 
 
 class Dashboard(QDialog):
@@ -151,23 +174,11 @@ class Dashboard(QDialog):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(18, 18, 18, 18)
         layout.setSpacing(14)
-        header = QHBoxLayout()
-        title = QLabel("Shared job queue")
-        font = title.font()
-        font.setPointSize(font.pointSize() + 4)
-        font.setBold(True)
-        title.setFont(font)
-        header.addWidget(title)
-        header.addStretch()
-        self.connection_status = QLabel("Not connected")
-        header.addWidget(self.connection_status)
-        layout.addLayout(header)
-        self.resources = QLabel("Sign in to view resources and jobs.")
-        self.resources.setWordWrap(True)
-        layout.addWidget(self.resources)
+        layout.addWidget(self._status_banner())
         metrics = QHBoxLayout()
         metrics.setSpacing(12)
         self.metric_values = {}
+        self.metric_bars = {}
         for key, title in (("running", "Running jobs"), ("pending", "Waiting jobs"),
                            ("cpu", "CPU reserved / budget"), ("memory", "Memory reserved / budget")):
             card = QGroupBox(title)
@@ -180,6 +191,20 @@ class Dashboard(QDialog):
             value.setFont(font)
             content.addWidget(value)
             self.metric_values[key] = value
+            bar = QProgressBar()
+            bar.setTextVisible(False)
+            bar.setFixedHeight(6)
+            bar.setRange(0, 100)
+            content.addWidget(bar)
+            if key in ("cpu", "memory"):
+                self.metric_bars[key] = bar
+                self._set_usage(key, None, None)
+            else:
+                # Count cards keep the bar's space so all four cards line up.
+                policy = bar.sizePolicy()
+                policy.setRetainSizeWhenHidden(True)
+                bar.setSizePolicy(policy)
+                bar.hide()
             metrics.addWidget(card, 1)
         layout.addLayout(metrics)
         layout.addWidget(QLabel("Jobs — select a row, then use the Queue menu for actions."))
@@ -199,6 +224,55 @@ class Dashboard(QDialog):
         layout.addWidget(self.jobs)
         self.tabs.addTab(page, "Dashboard")
 
+    def _status_banner(self):
+        banner = QFrame()
+        banner.setObjectName("statusBanner")
+        row = QHBoxLayout(banner)
+        row.setContentsMargins(14, 10, 14, 10)
+        row.setSpacing(12)
+        self.status_dot = QLabel()
+        self.status_dot.setFixedSize(16, 16)
+        row.addWidget(self.status_dot, 0, Qt.AlignmentFlag.AlignTop)
+        text = QVBoxLayout()
+        text.setSpacing(2)
+        self.connection_status = QLabel()
+        font = self.connection_status.font()
+        font.setPointSize(font.pointSize() + 4)
+        font.setBold(True)
+        self.connection_status.setFont(font)
+        text.addWidget(self.connection_status)
+        self.status_detail = QLabel()
+        self.status_detail.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        text.addWidget(self.status_detail)
+        self.resources = QLabel()
+        self.resources.setWordWrap(True)
+        text.addWidget(self.resources)
+        row.addLayout(text, 1)
+        self.status_checked = QLabel()
+        row.addWidget(self.status_checked, 0, Qt.AlignmentFlag.AlignTop)
+        self.status_banner = banner
+        self.set_status("unknown", "Checking server…", "Waiting for the first health check.")
+        self.status_checked.clear()
+        return banner
+
+    def set_status(self, level, headline, hint, version=None):
+        """Show the server state as a coloured banner with its address and next step."""
+        dot, tint = STATUS_COLORS[level]
+        self.status_level = level
+        self.status_banner.setStyleSheet(
+            f"#statusBanner {{ background: {tint}; border: 1px solid {dot}; border-radius: 8px; }}"
+        )
+        self.status_dot.setStyleSheet(f"background: {dot}; border-radius: 8px;")
+        self.connection_status.setText(headline)
+        address = self.client.url
+        if self.settings.public_url:
+            address += "  ·  Web " + self.settings.public_url
+        if version:
+            address += "  ·  v" + version
+        self.status_detail.setText(address)
+        self.resources.setText(hint)
+        self.status_checked.setText("Checked " + datetime.now().strftime("%H:%M:%S"))
+
     def _users(self):
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -212,7 +286,8 @@ class Dashboard(QDialog):
         self.devices.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._table_layout(self.devices, (270, 130, 100, 230))
         layout.addWidget(self.devices)
-        self.tabs.addTab(page, "Users & Devices")
+        # "&&" shows a literal ampersand; a single "&" is taken as a mnemonic.
+        self.tabs.addTab(page, "Users && Devices")
 
     @staticmethod
     def _table_layout(table, widths):
@@ -319,28 +394,46 @@ class Dashboard(QDialog):
             health = self.client.request("GET", "/health", authenticated=False)
             if not self.client.key_path.exists():
                 return {"health": health}
-            return {
-                "health": health,
-                "resources": self.client.request("GET", "/system/resources"),
-                "jobs": self.client.request("GET", "/admin/jobs"),
-                "users": self.client.request("GET", "/admin/users"),
-                "devices": self.client.request("GET", "/admin/devices"),
-            }
+            try:
+                return {
+                    "health": health,
+                    "resources": self.client.request("GET", "/system/resources"),
+                    "jobs": self.client.request("GET", "/admin/jobs"),
+                    "users": self.client.request("GET", "/admin/users"),
+                    "devices": self.client.request("GET", "/admin/devices"),
+                }
+            except Exception as exc:
+                # /health answered, so the daemon is online; only the signed-in calls failed.
+                return {"health": health, "error": str(exc)}
 
         def display(data):
-            self.connection_status.setText("Server online · " + data["health"]["server_version"])
-            self.message.setText(
-                f"Running at {self.client.url} — {data['health']['server_version']}"
-            )
+            version = data["health"]["server_version"]
+            self.message.setText(f"Running at {self.client.url} — {version}")
             if "resources" not in data:
                 self._clear_dashboard()
-                self.resources.setText("Sign in through Account > Sign in to view resources and jobs.")
+                if "error" in data:
+                    self.set_status(
+                        "warning", "Server online — sign-in failed",
+                        data["error"] + " Use Account > Sign in / register device.", version,
+                    )
+                else:
+                    self.set_status(
+                        "warning", "Server online — not signed in",
+                        "Use Account > Sign in / register device to view resources and jobs.", version,
+                    )
                 return
             resource = data["resources"]
-            self.resources.setText(
-                ("Queue paused" if resource.get("paused") else "Queue accepting jobs")
-                + " · CPU and memory reservations are advisory."
-            )
+            if resource.get("paused"):
+                self.set_status(
+                    "warning", "Server online — queue paused",
+                    "Waiting jobs do not start until Queue > Resume queue. Running jobs continue.",
+                    version,
+                )
+            else:
+                self.set_status(
+                    "online", "Server online — accepting jobs",
+                    "CPU and memory reservations are advisory.", version,
+                )
             for key in ("running", "pending"):
                 self.metric_values[key].setText(str(resource.get(key, "—")))
             self.metric_values["cpu"].setText(
@@ -349,6 +442,8 @@ class Dashboard(QDialog):
             self.metric_values["memory"].setText(
                 f"{resource.get('reserved_memory_mb', '—')} / {resource.get('memory_mb', '—')} MB"
             )
+            self._set_usage("cpu", resource.get("reserved_cpus"), resource.get("cpus"))
+            self._set_usage("memory", resource.get("reserved_memory_mb"), resource.get("memory_mb"))
             usernames = {u["id"]: u["username"] for u in data["users"]}
             self.usernames = usernames
             self.job_records = {job["id"]: job for job in data["jobs"]}
@@ -361,6 +456,7 @@ class Dashboard(QDialog):
                     for j in data["jobs"]
                 ], identifiers=[j["id"] for j in data["jobs"]],
             )
+            self._color_states()
             self._update_job_actions()
             self.fill(
                 self.users,
@@ -377,8 +473,11 @@ class Dashboard(QDialog):
             )
 
         def unavailable(_):
-            self.connection_status.setText("Connection unavailable")
-            self.resources.setText("Check Server > Start or Account > Sign in.")
+            self.set_status(
+                "offline", "Server offline",
+                "No daemon answers on this port. Choose Server > Start; "
+                "if it stays offline, check File > Open Logs.",
+            )
             self._clear_dashboard()
 
         self.task(work, display, interactive=False, on_error=unavailable)
@@ -388,11 +487,36 @@ class Dashboard(QDialog):
         self.usernames = {}
         for value in self.metric_values.values():
             value.setText("—")
+        for key in self.metric_bars:
+            self._set_usage(key, None, None)
         for table in (self.jobs, self.users, self.devices):
             self.fill(table, [])
         self._update_job_actions()
         if self.detail_dialog is not None:
             self.detail_dialog.invalidate("Connection unavailable. Sign in and refresh to view this job.")
+
+    def _set_usage(self, key, used, budget):
+        try:
+            percent = max(0, min(100, round(100 * used / budget)))
+        except (TypeError, ZeroDivisionError):
+            percent = 0
+        color = "#c62828" if percent >= 90 else "#e08600" if percent >= 70 else "#2e7d32"
+        bar = self.metric_bars[key]
+        bar.setValue(percent)
+        bar.setStyleSheet(
+            "QProgressBar { border: none; border-radius: 3px; background: rgba(127, 127, 127, 0.25); }"
+            f"QProgressBar::chunk {{ border-radius: 3px; background: {color}; }}"
+        )
+
+    def _color_states(self):
+        for row in range(self.jobs.rowCount()):
+            item = self.jobs.item(row, 2)
+            color = STATE_COLORS.get(item.text().split(" ", 1)[0]) if item else None
+            if color:
+                item.setForeground(QBrush(QColor(color)))
+                font = item.font()
+                font.setBold(True)
+                item.setFont(font)
 
     @staticmethod
     def timestamp(value):

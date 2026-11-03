@@ -33,8 +33,9 @@ def test_missing_libraries_show_dialog_and_allow_retry(monkeypatch):
 
     initialize(Context())
     assert not messages  # Plugin loading stays lazy.
-    for action in actions[:3]:
-        action()
+    assert len(actions) == 1
+    for _ in range(3):
+        actions[0]()
     assert len(messages) == 3
     assert all("cryptography" in message[2] and "uvicorn" in message[2] for message in messages)
     assert "pip install" in messages[0][2]
@@ -42,11 +43,7 @@ def test_missing_libraries_show_dialog_and_allow_retry(monkeypatch):
 
     class FakeDashboard:
         def __init__(self, parent):
-            self.tabs = self
-            self.index = None
-
-        def setCurrentIndex(self, index):
-            self.index = index
+            pass
 
         def show(self):
             pass
@@ -55,9 +52,8 @@ def test_missing_libraries_show_dialog_and_allow_retry(monkeypatch):
     module.Dashboard = FakeDashboard
     monkeypatch.setitem(sys.modules, "job_server.ui.dashboard", module)
     missing.clear()
-    actions[2]()
+    actions[0]()
     assert len(windows) == 1
-    assert windows[0].index == 2
 
     def broken_import(parent):
         raise ModuleNotFoundError("Missing transitive library", name="cffi")
@@ -107,8 +103,8 @@ def test_plugin_registration_is_lazy_and_uses_supported_context():
 
     context = Context()
     initialize(context)
-    assert len(context.actions) == 4
-    assert all(path.startswith("Extensions/Job Server/") for path, _ in context.actions)
+    # Users & Devices and Settings are dashboard tabs, not separate menu entries.
+    assert [path for path, _ in context.actions] == ["Extensions/Job Server..."]
 
 
 def test_gui_construction_has_no_listener(tmp_path):
