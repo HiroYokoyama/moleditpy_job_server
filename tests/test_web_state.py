@@ -7,7 +7,7 @@ import subprocess
 import pytest
 
 
-@pytest.mark.parametrize("scenario", ["keylessLogin", "authentication", "refresh", "details", "accountsPolling", "accountsOrdering", "loginView", "connectionFailure", "connectionTimeout"])
+@pytest.mark.parametrize("scenario", ["queueControls", "expiredDownload", "keylessLogin", "authentication", "refresh", "details", "accountsPolling", "accountsOrdering", "loginView", "connectionFailure", "connectionTimeout"])
 def test_browser_ignores_stale_responses(scenario):
     node = shutil.which("node")
     if not node:

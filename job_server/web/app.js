@@ -1,6 +1,6 @@
 'use strict';
 const $ = selector => document.querySelector(selector);
-const state = {token:null, expires:0, authenticated:0,  me:null, capabilities:null, paused:false, job:null, offset:0, page:0, busy:false, generation:0, busyGeneration:-1, detailRequest:0, accountsRequest:0};
+const state = {token:null, expires:0, authenticated:0,  me:null, capabilities:null, paused:false, job:null, jobInfo:null, queueBusy:false, offset:0, page:0, busy:false, generation:0, busyGeneration:-1, detailRequest:0, accountsRequest:0};
 const encoder = new TextEncoder();
 const digest = async value => [...new Uint8Array(await crypto.subtle.digest('SHA-256',value))].map(v=>v.toString(16).padStart(2,'0')).join('');
 function message(text) { $('#notice').textContent = text; $('#notice').hidden = !text; }
@@ -23,12 +23,12 @@ function requireSession(generation) {
 }
 function clearSession() {
   state.generation++;state.detailRequest++;state.accountsRequest++;
-  Object.assign(state,{token:null,expires:0,authenticated:0,me:null,capabilities:null,job:null,offset:0,page:0,paused:false});
+  Object.assign(state,{token:null,expires:0,authenticated:0,me:null,capabilities:null,job:null,jobInfo:null,queueBusy:false,offset:0,page:0,paused:false});
   $('#signin').textContent='Sign in';$('#signout').hidden=true;$('#accounts-nav').hidden=true;$('#pause').hidden=true;
   for(const id of ['jobs-body','users-body','devices-body','result-files'])$('#'+id).replaceChildren();
   for(const id of ['log','detail-name','detail-id','detail-spec'])$('#'+id).textContent='';
   for(const id of ['running','pending','cpu','memory'])$('#'+id).textContent='—';
-  panel('overview');setSignedIn(false);return state.generation;
+  $('#job-controls').hidden=true;panel('overview');setSignedIn(false);return state.generation;
 }
 
 async function api(method,path,body,options={}) {
@@ -127,7 +127,7 @@ async function refresh() {
     for(const job of jobs){
       const row=document.createElement('tr');const name=cell(row,job.spec.name,'job-name');
       const id=document.createElement('small');id.className='job-id';id.textContent=job.id;name.append(id);
-      const status=cell(row,'');const badge=document.createElement('span');badge.className='badge '+job.display_state.toLowerCase();badge.textContent=job.display_state;status.append(badge);
+      const status=cell(row,'');const badge=document.createElement('span');badge.className='badge '+job.display_state.toLowerCase();badge.textContent=job.display_state;status.append(badge);const priority=document.createElement('small');priority.className='job-id';priority.textContent='Priority '+(job.priority??0)+(job.force_run?' · Force requested':'');status.append(priority);
       cell(row,job.spec.resources.cpus_per_task+' cores · '+job.spec.resources.memory_mb+' MB');cell(row,date(job.created_at));button(cell(row,''),'Open',()=>detail(job.id));$('#jobs-body').append(row);
     }
     if(!jobs.length){const row=document.createElement('tr');const empty=cell(row,'No jobs on this page.','empty');empty.colSpan=5;$('#jobs-body').append(row);}
@@ -167,9 +167,13 @@ $('#submit-form').addEventListener('submit',event=>{
 async function detail(id,reset=true){
   if(!id)return;
   const request=++state.detailRequest;
-  state.job=id;if(reset){state.offset=0;$('#log').textContent='';$('#detail-name').textContent='Loading…';$('#detail-id').textContent=id;$('#detail-spec').textContent='';$('#result-files').replaceChildren();panel('detail');}
+  state.job=id;if(reset){state.jobInfo=null;$('#job-controls').hidden=true;state.offset=0;$('#log').textContent='';$('#detail-name').textContent='Loading…';$('#detail-id').textContent=id;$('#detail-spec').textContent='';$('#result-files').replaceChildren();panel('detail');}
   const current=()=>state.job===id&&state.detailRequest===request;
-  const job=await api('GET','/jobs/'+id);if(!current())return;
+  const job=await api('GET','/jobs/'+id);if(!current())return;state.jobInfo=job;
+  $('#job-controls').hidden=state.me?.role!=='admin'||job.state!=='PENDING';
+  if(document.activeElement!==$('#job-priority'))$('#job-priority').value=job.priority??0;
+  $('#force-job').textContent=job.force_run?'Cancel force request':'Force run…';
+  $('#force-job').disabled=$('#set-priority').disabled=state.queueBusy;
   $('#detail-name').textContent=job.spec.name+' · '+job.display_state;$('#detail-id').textContent=id;
   $('#detail-spec').textContent=job.spec.command+'\n\n'+job.spec.resources.cpus_per_task+' CPU cores · '+job.spec.resources.memory_mb+' MB · exit code '+(job.exit_code??'—')+(job.reason?'\n'+job.reason:'');
   $('#cancel-job').disabled=['DONE','FAILED','CANCELLED','LOST'].includes(job.state);
@@ -182,9 +186,33 @@ async function detail(id,reset=true){
 }
 $('#refresh-detail').addEventListener('click',()=>safe(()=>detail(state.job,false)));
 $('#cancel-job').addEventListener('click',()=>safe(async()=>{if(!confirm('Stop this job and its child processes?'))return;await api('POST','/jobs/'+state.job+'/cancel');await detail(state.job,false);}));
+async function queueControl(action) {
+  const job=state.jobInfo,id=state.job,generation=state.generation;
+  if(state.queueBusy||state.me?.role!=='admin'||!job||job.id!==id||job.state!=='PENDING')return;
+  let path,body;
+  if(action==='priority') {
+    const priority=Number($('#job-priority').value);
+    if(!Number.isInteger(priority)||priority < -1000||priority > 1000)throw new Error('Priority must be an integer from -1000 to 1000.');
+    path='priority';body={priority};
+  } else {
+    const force_run=!job.force_run;
+    if(force_run&&!confirm('Force this job to run? This overrides queue pause, waiting order, CPU/memory budgets and per-user active limits. It may overcommit this PC. Dependency conditions still apply.'))return;
+    path='force-run';body={force_run};
+  }
+  state.queueBusy=true;$('#force-job').disabled=$('#set-priority').disabled=true;
+  try {
+    await api('POST','/admin/jobs/'+encodeURIComponent(id)+'/'+path,body);
+    requireSession(generation);
+    if(state.job===id)await detail(id,false);
+  } finally {
+    if(generation===state.generation){state.queueBusy=false;$('#force-job').disabled=$('#set-priority').disabled=false;}
+  }
+}
+$('#set-priority').addEventListener('click',()=>safe(()=>queueControl('priority')));
+$('#force-job').addEventListener('click',()=>safe(()=>queueControl('force')));
 async function download(id,entry){
   const generation=state.generation;
-  if(!state.token||state.expires<Date.now()/1000+10)await authenticate();
+  if(!state.token||state.expires<Date.now()/1000+10)throw Object.assign(new Error('Sign in again to download results.'),{status:401});
   requireSession(generation);
   const response=await fetch('/api/v1/jobs/'+id+'/files/'+entry.path.split('/').map(encodeURIComponent).join('/'),{headers:{Authorization:'Bearer '+state.token},credentials:'omit',redirect:'error'});
   if(!response.ok)throw new Error('Download failed. Refresh your session and try again.');

@@ -200,5 +200,38 @@ async function keylessLogin() {
   assert.ok(calls.some(([url])=>url==='/api/v1/auth/logout'));
   assert.ok(calls.every(([url])=>!url.includes('challenge')&&!url.includes('/auth/devices')));
 }
-const cases={keylessLogin,authentication,refresh,details,accountsPolling,accountsOrdering,loginView,connectionFailure,connectionTimeout};
+async function queueControls() {
+  const calls=[];let priority=0,forced=false;
+  const app=await application(async(url,options)=>{
+    if(url==='/api/v1/jobs/pending')return response({...job('pending'),state:'PENDING',display_state:'PENDING',priority,force_run:forced});
+    if(url.includes('/log?'))return response({text:'',next_offset:0});
+    if(url==='/api/v1/admin/jobs/pending/priority'){priority=JSON.parse(options.body).priority;calls.push(url);return response({});}
+    if(url==='/api/v1/admin/jobs/pending/force-run'){forced=JSON.parse(options.body).force_run;calls.push(url);return response({});}
+    throw new Error('Unexpected URL '+url);
+  });
+  signedIn(app);app.state.me.role='admin';
+  await app.call('detail')('pending');
+  assert.equal(app.get('#job-controls').hidden,false);
+  app.get('#job-priority').value='25';await app.call('queueControl')('priority');
+  assert.equal(priority,25);
+  app.get('#job-priority').value='1.5';await assert.rejects(()=>app.call('queueControl')('priority'),/integer/);
+  const confirms=[];app.context.confirm=text=>{confirms.push(text);return true;};
+  await app.call('queueControl')('force');assert.equal(forced,true);
+  assert.match(confirms[0],/CPU\/memory budgets/);
+  assert.match(confirms[0],/Dependency conditions/);
+  await app.call('queueControl')('force');assert.equal(forced,false);
+  assert.equal(confirms.length,1,'Cancelling force does not ask to overcommit');
+  app.state.me.role='user';const count=calls.length;
+  await app.call('queueControl')('force');assert.equal(calls.length,count);
+  await app.call('detail')('pending');assert.equal(app.get('#job-controls').hidden,true);
+}
+async function expiredDownload() {
+  const app=await application(async url=>{throw new Error('Unexpected URL '+url);});
+  signedIn(app);app.state.expires=0;
+  await app.call('safe')(()=>app.call('download')('job',{}));
+  assert.equal(app.state.token,null);
+  assert.equal(app.state.me,null);
+  assert.match(app.get('#login-status').textContent,/Sign in again/);
+}
+const cases={queueControls,expiredDownload,keylessLogin,authentication,refresh,details,accountsPolling,accountsOrdering,loginView,connectionFailure,connectionTimeout};
 cases[process.argv[3]]().then(()=>console.log('PASS '+process.argv[3])).catch(error=>{console.error(error);process.exitCode=1;});
