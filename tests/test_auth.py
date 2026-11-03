@@ -1,9 +1,46 @@
 import base64
 import time
 
+import pytest
+
 from job_server.auth import signing_message
 from job_server import PLUGIN_VERSION
 from .conftest import enroll
+
+
+@pytest.mark.parametrize("password", ["x", "short"])
+def test_short_password_initial_admin_and_login(client, password):
+    client.app.state.auth.create_initial_admin("short-admin", password)
+    response = client.post(
+        "/api/v1/auth/login", json={"username": "short-admin", "password": password}
+    )
+    assert response.status_code == 200
+    assert response.json()["scope"] == "enrollment"
+    assert client.post(
+        "/api/v1/auth/login", json={"username": "short-admin", "password": "wrong"}
+    ).status_code == 401
+
+
+@pytest.mark.parametrize("password", ["x", "short"])
+def test_short_password_api_user_creation(client, password):
+    admin = enroll(client, "admin", "admin")
+    response = client.post(
+        "/api/v1/admin/users", headers=admin["headers"],
+        json={"username": "short-user", "password": password, "role": "user"},
+    )
+    assert response.status_code == 201
+    assert client.post(
+        "/api/v1/auth/login", json={"username": "short-user", "password": password}
+    ).status_code == 200
+
+
+@pytest.mark.parametrize("password", ["", "x" * 1025, None])
+def test_password_empty_type_and_upper_bound_still_rejected(password):
+    from job_server.auth import password_hash
+    from job_server.errors import ServerError
+    with pytest.raises(ServerError) as error:
+        password_hash(password)
+    assert error.value.code == "password_policy"
 
 
 def test_login_enrollment_cannot_run_jobs(client, alice):

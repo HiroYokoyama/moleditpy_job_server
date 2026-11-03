@@ -16,8 +16,8 @@ from .errors import reject
 
 
 def password_hash(password):
-    if not isinstance(password, str) or not 12 <= len(password) <= 1024:
-        reject(400, "password_policy", "Password must contain 12–1024 characters")
+    if not isinstance(password, str) or not 1 <= len(password) <= 1024:
+        reject(400, "password_policy", "Password must contain 1–1024 characters")
     salt = secrets.token_bytes(16)
     digest = hashlib.scrypt(
         password.encode(), salt=salt, n=32768, r=8, p=1, maxmem=64 * 1024 * 1024

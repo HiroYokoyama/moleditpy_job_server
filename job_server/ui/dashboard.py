@@ -398,7 +398,7 @@ class Dashboard(QDialog):
         password.setObjectName("password")
         password.setEchoMode(QLineEdit.EchoMode.Password)
         layout.addRow("Username", username)
-        layout.addRow("Password (12+ characters)", password)
+        layout.addRow("Password", password)
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
             parent=dialog,
