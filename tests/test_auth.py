@@ -76,6 +76,17 @@ def test_web_login_schema_does_not_accept_an_asserted_role(client):
     ).status_code == 400
 
 
+def test_web_login_disabled_with_web_ui_and_lifetime_is_capped(client):
+    client.app.state.auth.create_user("web-user", "x")
+    client.app.state.settings.token_seconds = 3600
+    session = client.post("/api/v1/auth/web-login", json={"username": "web-user", "password": "x"}).json()
+    assert 0 < session["expires_at"] - time.time() <= 900
+    client.app.state.settings.web_ui = False
+    assert client.post(
+        "/api/v1/auth/web-login", json={"username": "web-user", "password": "x"},
+    ).status_code == 404
+
+
 @pytest.mark.parametrize("password", ["x", "short"])
 def test_short_password_initial_admin_and_login(client, password):
     client.app.state.auth.create_initial_admin("short-admin", password)

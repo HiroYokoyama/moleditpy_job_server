@@ -189,6 +189,8 @@ def create_app(settings=None, dispatch=True):
 
     @app.post(prefix + "/auth/web-login")
     def web_login(body: Login, request: Request):
+        if not settings.web_ui:
+            reject(404, "not_found", "Web sign-in is disabled")
         limited(request)
         return auth.login(body.username, body.password, web=True)
 
