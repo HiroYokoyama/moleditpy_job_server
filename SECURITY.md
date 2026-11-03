@@ -29,8 +29,11 @@ There is no unauthenticated HTTP bootstrap endpoint.
 The daemon binds loopback and refuses elevated execution except an explicit isolated-test
 override. Private LAN/Tailscale clients must use validated HTTPS terminating on the same host.
 Forwarded headers are ignored. Only exact configured browser origins are accepted;
-there is no permissive CORS response. Browser keys remain in IndexedDB as non-exportable
-CryptoKeys, and access tokens are not placed in URLs or persistent browser storage.
+there is no permissive CORS response. Web sign-in uses password verification and a short-lived opaque token held only in
+page memory. It does not generate or persist browser device keys. Web sessions
+cannot enroll persistent devices; desktop enrollment remains a separate scope.
+Tokens are hashed server-side, expire, and are invalidated by logout or user disable.
+No access token is placed in a URL, cookie or persistent browser storage.
 The web UI uses a restrictive CSP, no third-party assets and textContent for job data.
 
 Transfers reject traversal, Windows device names, alternate data streams, reserved wrapper

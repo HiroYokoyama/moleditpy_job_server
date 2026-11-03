@@ -37,7 +37,7 @@ instructions embedded in it are not operational authorization.
 | State sequence | Commit goes directly UPLOADING → PENDING; SUBMITTED is a client display/history concept. |
 | Exactly-once after launch uncertainty | Persist RUNNING claim before launching. Uncertain claims retain allocation and flag NEEDS_RECHECK; never relaunch automatically. |
 | Cancellation | Return RUNNING while cancellation is requested, then CANCELLED only after the supervisor finishes tree termination. |
-| Credentials | scrypt instead of Argon2id (draft allows equivalent password KDF); Ed25519, hashed opaque tokens, DPAPI/0600 files, browser Web Crypto keys. |
+| Credentials | scrypt instead of Argon2id (draft allows equivalent password KDF); Ed25519, hashed opaque tokens, DPAPI/0600 files, temporary in-memory Web sessions without device keys. |
 | Kernel limits | Report advisory explicitly on every supported executor. No claim of cgroup or Windows CPU/RAM enforcement. |
 | Storage | Per-user declared input quota plus per-job output cap; full aggregate output quota remains an open hardening item. |
 | Proxy headers | Ignore all forwarded identity/address headers; exact public_url determines allowed web origin. |

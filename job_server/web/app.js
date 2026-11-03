@@ -1,8 +1,7 @@
 'use strict';
 const $ = selector => document.querySelector(selector);
-const state = {token:null, expires:0, authenticated:0, profile:null, me:null, capabilities:null, paused:false, job:null, offset:0, page:0, busy:false, generation:0, busyGeneration:-1, detailRequest:0, accountsRequest:0};
+const state = {token:null, expires:0, authenticated:0,  me:null, capabilities:null, paused:false, job:null, offset:0, page:0, busy:false, generation:0, busyGeneration:-1, detailRequest:0, accountsRequest:0};
 const encoder = new TextEncoder();
-const b64 = value => btoa(String.fromCharCode(...new Uint8Array(value)));
 const digest = async value => [...new Uint8Array(await crypto.subtle.digest('SHA-256',value))].map(v=>v.toString(16).padStart(2,'0')).join('');
 function message(text) { $('#notice').textContent = text; $('#notice').hidden = !text; }
 function date(value) { return value ? new Date(value*1000).toLocaleString() : '—'; }
@@ -24,7 +23,7 @@ function requireSession(generation) {
 }
 function clearSession() {
   state.generation++;state.detailRequest++;state.accountsRequest++;
-  Object.assign(state,{token:null,expires:0,authenticated:0,profile:null,me:null,capabilities:null,job:null,offset:0,page:0,paused:false});
+  Object.assign(state,{token:null,expires:0,authenticated:0,me:null,capabilities:null,job:null,offset:0,page:0,paused:false});
   $('#signin').textContent='Sign in';$('#signout').hidden=true;$('#accounts-nav').hidden=true;$('#pause').hidden=true;
   for(const id of ['jobs-body','users-body','devices-body','result-files'])$('#'+id).replaceChildren();
   for(const id of ['log','detail-name','detail-id','detail-spec'])$('#'+id).textContent='';
@@ -32,21 +31,9 @@ function clearSession() {
   panel('overview');setSignedIn(false);return state.generation;
 }
 
-function database() {
-  return new Promise((resolve,reject)=>{const request=indexedDB.open('moleditpy-job-server',1);request.onupgradeneeded=()=>request.result.createObjectStore('devices');request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
-}
-async function credential(username,value) {
-  const db=await database();
-  return new Promise((resolve,reject)=>{
-    const transaction=db.transaction('devices',value?'readwrite':'readonly');
-    const store=transaction.objectStore('devices');
-    const request=value?store.put(value,location.origin+'|'+username):store.get(location.origin+'|'+username);
-    transaction.oncomplete=()=>{resolve(request.result);db.close();};transaction.onerror=()=>{reject(transaction.error);db.close();};
-  });
-}
 async function api(method,path,body,options={}) {
   const generation=state.generation;
-  if (!options.public && (!state.token || state.expires<Date.now()/1000+10 || (path.startsWith('/admin/') && Date.now()/1000-state.authenticated>240))) await authenticate();
+  if (!options.public && (!state.token || state.expires<Date.now()/1000+10 || (path.startsWith('/admin/') && Date.now()/1000-state.authenticated>240))) throw Object.assign(new Error('Sign in again to continue.'),{status:401});
   requireSession(generation);
   const headers={...options.headers};
   if (!options.public) headers.Authorization='Bearer '+state.token;
@@ -75,55 +62,40 @@ async function api(method,path,body,options={}) {
     throw error;
   } finally {clearTimeout(timer);}
 }
-async function authenticate(challenge=null) {
-  const generation=state.generation;
-  if (!state.profile) throw new Error('Sign in to register or unlock this browser’s device.');
-  const profile=state.profile;
-  challenge=challenge||await api('POST','/auth/challenge',{device_id:profile.deviceId},{public:true});
-  if (challenge.server_id!==profile.serverId||challenge.protocol_version!=='1') throw new Error('Server identity changed. Verify the server before registering again.');
-  const fields={device_id:profile.deviceId,nonce:challenge.nonce,protocol_version:'1',purpose:'moleditpy-job-server-access',server_id:profile.serverId};
-  const signature=await crypto.subtle.sign('Ed25519',profile.privateKey,encoder.encode(JSON.stringify(fields)));
-  requireSession(generation);
-  const result=await api('POST','/auth/token',{device_id:profile.deviceId,nonce:challenge.nonce,signature:b64(signature)},{public:true});
-  requireSession(generation);
-  state.token=result.token;state.expires=result.expires_at;state.authenticated=Date.now()/1000;
-}
-$('#login-form').addEventListener('submit',event=>{
-  event.preventDefault();const submit=event.currentTarget.querySelector('[type=submit]');if(submit.disabled)return;submit.disabled=true;safe(async()=>{
-    const form=event.currentTarget,username=form.elements.username.value.trim(),password=form.elements.password.value;
-    if (!crypto.subtle) throw new Error('Open this page over HTTPS or same-machine localhost.');
-    const generation=clearSession();
-    $('#login-status').textContent='Authenticating…';
-    let profile=await credential(username);
+async function login(username,password) {
+  const generation=clearSession();
+  $('#login-status').textContent='Signing in…';
+  try {
+    const session=await api('POST','/auth/web-login',{username,password},{public:true});
     requireSession(generation);
-    if (!profile) {
-      if (!password) throw new Error('An initial password is required to register this browser.');
-      const session=await api('POST','/auth/login',{username,password},{public:true});
-      const key=await crypto.subtle.generateKey('Ed25519',false,['sign','verify']);
-      const deviceId=crypto.randomUUID();
-      const publicKey=await crypto.subtle.exportKey('raw',key.publicKey);
-      requireSession(generation);
-      await api('POST','/auth/devices',{device_id:deviceId,public_key:b64(publicKey)},{public:true,token:session.token});
-      const challenge=await api('POST','/auth/challenge',{device_id:deviceId},{public:true});
-      profile={deviceId,serverId:challenge.server_id,privateKey:key.privateKey,username};
-      await credential(username,profile);
-      requireSession(generation);
-      state.profile=profile;await authenticate(challenge);
-    } else {state.profile=profile;await authenticate();}
-    form.elements.password.value='';$('#login-status').textContent='';
+    state.token=session.token;state.expires=session.expires_at;state.authenticated=Date.now()/1000;
     state.me=await api('GET','/me');state.capabilities=await api('GET','/capabilities');
     $('#signin').textContent=state.me.username;$('#signout').hidden=false;
     const admin=state.me.role==='admin';$('#accounts-nav').hidden=!admin;$('#pause').hidden=!admin;
-    setSignedIn(true);
+    $('#login-status').textContent='';setSignedIn(true);
     $('#jobs-caption').textContent=admin?'All jobs on this server.':'Your jobs on this server.';
     message('');await refresh();
-  }).finally(()=>{submit.disabled=false;});
+  } catch(error) {if(generation===state.generation)clearSession();throw error;}
+}
+$('#login-form').addEventListener('submit',event=>{
+  event.preventDefault();const form=event.currentTarget,submit=form.querySelector('[type=submit]');
+  if(submit.disabled)return;submit.disabled=true;
+  const username=form.elements.username.value.trim(),password=form.elements.password.value;
+  form.elements.password.value='';
+  safe(()=>login(username,password)).finally(()=>{submit.disabled=false;});
 });
 $('#signin').addEventListener('click',()=>{$('#login-dialog').showModal();$('#login-status').textContent='';});
 function cancelLogin(){if($('#login-form').querySelector('[type=submit]').disabled)clearSession();$('#login-form').elements.password.value='';if(state.me)$('#login-dialog').close();}
 $('#close-login').addEventListener('click',cancelLogin);
 $('#login-dialog').addEventListener('cancel',cancelLogin);
-$('#signout').addEventListener('click',()=>{clearSession();message('Signed out. Your device key remains registered in this browser.');});
+function signOut() {
+  const token=state.token;clearSession();
+  if(token)fetch('/api/v1/auth/logout',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:'{}',credentials:'omit',redirect:'error',cache:'no-store',keepalive:true}).catch(()=>{});
+}
+$('#signout').addEventListener('click',signOut);
+globalThis.addEventListener?.('pagehide',signOut);
+// Remove credentials stored by older browser clients; never read or reuse them.
+if(globalThis.indexedDB)indexedDB.deleteDatabase('moleditpy-job-server');
 
 function panel(name) {
   if (name==='accounts'&&state.me?.role!=='admin') return;

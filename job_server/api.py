@@ -143,7 +143,7 @@ def create_app(settings=None, dispatch=True):
     def principal(authorization: str | None = Header(default=None)):
         if not authorization or not authorization.startswith("Bearer "):
             reject(401, "unauthenticated", "Authentication required")
-        return auth.principal(authorization[7:])
+        return auth.principal(authorization[7:], allow_web=True)
 
     def enrollment(authorization: str | None = Header(default=None)):
         if not authorization or not authorization.startswith("Bearer "):
@@ -186,6 +186,16 @@ def create_app(settings=None, dispatch=True):
     def login(body: Login, request: Request):
         limited(request)
         return auth.login(body.username, body.password)
+
+    @app.post(prefix + "/auth/web-login")
+    def web_login(body: Login, request: Request):
+        limited(request)
+        return auth.login(body.username, body.password, web=True)
+
+    @app.post(prefix + "/auth/logout")
+    def logout(p=Depends(principal)):
+        auth.logout(p)
+        return {"signed_out": True}
 
     @app.post(prefix + "/auth/devices", status_code=201)
     def devices(body: Enrollment, p=Depends(enrollment)):

@@ -8,6 +8,74 @@ from job_server import PLUGIN_VERSION
 from .conftest import enroll
 
 
+def test_web_login_needs_no_device_and_logout_revokes_only_its_session(client):
+    client.app.state.auth.create_initial_admin("admin", "x")
+    sessions = [client.post("/api/v1/auth/web-login", json={"username": "admin", "password": "x"}).json() for _ in range(2)]
+    headers = [{"Authorization": "Bearer " + session["token"]} for session in sessions]
+    assert client.get("/api/v1/admin/users", headers=headers[0]).status_code == 200
+    assert client.app.state.db.rows("SELECT id FROM devices") == []
+    assert all(session["scope"] == "web" for session in sessions)
+    assert client.post("/api/v1/auth/logout", headers=headers[0]).status_code == 200
+    assert client.get("/api/v1/me", headers=headers[0]).status_code == 401
+    assert client.get("/api/v1/me", headers=headers[1]).status_code == 200
+    assert client.post("/api/v1/auth/web-login", json={"username": "admin", "password": "wrong"}).status_code == 401
+
+
+def test_web_session_expiry_freshness_and_disabled_user(client):
+    user = client.app.state.auth.create_initial_admin("admin", "x")
+    session = client.post("/api/v1/auth/web-login", json={"username": "admin", "password": "x"}).json()
+    headers = {"Authorization": "Bearer " + session["token"]}
+    assert 0 < session["expires_at"] - time.time() <= client.app.state.settings.token_seconds
+    with client.app.state.db.transaction() as c:
+        c.execute("UPDATE sessions SET authenticated_at=?", (time.time() - 301,))
+    assert client.get("/api/v1/admin/users", headers=headers).status_code == 401
+    assert client.get("/api/v1/me", headers=headers).status_code == 200
+    with client.app.state.db.transaction() as c:
+        c.execute("UPDATE users SET enabled=0 WHERE id=?", (user["id"],))
+    assert client.get("/api/v1/me", headers=headers).status_code == 401
+    assert client.post("/api/v1/auth/web-login", json={"username": "admin", "password": "x"}).status_code == 401
+
+
+def test_web_login_still_rejects_unconfigured_browser_origin(client):
+    client.app.state.auth.create_initial_admin("admin", "x")
+    assert client.post(
+        "/api/v1/auth/web-login", json={"username": "admin", "password": "x"},
+        headers={"Origin": "https://other.example.ts.net"},
+    ).status_code == 403
+
+
+def test_web_user_cannot_escalate_or_register_persistent_device(client):
+    from uuid import uuid4
+
+    client.app.state.auth.create_user("web-user", "x")
+    session = client.post("/api/v1/auth/web-login", json={"username": "web-user", "password": "x"}).json()
+    headers = {"Authorization": "Bearer " + session["token"]}
+    for path in ["/admin/users", "/admin/devices", "/admin/jobs"]:
+        assert client.get("/api/v1" + path, headers=headers).status_code == 403
+    for path, payload in [
+        ("/admin/users", {"username": "intruder", "password": "x", "role": "admin"}),
+        ("/admin/shutdown", {}),
+        ("/admin/queue/pause", {"paused": True}),
+    ]:
+        assert client.post("/api/v1" + path, headers=headers, json=payload).status_code == 403
+    assert client.post(
+        "/api/v1/me/devices", headers=headers,
+        json={"device_id": str(uuid4()), "public_key": "AAAA"},
+    ).status_code == 403
+    assert client.app.state.db.rows("SELECT id FROM users WHERE role='admin'") == []
+    assert client.app.state.db.rows("SELECT id FROM devices") == []
+    with client.app.state.db.transaction() as c:
+        c.execute("UPDATE sessions SET expires=?", (time.time() - 1,))
+    assert client.get("/api/v1/me", headers=headers).status_code == 401
+
+
+def test_web_login_schema_does_not_accept_an_asserted_role(client):
+    client.app.state.auth.create_user("web-user", "x")
+    assert client.post(
+        "/api/v1/auth/web-login", json={"username": "web-user", "password": "x", "role": "admin"},
+    ).status_code == 400
+
+
 @pytest.mark.parametrize("password", ["x", "short"])
 def test_short_password_initial_admin_and_login(client, password):
     client.app.state.auth.create_initial_admin("short-admin", password)

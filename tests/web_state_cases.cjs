@@ -25,7 +25,7 @@ function element() {
   };
 }
 async function application(fetch) {
-  const elements = new Map();
+  const elements = new Map(), events={};
   const get = name => {
     if (!elements.has(name)) elements.set(name, element());
     return elements.get(name);
@@ -36,16 +36,15 @@ async function application(fetch) {
     crypto:{randomUUID, subtle:{sign:async()=>new Uint8Array(64), digest:webcrypto.subtle.digest.bind(webcrypto.subtle)}},
     document:{querySelector:get, querySelectorAll:()=>[], createElement:element,body:element()},
     location:{origin:'http://127.0.0.1:8766'},
-    setInterval(){}, setTimeout(){},clearTimeout(){},
+    setInterval(){}, setTimeout(){},clearTimeout(){},addEventListener(name,callback){events[name]=callback;},
     fetch:async(url, options)=>url==='/api/v1/health' ? response({server_version:'synthetic'}) : fetch(url, options),
   });
   vm.runInContext(fs.readFileSync(process.argv[2], 'utf8'), context);
   await new Promise(done=>setImmediate(done));
   const state = vm.runInContext('state', context);
-  return {context, state, get, call:name=>vm.runInContext(name, context)};
+  return {context, state, get, events, call:name=>vm.runInContext(name, context)};
 }
 function signedIn(app) {
-  app.state.profile={deviceId:'device-a',serverId:'server',privateKey:{}};
   app.state.me={role:'user',username:'alice',user_id:'alice'};
   app.state.token='existing-token';
   app.state.expires=Date.now()/1000+3600;
@@ -59,16 +58,17 @@ function job(id) {
 async function authentication() {
   const entered=deferred(), reply=deferred();
   const app=await application(async url=>{
-    assert.equal(url,'/api/v1/auth/token'); entered.resolve(); return reply.promise;
+    if(url==='/api/v1/auth/logout')return response({signed_out:true});
+    assert.equal(url,'/api/v1/auth/web-login'); entered.resolve(); return reply.promise;
   });
   signedIn(app);
-  const pending=app.call('authenticate')({server_id:'server',protocol_version:'1',nonce:'synthetic'}).catch(error=>error);
+  const pending=app.call('login')('alice','x').catch(error=>error);
   await entered.promise;
   app.get('#signout').listeners.click();
   reply.resolve(response({token:'late-token',expires_at:Date.now()/1000+3600}));
   await pending;
   assert.equal(app.state.token,null,'Late authentication must not restore a signed-out session');
-  assert.equal(app.state.profile,null);
+  assert.equal(app.state.me,null);
 }
 async function refresh() {
   const entered=deferred(), reply=deferred();
@@ -173,5 +173,32 @@ async function connectionTimeout() {
   assert.equal(app.get('#connection-text').textContent,'Connection failed');
   assert.match(app.get('#login-status').textContent,/timed out/);
 }
-const cases={authentication,refresh,details,accountsPolling,accountsOrdering,loginView,connectionFailure,connectionTimeout};
+async function keylessLogin() {
+  const calls=[];
+  const app=await application(async(url,options)=>{
+    calls.push([url,options]);
+    if(url==='/api/v1/auth/web-login'){
+      assert.deepEqual(JSON.parse(options.body),{username:'alice',password:'x'});
+      assert.equal(options.credentials,'omit');
+      return response({token:'web-token',expires_at:Date.now()/1000+900});
+    }
+    if(url==='/api/v1/me')return response({username:'alice',role:'user'});
+    if(url==='/api/v1/capabilities')return response({});
+    if(url==='/api/v1/system/resources')return response({});
+    if(url.startsWith('/api/v1/jobs?'))return response([]);
+    if(url==='/api/v1/auth/logout')return response({signed_out:true});
+    throw new Error('Unexpected URL '+url);
+  });
+  await app.call('login')('alice','x');
+  assert.equal(app.state.token,'web-token');
+  assert.equal(app.context.document.body.classList.contains('signed-out'),false);
+  const reloaded=await application(async()=>{throw new Error('Unexpected authenticated request');});
+  assert.equal(reloaded.state.token,null,'Reloading must require a new password sign-in');
+  app.events.pagehide();
+  assert.equal(app.state.token,null);
+  assert.equal(app.state.me,null);
+  assert.ok(calls.some(([url])=>url==='/api/v1/auth/logout'));
+  assert.ok(calls.every(([url])=>!url.includes('challenge')&&!url.includes('/auth/devices')));
+}
+const cases={keylessLogin,authentication,refresh,details,accountsPolling,accountsOrdering,loginView,connectionFailure,connectionTimeout};
 cases[process.argv[3]]().then(()=>console.log('PASS '+process.argv[3])).catch(error=>{console.error(error);process.exitCode=1;});
