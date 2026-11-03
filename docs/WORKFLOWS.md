@@ -43,14 +43,14 @@ owner **HiroYokoyama**, repository **moleditpy_job_server**, workflow
 a pending publisher in PyPI account publishing settings. No PyPI API token is needed.
 
 Run **Actions → Publish to PyPI → Run workflow** on **main**, supplying an existing
-GitHub Release version such as **0.3.3** without `v`. The workflow uploads the exact
+GitHub Release version such as **0.3.4** without `v`. The workflow uploads the exact
 released wheel and sdist, after checksum verification and an isolated wheel check
 of CLI startup, daemon/API, web UI, authentication, native execution and verified
 output download. The latest stable Job Manager from PyPI is also exercised through its
 standalone window and `moleditpy-job submit --wait`, including input upload,
 automatic/manual download, file preview, failure exit codes and cancellation.
 After publishing, manually run **Installed Job Manager integration** with
-**server-version = 0.3.3** to test the PyPI server package in six environments,
+**server-version = 0.3.4** to test the PyPI server package in six environments,
 with bounded install retries for PyPI index propagation. Leave the version blank
 to test a wheel built from the selected checkout. This workflow is dispatch-only;
 pushes, pull requests and publication do not start it automatically.
