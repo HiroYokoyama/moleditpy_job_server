@@ -38,21 +38,34 @@ Extract the artifact download and install the inner plugin ZIP, or build it from
 
 You can operate the server from MoleditPy dialogs; the command line is optional:
 
-1. On the **server PC**, open **Account → Create initial administrator...**.
-   This also works if the daemon is already running. An existing enabled
-   administrator prevents a second bootstrap account.
-2. Choose **Server → Start** in Server Dashboard.
-3. Choose **Account → Sign in / register device...** once for the administrator.
+1. On the **server PC**, open Server Dashboard. If no administrator exists, the
+   **Job Server setup** screen opens. You can reopen it with **File → Setup guide…**.
+2. Set the optional remote Web address and resource budget. Leave the Web address
+   blank for local access. For Tailscale, copy its printed HTTPS URL into the field.
+3. Enter the initial administrator username and password, then choose
+   **Create, start and sign in**. This explicitly saves the configuration, creates
+   the account, starts the daemon and signs in this GUI. No second password prompt
+   is needed. An existing administrator prevents a second bootstrap account.
 4. Use **Queue** to pause/resume the queue or cancel a selected job.
 5. Open **Users & Devices** to view accounts and devices; use **Account** to add
    users, disable the selected user, or revoke the selected device.
-6. Open **Settings…** to configure resource budgets, limits, and the daemon runtime.
+6. Open **Settings** to configure resource budgets, limits, and the daemon runtime.
+   Save changes, then choose **Server → Restart** to apply them.
 7. Choose **File → Open Web UI** to open the browser interface when you want it.
+
+For an already configured server, the setup screen does not open automatically.
+Use **Account → Sign in / register device…** for its desktop administration window.
+The desktop keeps its registered device credential and can authenticate on later
+uses without saving the administrator password. Initial setup can also be run from
+**Account → Create initial administrator…**; its dialog states that this starts the
+server and signs in the GUI. Closing the guide without applying it creates no
+account and starts no server.
 
 Username and password are entered together in one dialog. Successful actions show
 a **Success** dialog, and interactive errors remain visible until dismissed.
-The administration window, Job Manager, and browser each register their own device:
-signing in to one does not sign in the others. **Stop** and **Add user** require
+The administration window and Job Manager register desktop devices. Browser sign-in
+uses a separate temporary session and does not register a device or store a private
+key. Signing in to one does not sign in the others. **Stop** and **Add user** require
 signing in within the administration window first. If its credential file is
 missing, the dialog explains how to register instead of reporting "File not found".
 
@@ -103,10 +116,14 @@ python -m job_server serve
 ```
 
 Open **http://127.0.0.1:8766/** on the same machine. Sign in with the administrator
-you created. The browser registers an Ed25519 device key; subsequent sign-ins need
-only the username in that browser. Private keys are non-exportable Web Crypto keys
-in IndexedDB. Bearer tokens stay in page memory. Clearing browser storage requires
-registering a new device and revoking the old one.
+you created. Web sign-in requires the username and password each time the page is
+opened or reloaded. The short-lived access token stays only in page memory; no
+application credentials are written to cookies, local storage or IndexedDB. Signing
+out invalidates that session on the server. Closing or leaving the page clears the
+client state and requests server-side sign-out on a best-effort basis; otherwise
+the server session expires after the configured token lifetime (15 minutes by
+default). Administrator operations require a sign-in within the last five minutes.
+Desktop device credentials remain available for GUI and Job Manager use.
 
 CLI commands accept `--config /path/to/settings.json` before or after the command.
 Persistent data defaults to `~/.moleditpy/job_server/`, outside installed plugin code.

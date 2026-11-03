@@ -67,6 +67,8 @@ class Dashboard(QDialog):
         self.pool.setMaxThreadCount(1)
         self._tasks = set()
         self.busy = False
+        self.setup_dialog = None
+        self._setup_checked = False
         layout = QVBoxLayout(self)
         self.menu_bar = QMenuBar(self)
         layout.setMenuBar(self.menu_bar)
@@ -99,6 +101,8 @@ class Dashboard(QDialog):
             return item
 
         files = self.menu_bar.addMenu("File")
+        action(files, "Setup guide...", self.open_setup)
+        files.addSeparator()
         action(files, "Open Web UI", self.open_web_ui)
         action(files, "Open Logs...", self.open_logs)
         files.addSeparator()
@@ -218,7 +222,7 @@ class Dashboard(QDialog):
         layout.addStretch()
         self.tabs.addTab(page, "Settings")
 
-    def task(self, call, on_ok=None, *, interactive=True, success_message=None):
+    def task(self, call, on_ok=None, *, interactive=True, success_message=None, on_error=None):
         if self.busy:
             return
         self.busy = True
@@ -237,6 +241,8 @@ class Dashboard(QDialog):
             self._tasks.discard(task)
             self.busy = False
             self.message.setText(message)
+            if on_error:
+                on_error(message)
             if interactive:
                 QMessageBox.warning(self, "Job Server", message)
 
@@ -337,8 +343,10 @@ class Dashboard(QDialog):
             self.settings = candidate
             self.public_url.setText(candidate.public_url)
             self.message.setText(f"Saved {self.config}. Choose Server > Restart to apply.")
+            return True
         except Exception as exc:
             self.message.setText(str(exc))
+            return False
 
     def require_own_daemon(self):
         """Refuse a listener that is not the daemon holding this data directory's lock.
@@ -357,55 +365,59 @@ class Dashboard(QDialog):
             "stop it or choose another port"
         )
 
+    def _start_daemon(self):
+        self.client = JobServerClient(
+            f"http://127.0.0.1:{self.settings.port}",
+            self.settings.root / "identity" / "admin-device.key",
+        )
+        try:
+            self.client.request("GET", "/health", authenticated=False)
+            running = True
+        except Exception:
+            running = False
+        if running:
+            self.require_own_daemon()
+            return "Daemon is already running; reusing it."
+        self.settings.save(self.config)
+        log_dir = self.settings.root / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        environment = os.environ.copy()
+        environment["PYTHONPATH"] = (
+            str(Path(__file__).resolve().parents[2])
+            + os.pathsep
+            + environment.get("PYTHONPATH", "")
+        )
+        with (log_dir / "startup.log").open("ab") as log:
+            from ..runtime import python_executable
+
+            subprocess.Popen(
+                [
+                    python_executable(self.settings),
+                    "-m",
+                    "job_server",
+                    "serve",
+                    "--config",
+                    str(self.config),
+                ],
+                stdin=subprocess.DEVNULL,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                env=environment,
+                start_new_session=os.name != "nt",
+                creationflags=0x08000000 | 0x00000008 if os.name == "nt" else 0,
+            )
+        self.client = JobServerClient(
+            f"http://127.0.0.1:{self.settings.port}",
+            self.settings.root / "identity" / "admin-device.key",
+        )
+        return "Start requested; see startup.log if the health check stays offline."
+
     def start_daemon(self):
-        def work():
-            try:
-                self.client.request("GET", "/health", authenticated=False)
-                running = True
-            except Exception:
-                running = False
-            if running:
-                self.require_own_daemon()
-                return "Daemon is already running; reusing it."
-            self.settings.save(self.config)
-            log_dir = self.settings.root / "logs"
-            log_dir.mkdir(parents=True, exist_ok=True)
-            environment = os.environ.copy()
-            environment["PYTHONPATH"] = (
-                str(Path(__file__).resolve().parents[2])
-                + os.pathsep
-                + environment.get("PYTHONPATH", "")
-            )
-            with (log_dir / "startup.log").open("ab") as log:
-                from ..runtime import python_executable
-
-                subprocess.Popen(
-                    [
-                        python_executable(self.settings),
-                        "-m",
-                        "job_server",
-                        "serve",
-                        "--config",
-                        str(self.config),
-                    ],
-                    stdin=subprocess.DEVNULL,
-                    stdout=log,
-                    stderr=subprocess.STDOUT,
-                    env=environment,
-                    start_new_session=os.name != "nt",
-                    creationflags=0x08000000 | 0x00000008 if os.name == "nt" else 0,
-                )
-            self.client = JobServerClient(
-                f"http://127.0.0.1:{self.settings.port}",
-                self.settings.root / "identity" / "admin-device.key",
-            )
-            return "Start requested; see startup.log if the health check stays offline."
-
         def started(message):
             self.message.setText(message)
             QMessageBox.information(self, "Success", message)
 
-        self.task(work, started)
+        self.task(self._start_daemon, started)
 
     def stop_daemon(self):
         if not self.require_admin_registration():
@@ -503,31 +515,88 @@ class Dashboard(QDialog):
         )
         return False
 
+    def has_administrator(self):
+        import sqlite3
+
+        database = self.settings.root / "server.db"
+        if not database.exists():
+            return False
+        connection = sqlite3.connect(database.as_uri() + "?mode=ro", uri=True, timeout=2)
+        try:
+            return connection.execute(
+                "SELECT 1 FROM users WHERE role='admin' AND enabled=1 LIMIT 1"
+            ).fetchone() is not None
+        finally:
+            connection.close()
+
+    def open_setup(self):
+        from .setup import SetupDialog
+
+        if self.setup_dialog is None or not self.setup_dialog.isVisible():
+            self.setup_dialog = SetupDialog(self)
+        self.timer.stop()
+        self.setup_dialog.show()
+        self.setup_dialog.raise_()
+        self.setup_dialog.activateWindow()
+
+    def _first_setup(self):
+        if not self.isVisible():
+            return
+        try:
+            if not self.has_administrator():
+                self.open_setup()
+        except Exception as exc:
+            self.message.setText("Unable to check setup: " + str(exc))
+
+    def _start_and_sign_in(self, credentials=None):
+        self._start_daemon()
+        health = JobServerClient(f"http://127.0.0.1:{self.settings.port}", timeout=1)
+        deadline = time.monotonic() + 20
+        while True:
+            try:
+                health.request("GET", "/health", authenticated=False)
+                break
+            except Exception:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("Server did not start; open File > Open Logs and check the Python runtime") from None
+                time.sleep(0.2)
+        self.require_own_daemon()
+        if self.client.key_path.exists():
+            self.client.authenticate()
+        elif credentials:
+            self.client.enroll(*credentials)
+        else:
+            raise ValueError("Sign in with the existing administrator username and password")
+        me = self.client.request("GET", "/me")
+        if me["role"] != "admin":
+            raise ValueError("An administrator account is required for this window")
+
+    def create_administrator(self, credentials):
+        from ..auth import Auth
+        from ..db import Database
+
+        db = Database(self.settings.root)
+        try:
+            Auth(db, self.settings).create_initial_admin(*credentials)
+        finally:
+            db.close()
+
+    def create_and_sign_in(self, credentials):
+        self.create_administrator(credentials)
+        self._start_and_sign_in(credentials)
+
     def bootstrap(self):
-        credentials = self.credentials("Create initial administrator on this server PC")
+        credentials = self.credentials("Create administrator, start server and sign in")
         if not credentials:
             return
 
-        def work():
-            from ..auth import Auth
-            from ..db import Database
-            db = Database(self.settings.root)
-            try:
-                return Auth(db, self.settings).create_initial_admin(*credentials)
-            finally:
-                db.close()
-
         def created(_):
-            message = (
-                "Administrator created. Start the server if needed, then use "
-                "Sign in / register device in this window with the new administrator account."
-            )
-            self.message.setText(message)
-            QMessageBox.information(self, "Success", message)
+            self.message.setText("Administrator created. This window is signed in.")
+            self.refresh()
 
         self.task(
-            work,
-            created,
+            lambda: self.create_and_sign_in(credentials), created,
+            success_message="Administrator created. The server is running and this window is signed in.",
         )
 
     def add_user(self):
@@ -590,6 +659,8 @@ class Dashboard(QDialog):
             )
 
     def closeEvent(self, event):
+        if self.setup_dialog is not None:
+            self.setup_dialog.close()
         self.timer.stop()
         # Window disposal never shuts down the separately owned daemon.
         super().closeEvent(event)
@@ -597,3 +668,6 @@ class Dashboard(QDialog):
     def showEvent(self, event):
         self.timer.start()
         super().showEvent(event)
+        if not self._setup_checked:
+            self._setup_checked = True
+            QTimer.singleShot(0, self._first_setup)
