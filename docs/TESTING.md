@@ -43,5 +43,5 @@ The installed smoke scripts must be copied outside the checkout and run with the
 interpreter that has the distributions installed:
 
 ```sh
-python smoke_test_installed.py --version 0.3.4 --manager-version 3.4.1
+python smoke_test_installed.py --version 0.4.0 --manager-version 3.4.1
 ```

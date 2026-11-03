@@ -3,14 +3,14 @@
 [![Tests](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/test.yml/badge.svg)](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/test.yml)
 [![Security](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/security.yml/badge.svg)](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/security.yml)
 [![Release](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/release.yml/badge.svg)](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/release.yml)
-[![Version](https://img.shields.io/badge/version-0.3.4-blue)](pyproject.toml)
+[![Version](https://img.shields.io/badge/version-0.4.0-blue)](pyproject.toml)
 [![Downloads](https://img.shields.io/github/downloads/HiroYokoyama/moleditpy_job_server/total)](https://github.com/HiroYokoyama/moleditpy_job_server/releases)
 [![License: GPL v3](https://img.shields.io/badge/License-LGPLv3-blue.svg)](LICENSE)
 [![MoleditPy](https://img.shields.io/badge/MoleditPy-5.x-3577F7)](https://github.com/HiroYokoyama/python_molecular_editor)
 
 A LAN computational helper for MoleditPy Job Manager, with an authenticated shared
 job queue, headless daemon, MoleditPy administration plugin, and browser UI.
-Version **0.3.4**. Access is for trusted users on a private network.
+Version **0.4.0**. Access is for trusted users on a private network.
 
 > [!WARNING]
 > **Never expose Job Server to the public internet. Use localhost, a private LAN over HTTPS, or a private Tailscale tailnet only.**
@@ -27,8 +27,8 @@ Job Manager source dependency, rather than a second maintained copy.
 
 ## Use from MoleditPy (plugin workflow)
 
-Install **`job_server_0.3.4.zip`** using MoleditPy's Plugin Installer. Then open
-**Plugin → Job Server → Server Dashboard…**.
+Install **`job_server_0.4.0.zip`** using MoleditPy's Plugin Installer. Then open
+**Extensions → Job Server → Server Dashboard…**.
 If required Python libraries are missing, opening a Job Server dialog shows their
 names and installation guidance. Install them in MoleditPy's Python environment
 and retry; no daemon is started by this check.
@@ -38,15 +38,15 @@ Extract the artifact download and install the inner plugin ZIP, or build it from
 
 You can operate the server from MoleditPy dialogs; the command line is optional:
 
-1. On the **server PC**, open **Users & Devices… → Create initial administrator**.
+1. On the **server PC**, open **Account → Create initial administrator...**.
    This also works if the daemon is already running. An existing enabled
    administrator prevents a second bootstrap account.
-2. Click **Start** in Server Dashboard.
-3. Click **Sign in / register device** once for the administrator.
+2. Choose **Server → Start** in Server Dashboard.
+3. Choose **Account → Sign in / register device...** once for the administrator.
 4. Use the dashboard to pause/resume the queue, view jobs, or cancel a selected job.
 5. Open **Users & Devices…** to add users, disable accounts, or revoke device keys.
 6. Open **Settings…** to configure resource budgets, limits, and the daemon runtime.
-7. Click **Open Web UI** to open the browser interface when you want it.
+7. Choose **File → Open Web UI** to open the browser interface when you want it.
 
 Username and password are entered together in one dialog. Successful actions show
 a **Success** dialog, and interactive errors remain visible until dismissed.
@@ -112,8 +112,8 @@ The listener starts only on explicit `serve` or GUI Start and binds **127.0.0.1*
 python scripts/build_plugin.py
 ```
 
-Install `dist/job_server_0.3.4.zip` using MoleditPy's Plugin Installer. Open
-**Plugin → Job Server → Server Dashboard…**. The GUI can bootstrap the first
+Install `dist/job_server_0.4.0.zip` using MoleditPy's Plugin Installer. Open
+**Extensions → Job Server → Server Dashboard…**. The GUI can bootstrap the first
 administrator, start/stop/restart the daemon, pause/resume the queue, manage accounts
 and device keys, and cancel jobs. Reloading or closing the plugin does not stop the daemon.
 For a frozen/portable MoleditPy application, install the server in a Python environment
@@ -169,9 +169,10 @@ certificates and forwards connections to the local Job Server.
 4. Copy the **HTTPS URL printed by Tailscale Serve** into Job Manager's
    **Hosts → Server URL**, then use **Sign in / register device**. Use the printed
    hostname, not the server's LAN IP, and do not append `:8766` to that HTTPS URL.
-5. To use the browser UI, also set Job Server's `public_url` to that exact HTTPS
-   origin and restart the daemon. This permits that browser origin; other origins
-   remain rejected.
+5. To use the browser UI, enter that exact HTTPS origin in Job Server's
+   **Settings → Remote HTTPS URL (Tailscale/LAN)**, save the configuration, then
+   choose **Server → Restart**. The JSON setting is `public_url`. This permits
+   that browser origin; other origins remain rejected.
 
 The daemon stays on loopback and ignores forwarded headers. HTTP on
 `127.0.0.1:8766` is the local connection from Tailscale Serve to Job Server; remote
