@@ -109,6 +109,17 @@ class Scheduler:
     def tick(self):
         self.reconcile()
         with self.db.transaction() as c:
+            # A durable force request may wait for a dependency. Losing the
+            # requesting administrator's authority must revoke the override
+            # before priority ordering or resource checks are evaluated.
+            for revoked in c.execute(
+                """SELECT j.id,j.force_actor FROM jobs j LEFT JOIN users u ON u.id=j.force_actor
+                   WHERE j.state='PENDING' AND j.force_run=1
+                   AND (u.id IS NULL OR u.enabled<>1 OR u.role<>'admin')"""
+            ).fetchall():
+                c.execute("UPDATE jobs SET force_run=0,force_actor=NULL WHERE id=?", (revoked["id"],))
+                self.db.event(c, "job_force_run_revoked", job_id=revoked["id"],
+                              requested_by=revoked["force_actor"], reason="administrator_unavailable")
             paused = self.db.metadata("paused") == "true"
             running = self.db.rows("SELECT * FROM jobs WHERE state='RUNNING'")
             used_cpu = sum(json.loads(j["spec"])["resources"]["cpus_per_task"] for j in running)

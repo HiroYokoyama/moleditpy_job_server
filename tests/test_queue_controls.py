@@ -107,6 +107,39 @@ def test_force_run_never_bypasses_dependency_policy(client, admin, alice, launch
     assert launches == ([dependent] if chain_any else [])
 
 
+@pytest.mark.parametrize("revoke", ["disable", "demote"])
+def test_deferred_force_request_loses_override_when_administrator_loses_authority(client, admin, alice, launches, revoke):
+    predecessor = pending(client, alice)
+    dependent = pending(client, alice, after_job=predecessor)
+    occupying = pending(client, alice)
+    change(client, admin, dependent, "force-run", {"force_run": True})
+    client.post("/api/v1/admin/queue/pause", headers=admin["headers"], json={"paused": True})
+    client.app.state.scheduler.tick()
+    assert launches == []
+    with client.app.state.db.transaction() as c:
+        if revoke == "disable":
+            c.execute("UPDATE users SET enabled=0 WHERE id=?", (admin["user"]["id"],))
+        else:
+            c.execute("UPDATE users SET role='user' WHERE id=?", (admin["user"]["id"],))
+        c.execute("UPDATE jobs SET state='DONE' WHERE id=?", (predecessor,))
+    client.app.state.scheduler.tick()
+    assert launches == [], "Revoked authority must not bypass queue pause"
+    db = client.app.state.db
+    assert db.one("SELECT force_run,force_actor FROM jobs WHERE id=?", (dependent,)) == {"force_run": 0, "force_actor": None}
+    assert db.one("SELECT event FROM events WHERE job_id=? AND event='job_force_run_revoked'", (dependent,))
+    with db.transaction() as c:
+        c.execute("UPDATE metadata SET value='false' WHERE key='paused'")
+        # Occupied reservations still block the now-ordinary dependent job.
+        c.execute("UPDATE jobs SET state='RUNNING',started_at=? WHERE id=?", (time.time(), occupying))
+    client.app.state.settings.max_active_per_user = 1
+    client.app.state.scheduler.tick()
+    assert launches == []
+    with db.transaction() as c:
+        c.execute("UPDATE jobs SET state='DONE' WHERE id=?", (occupying,))
+    client.app.state.scheduler.tick()
+    assert launches == [dependent], "Revoking Force must not cancel an otherwise eligible normal job"
+
+
 def test_force_request_can_be_withdrawn_before_dispatch(client, admin, alice, launches):
     identifier = pending(client, alice)
     assert change(client, admin, identifier, "force-run", {"force_run": True}).status_code == 200
