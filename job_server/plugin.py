@@ -29,10 +29,9 @@ def initialize(context):
 
     icon = str(Path(__file__).parent / "web" / "icon.png")
 
-    def open_tab(index):
+    def open_dashboard():
         existing = context.get_window("job_server_dashboard")
         if existing is not None:
-            existing.tabs.setCurrentIndex(index)
             existing.show()
             existing.raise_()
             existing.activateWindow()
@@ -52,20 +51,8 @@ def initialize(context):
             dependency_dialog(parent, [exc.name or str(exc)])
             return
         context.register_window("job_server_dashboard", dialog)
-        dialog.tabs.setCurrentIndex(index)
         dialog.show()
 
-    context.add_menu_action("Extensions/Job Server/Server Dashboard...", lambda: open_tab(0), icon=icon)
-    context.add_menu_action("Extensions/Job Server/Users & Devices...", lambda: open_tab(1), icon=icon)
-    context.add_menu_action("Extensions/Job Server/Settings...", lambda: open_tab(2), icon=icon)
-    context.add_menu_action("Extensions/Job Server/Open Logs...", lambda: open_logs(), icon=icon)
-
-
-def open_logs():
-    from PySide6.QtCore import QUrl
-    from PySide6.QtGui import QDesktopServices
-    from .settings import Settings
-
-    directory = Settings.load().root / "logs"
-    directory.mkdir(parents=True, exist_ok=True)
-    QDesktopServices.openUrl(QUrl.fromLocalFile(str(directory)))
+    # Users & Devices, Settings and Open Logs live inside the dashboard window
+    # (tabs and File menu), so MoleditPy needs only this one entry.
+    context.add_menu_action("Extensions/Job Server...", open_dashboard, icon=icon)

@@ -4,6 +4,8 @@ const state = {token:null, expires:0, authenticated:0,  me:null, capabilities:nu
 const encoder = new TextEncoder();
 const digest = async value => [...new Uint8Array(await crypto.subtle.digest('SHA-256',value))].map(v=>v.toString(16).padStart(2,'0')).join('');
 function message(text) { $('#notice').textContent = text; $('#notice').hidden = !text; }
+// Memory is stored in MB but shown and entered in GB.
+function gb(mb) { return typeof mb==='number' ? String(Number((mb/1024).toFixed(1))) : '—'; }
 function date(value) { return value ? new Date(value*1000).toLocaleString() : '—'; }
 function cell(row,text,className='') { const td = document.createElement('td'); td.textContent=String(text); td.className=className; row.append(td); return td; }
 function button(parent,text,call) { const element=document.createElement('button'); element.textContent=text; element.addEventListener('click',()=>safe(call)); parent.append(element); return element; }
@@ -140,7 +142,7 @@ async function refresh() {
     const resource=await api('GET','/system/resources');
     $('#running').textContent=resource.running;$('#pending').textContent=resource.pending;
     $('#cpu').textContent=resource.reserved_cpus+' / '+resource.cpus;
-    $('#memory').textContent=resource.reserved_memory_mb+' / '+resource.memory_mb;
+    $('#memory').textContent=gb(resource.reserved_memory_mb)+' / '+gb(resource.memory_mb);
     state.paused=resource.paused;$('#queue-label').textContent=resource.paused?'Queue paused':'Shared queue';$('#pause').textContent=resource.paused?'Resume queue':'Pause queue';
     const page=state.page;
     const jobs=await api('GET',(state.me.role==='admin'?'/admin/jobs':'/jobs')+'?limit=50&offset='+page*50);
@@ -150,7 +152,7 @@ async function refresh() {
       const row=document.createElement('tr');const name=cell(row,job.spec.name,'job-name');
       const id=document.createElement('small');id.className='job-id';id.textContent=job.id;name.append(id);
       const status=cell(row,'');const badge=document.createElement('span');badge.className='badge '+job.display_state.toLowerCase();badge.textContent=job.display_state;status.append(badge);const priority=document.createElement('small');priority.className='job-id';priority.textContent='Priority '+(job.priority??0)+(job.force_run?' · Force requested':'');status.append(priority);
-      cell(row,job.spec.resources.cpus_per_task+' cores · '+job.spec.resources.memory_mb+' MB');cell(row,date(job.created_at));button(cell(row,''),'Open',()=>detail(job.id));$('#jobs-body').append(row);
+      cell(row,job.spec.resources.cpus_per_task+' cores · '+gb(job.spec.resources.memory_mb)+' GB');cell(row,date(job.created_at));button(cell(row,''),'Open',()=>detail(job.id));$('#jobs-body').append(row);
     }
     if(!jobs.length){const row=document.createElement('tr');const empty=cell(row,'No jobs on this page.','empty');empty.colSpan=5;$('#jobs-body').append(row);}
     $('#previous-page').disabled=state.page===0;$('#next-page').disabled=jobs.length<50;$('#page-number').textContent='Page '+(state.page+1);
@@ -176,7 +178,7 @@ $('#submit-form').addEventListener('submit',event=>{
     try{
       const fields=form.elements,files=[...fields.files.files],manifest=[];
       for(const file of files){$('#upload-progress').textContent='Verifying '+file.name+'…';manifest.push({path:file.name,size:file.size,sha256:await digest(await file.arrayBuffer())});}
-      const spec={name:fields.name.value,command:fields.command.value,files:manifest,resources:{cpus_per_task:Number(fields.cpus.value),memory_mb:Number(fields.memory.value),walltime_seconds:Number(fields.walltime.value)},after_job:fields.after.value||null,chain_any:fields.chain_any.checked,auto_download:true,fetch_globs:fields.globs.value.split(',').map(x=>x.trim()).filter(Boolean)};
+      const spec={name:fields.name.value,command:fields.command.value,files:manifest,resources:{cpus_per_task:Number(fields.cpus.value),memory_mb:Math.max(1,Math.round(Number(fields.memory.value)*1024)),walltime_seconds:Number(fields.walltime.value)},after_job:fields.after.value||null,chain_any:fields.chain_any.checked,auto_download:true,fetch_globs:fields.globs.value.split(',').map(x=>x.trim()).filter(Boolean)};
       const fingerprint=await digest(encoder.encode(JSON.stringify(spec)));
       requireSession(generation);
       const prior=JSON.parse(sessionStorage.getItem('pending-submit')||'null');
@@ -203,7 +205,7 @@ async function detail(id,reset=true){
   $('#force-job').textContent=job.force_run?'Cancel force request':'Force run…';
   $('#force-job').disabled=$('#set-priority').disabled=state.queueBusy;
   $('#detail-name').textContent=job.spec.name+' · '+job.display_state;$('#detail-id').textContent=id;
-  $('#detail-spec').textContent=job.spec.command+'\n\n'+job.spec.resources.cpus_per_task+' CPU cores · '+job.spec.resources.memory_mb+' MB · exit code '+(job.exit_code??'—')+(job.reason?'\n'+job.reason:'');
+  $('#detail-spec').textContent=job.spec.command+'\n\n'+job.spec.resources.cpus_per_task+' CPU cores · '+gb(job.spec.resources.memory_mb)+' GB · exit code '+(job.exit_code??'—')+(job.reason?'\n'+job.reason:'');
   $('#cancel-job').disabled=['DONE','FAILED','CANCELLED','LOST'].includes(job.state);
   const log=await api('GET',`/jobs/${id}/log?offset=${state.offset}&limit=65536`);if(!current())return;$('#log').textContent=($('#log').textContent+log.text).slice(-1000000);state.offset=log.next_offset;
   $('#result-files').replaceChildren();

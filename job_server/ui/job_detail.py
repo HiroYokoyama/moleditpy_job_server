@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
 
 from ._qt_callbacks import connect_queued
 from .dashboard import Task
+from .units import gb
 
 LOG_LIMIT = 65536
 FILE_LIMIT = 1000
@@ -120,7 +121,7 @@ class JobDetailDialog(QDialog):
                 "name": spec.get("name", "—"), "state": job.get("display_state", job["state"]),
                 "owner": owner, "id": job["id"], "priority": job.get("priority", 0),
                 "force": "Requested; dependencies still apply" if job.get("force_run") else "Not requested",
-                "resources": f"CPU {resources.get('cpus_per_task', '—')} · Memory {resources.get('memory_mb', '—')} MB · Wall time {resources.get('walltime_seconds', '—')} s",
+                "resources": f"CPU {resources.get('cpus_per_task', '—')} · Memory {gb(resources.get('memory_mb'))} GB · Wall time {resources.get('walltime_seconds', '—')} s",
                 "dependency": (str(dependency) + (" · any completion" if spec.get("chain_any") else " · must succeed")) if dependency else "None",
                 "exit": job.get("exit_code") if job.get("exit_code") is not None else "—",
             }

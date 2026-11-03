@@ -69,7 +69,7 @@ def test_refresh_displays_names_status_and_local_access_time(dashboard, monkeypa
     dashboard.refresh()
     assert dashboard.jobs.item(0, 1).text() == "alice"
     assert dashboard.metric_values["cpu"].text() == "2 / 8"
-    assert dashboard.metric_values["memory"].text() == "1024 / 4096 MB"
+    assert dashboard.metric_values["memory"].text() == "1 / 4 GB"
     assert dashboard.metric_values["running"].text() == "1"
     dashboard.jobs.setCurrentCell(0, 0)
     assert dashboard.selected(dashboard.jobs) == "job-id"
@@ -205,3 +205,63 @@ def test_refresh_preserves_user_column_widths(dashboard):
     dashboard.fill(dashboard.jobs, rows, ["job-id"])
     assert dashboard.jobs.columnWidth(1) == 175
     assert not dashboard.jobs.wordWrap()
+
+
+def test_status_banner_reports_each_server_state(dashboard, monkeypatch):
+    assert dashboard.status_level == "unknown"
+    monkeypatch.setattr(dashboard, "task", lambda call, display, **kwargs: (
+        kwargs["on_error"]("refused") if fail else display(call())))
+    fail = True
+    dashboard.refresh()
+    assert dashboard.status_level == "offline"
+    assert dashboard.connection_status.text() == "Server offline"
+    assert "Server > Start" in dashboard.resources.text()
+    assert dashboard.client.url in dashboard.status_detail.text()
+
+    fail = False
+    replies = {"/health": {"server_version": "9.9.9"}}
+    monkeypatch.setattr(dashboard.client, "request", lambda method, path, **kwargs: replies[path])
+    dashboard.refresh()
+    assert dashboard.status_level == "warning"
+    assert "not signed in" in dashboard.connection_status.text()
+    assert "v9.9.9" in dashboard.status_detail.text()
+
+    dashboard.client.key_path.parent.mkdir(parents=True, exist_ok=True)
+    dashboard.client.key_path.write_text("synthetic placeholder")
+    dashboard.refresh()  # /system/resources is missing: the signed-in calls fail.
+    assert dashboard.status_level == "warning"
+    assert "sign-in failed" in dashboard.connection_status.text()
+
+    replies.update({
+        "/system/resources": {"running": 1, "pending": 0, "reserved_cpus": 6, "cpus": 8,
+                              "reserved_memory_mb": 1000, "memory_mb": 1000, "paused": False},
+        "/admin/jobs": [{"id": "j", "owner_id": "u", "spec": {"name": "opt"},
+                         "display_state": "RUNNING"}],
+        "/admin/users": [], "/admin/devices": [],
+    })
+    dashboard.refresh()
+    assert dashboard.status_level == "online"
+    assert "accepting jobs" in dashboard.connection_status.text()
+    assert dashboard.metric_bars["cpu"].value() == 75
+    assert dashboard.metric_bars["memory"].value() == 100
+    assert dashboard.jobs.item(0, 2).font().bold()
+    replies["/system/resources"]["paused"] = True
+    dashboard.refresh()
+    assert dashboard.status_level == "warning"
+    assert "queue paused" in dashboard.connection_status.text()
+
+
+def test_memory_and_storage_are_edited_in_gb_but_saved_in_mb(dashboard):
+    from job_server.settings import Settings
+    from job_server.ui.units import gb
+
+    assert gb(16384) == "16" and gb(512) == "0.5" and gb(1000) == "1" and gb(1300) == "1.3"
+    assert gb(None) == "—"
+    assert dashboard.fields["memory_mb"].decimals() == 1
+    assert dashboard.fields["memory_mb"].suffix() == " GB"
+    dashboard.fields["memory_mb"].setValue(16)
+    dashboard.fields["storage_quota_mb"].setValue(2.5)
+    assert dashboard.save_settings()
+    saved = Settings.load(dashboard.config)
+    assert saved.memory_mb == 16384
+    assert saved.storage_quota_mb == 2560

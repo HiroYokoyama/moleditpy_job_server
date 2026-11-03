@@ -272,7 +272,7 @@ async function submittedAndCompleted() {
   });
   signedIn(app);app.state.page=3;
   const field=value=>({value});
-  const form={querySelector:()=>({disabled:false}),elements:{files:{files:[]},name:field('submitted'),command:field('echo synthetic'),cpus:field('1'),memory:field('512'),walltime:field('60'),after:field(''),chain_any:{checked:false},globs:field('*.out')}};
+  const form={querySelector:()=>({disabled:false}),elements:{files:{files:[]},name:field('submitted'),command:field('echo synthetic'),cpus:field('1'),memory:field('0.5'),walltime:field('60'),after:field(''),chain_any:{checked:false},globs:field('*.out')}};
   await app.get('#submit-form').listeners.submit({preventDefault(){},currentTarget:form});
   assert.equal(app.state.page,0);assert.equal(app.state.job,'submitted');
   assert.equal(app.get('#jobs-body').children[0].children[1].children[0].textContent,'PENDING');
