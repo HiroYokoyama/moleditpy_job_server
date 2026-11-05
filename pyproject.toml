@@ -30,7 +30,7 @@ Issues = "https://github.com/HiroYokoyama/moleditpy_job_server/issues"
 include = ["job_server*"]
 
 [tool.setuptools.package-data]
-job_server = ["web/*.html", "web/*.css", "web/*.js", "web/*.png"]
+job_server = ["web/*.html", "web/*.css", "web/*.js", "web/*.png", "web/*.txt", "web/*.json"]
 
 [tool.ruff]
 target-version = "py311"

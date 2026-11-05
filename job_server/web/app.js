@@ -2,7 +2,18 @@
 const $ = selector => document.querySelector(selector);
 const state = {token:null, expires:0, authenticated:0,  me:null, capabilities:null, paused:false, job:null, jobInfo:null, queueBusy:false, offset:0, page:0, busy:false, refreshPending:false, generation:0, busyGeneration:-1, detailRequest:0, accountsRequest:0};
 const encoder = new TextEncoder();
-const digest = async value => [...new Uint8Array(await crypto.subtle.digest('SHA-256',value))].map(v=>v.toString(16).padStart(2,'0')).join('');
+async function digest(value) {
+  if(globalThis.crypto?.subtle)return [...new Uint8Array(await crypto.subtle.digest('SHA-256',value))].map(v=>v.toString(16).padStart(2,'0')).join('');
+  return sha256(value);
+}
+function randomId() {
+  if(globalThis.crypto?.randomUUID)return crypto.randomUUID();
+  if(!globalThis.crypto?.getRandomValues)throw new Error('Secure random generation is unavailable. Use a supported browser.');
+  const bytes=crypto.getRandomValues(new Uint8Array(16));
+  bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;
+  const hex=[...bytes].map(v=>v.toString(16).padStart(2,'0')).join('');
+  return [hex.slice(0,8),hex.slice(8,12),hex.slice(12,16),hex.slice(16,20),hex.slice(20)].join('-');
+}
 function message(text) { $('#notice').textContent = text; $('#notice').hidden = !text; }
 // Memory is stored in MB but shown and entered in GB.
 function gb(mb) { return typeof mb==='number' ? String(Number((mb/1024).toFixed(1))) : '—'; }
@@ -182,7 +193,7 @@ $('#submit-form').addEventListener('submit',event=>{
       const fingerprint=await digest(encoder.encode(JSON.stringify(spec)));
       requireSession(generation);
       const prior=JSON.parse(sessionStorage.getItem('pending-submit')||'null');
-      const key=prior?.fingerprint===fingerprint?prior.key:crypto.randomUUID();
+      const key=prior?.fingerprint===fingerprint?prior.key:randomId();
       sessionStorage.setItem('pending-submit',JSON.stringify({key,fingerprint}));
       const reservation=await api('POST','/jobs',spec,{headers:{'Idempotency-Key':key}});
       const statuses=await api('GET','/jobs/'+reservation.id+'/uploads');

@@ -39,3 +39,11 @@ The immutable submodule's original GPL license document and source bytes are
 preserved for provenance; this explicit owner permission supplies the additional
 LGPL grant for these redistributed first-party copies. It does not relicense
 third-party files/dependencies or change any historical release.
+
+## Browser SHA-256
+
+The browser bundle `job_server/web/sha256.min.js` is js-sha256 1.0.0 by Chen,
+Yi-Cyuan, distributed under the MIT license. Its license is included as
+`job_server/web/sha256.LICENSE.txt`; the pinned revision and file hashes are in
+`job_server/web/sha256.PROVENANCE.json`. It verifies file checksums when Web Crypto
+is unavailable on an HTTP origin. Authentication does not use this bundle.

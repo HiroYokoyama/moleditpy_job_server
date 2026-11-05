@@ -36,6 +36,8 @@ def test_release_checksums_cover_only_distributed_assets(tmp_path):
     with ZipFile(wheel, "w") as archive:
         archive.writestr("job_server/_execution/schedulers/base.py", "fixture")
         archive.writestr("job_server/web/app.js", "fixture")
+        for name in ("sha256.min.js", "sha256.LICENSE.txt", "sha256.PROVENANCE.json"):
+            archive.writestr("job_server/web/" + name, "fixture")
     with tarfile.open(source, "w:gz"):
         pass
     assets = [server, wheel, source]

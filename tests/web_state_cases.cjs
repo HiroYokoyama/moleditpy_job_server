@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const {webcrypto, randomUUID} = require('node:crypto');
+const {webcrypto, randomUUID, createHash} = require('node:crypto');
 
 function deferred() {
   let resolve;
@@ -40,6 +40,9 @@ async function application(fetch, storage=new Map()) {
     setInterval(){}, setTimeout(){},clearTimeout(){},addEventListener(name,callback){events[name]=callback;},
     fetch:async(url, options)=>url==='/api/v1/health' ? response({server_version:'synthetic'}) : fetch(url, options),
   });
+  context.window=context;
+  const path=require('node:path');
+  vm.runInContext(fs.readFileSync(path.join(path.dirname(process.argv[2]),'sha256.min.js'),'utf8'),context);
   vm.runInContext(fs.readFileSync(process.argv[2], 'utf8'), context);
   await new Promise(done=>setImmediate(done));
   const state = vm.runInContext('state', context);
@@ -297,5 +300,22 @@ async function queuedRefresh() {
   assert.equal(requests,2);
   assert.equal(app.get('#jobs-body').children[0].children[1].children[0].textContent,'DONE');
 }
-const cases={sessionRestore,submittedAndCompleted,queuedRefresh,queueControls,expiredDownload,keylessLogin,authentication,refresh,details,accountsPolling,accountsOrdering,loginView,connectionFailure,connectionTimeout};
+async function insecureContext() {
+  const app=await application(async()=>response({}));
+  app.context.crypto={getRandomValues:webcrypto.getRandomValues.bind(webcrypto)};
+  for(const length of [0,1,55,56,63,64,65,1000,1000000]){
+    const value=new Uint8Array(length).fill(97);
+    assert.equal(await app.call('digest')(value.buffer),createHash('sha256').update(value).digest('hex'));
+  }
+  const identifiers=new Set();
+  for(let index=0;index<100;index++){
+    const id=app.call('randomId')();
+    assert.match(id,/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    identifiers.add(id);
+  }
+  assert.equal(identifiers.size,100);
+  app.context.crypto={};
+  assert.throws(()=>app.call('randomId')(),/Secure random generation is unavailable/);
+}
+const cases={insecureContext,sessionRestore,submittedAndCompleted,queuedRefresh,queueControls,expiredDownload,keylessLogin,authentication,refresh,details,accountsPolling,accountsOrdering,loginView,connectionFailure,connectionTimeout};
 cases[process.argv[3]]().then(()=>console.log('PASS '+process.argv[3])).catch(error=>{console.error(error);process.exitCode=1;});

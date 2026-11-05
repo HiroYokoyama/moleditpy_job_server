@@ -61,6 +61,8 @@ def verify_artifacts(version, root=ROOT):
         safe_members(archive.namelist())
         archive.getinfo("job_server/_execution/schedulers/base.py")
         archive.getinfo("job_server/web/app.js")
+        for name in ("sha256.min.js", "sha256.LICENSE.txt", "sha256.PROVENANCE.json"):
+            archive.getinfo("job_server/web/" + name)
     with tarfile.open(source) as archive:
         safe_members(archive.getnames())
         if any(member.issym() or member.islnk() for member in archive.getmembers()):

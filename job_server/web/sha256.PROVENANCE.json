@@ -1,0 +1,11 @@
+{
+  "repository": "https://github.com/emn178/js-sha256",
+  "version": "1.0.0",
+  "commit": "9a54fb31d4594762987e1b5d175265f6bac921de",
+  "license": "MIT",
+  "files": {
+    "sha256.min.js": "a050d794e170699bd1a69d33908d0942c68901cb88347016064b60b240f0067e",
+    "sha256.LICENSE.txt": "2153bd2978793748fbe0eb8f838ae2ae19f03f9d4ee5473dd1628a0c0790e4ab"
+  },
+  "hash_normalization": "UTF-8 with LF newlines"
+}
