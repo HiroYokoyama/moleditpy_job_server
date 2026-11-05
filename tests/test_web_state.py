@@ -7,8 +7,7 @@ import subprocess
 import pytest
 
 
-@pytest.mark.parametrize("scenario", ["insecureContext", "sessionRestore", "submittedAndCompleted", "queuedRefresh", "queueControls", "expiredDownload", "keylessLogin", "authentication", "refresh", "details", "accountsPolling", "accountsOrdering", "loginView", "connectionFailure", "connectionTimeout"])
-def test_browser_ignores_stale_responses(scenario):
+def test_browser_ignores_stale_responses():
     node = shutil.which("node")
     if not node:
         pytest.skip("Node.js unavailable for browser JavaScript regression")
@@ -18,11 +17,13 @@ def test_browser_ignores_stale_responses(scenario):
             node,
             str(root / "tests/web_state_cases.cjs"),
             str(root / "job_server/web/app.js"),
-            scenario,
+            "all",
         ],
         capture_output=True,
         text=True,
-        timeout=15,
+        # One process avoids fifteen cold Node starts competing with native/Qt
+        # tests on Windows runners. The JS harness bounds each scenario itself.
+        timeout=60,
     )
     assert result.returncode == 0, result.stdout + result.stderr
 
