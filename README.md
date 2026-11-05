@@ -187,12 +187,12 @@ overlay. It does not change your sibling Job Manager repository or its upstream 
 
 ### Multiple connection addresses and optional LAN HTTP
 
-In **Settings**, enter one origin per line in **Web access URLs**. Existing
+In **Settings**, enter Tailscale or proxy origins, one per line, in **Other web URLs**. Existing
 `public_url` and `public_urls` configurations appear in this single field.
 Browser requests use an exact origin allowlist, without wildcards.
 
-For direct access from another LAN PC, enable **local HTTPS**, select this PC's
-private IP in **LAN listen address**, save, then choose **Server > Restart**.
+For direct access from another LAN PC, enable **local HTTPS**, tick this PC's
+private IPs or `.local` name in **Reachable from other PCs at**, save, then choose **Server > Restart**.
 The HTTPS port defaults to 8767. The server creates a persistent local CA and
 renews its server certificate when needed at startup. Use **Create / show CA
 certificate...** to copy the fingerprint or export the public CA.
@@ -245,7 +245,7 @@ certificates and forwards connections to the local Job Server.
    **Hosts → Server URL**, then use **Sign in / register device**. Use the printed
    hostname, not the server's LAN IP, and do not append `:8766` to that HTTPS URL.
 5. To use the browser UI, paste that same HTTPS URL in Job Server's
-   **Settings → Web access URLs**, save the configuration, then
+   **Settings → Other web URLs**, save the configuration, then
    choose **Server → Restart**. The JSON setting is `public_urls` (one origin per list entry). This enables browser access at that address. Other website addresses remain rejected.
 
 The daemon stays on loopback and ignores forwarded headers. HTTP on

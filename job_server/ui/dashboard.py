@@ -43,7 +43,7 @@ from PySide6.QtWidgets import (
 
 from ..client import JobServerClient
 from .units import GBSpinBox, FocusSpinBox, gb
-from .network import lan_address_selector
+from .network import LanAddressList
 from ..settings import Settings
 
 
@@ -340,22 +340,35 @@ class Dashboard(QDialog):
         self.ca_button = QPushButton("Create / show CA certificate...")
         self.ca_button.clicked.connect(self.show_local_ca)
         form.addRow("", self.ca_button)
+        self.regenerate_ca_button = QPushButton("Regenerate CA certificate...")
+        self.regenerate_ca_button.clicked.connect(self.regenerate_ca)
+        form.addRow("", self.regenerate_ca_button)
         self.allow_lan_http = QCheckBox("Allow unencrypted HTTP on trusted LAN addresses")
         self.allow_lan_http.setChecked(self.settings.allow_lan_http)
         self.allow_lan_http.setToolTip(
             "Passwords, tokens and job data are readable on the network. "
-            "Only private IPv4/IPv6 literal addresses are accepted; HTTPS remains recommended."
+            "Only private IP addresses and .local names are accepted; HTTPS remains recommended."
         )
         form.addRow(self.allow_lan_http)
-        self.lan_bind_address = lan_address_selector(self.settings.lan_bind_address)
-        form.addRow("LAN listen address", self.lan_bind_address)
-        self.public_urls = QPlainTextEdit("\n".join(self.settings.connection_urls))
-        self.public_urls.setPlaceholderText("One origin per line (LAN / Tailscale / HTTPS proxy)")
-        self.public_urls.setMaximumHeight(80)
-        form.addRow("Web access URLs", self.public_urls)
+        self.lan_addresses = LanAddressList(
+            self.settings.lan_addresses, self.settings.lan_hostname
+        )
+        form.addRow("Reachable from other PCs at", self.lan_addresses)
+        self.connect_urls = QLabel()
+        self.connect_urls.setWordWrap(True)
+        self.connect_urls.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        form.addRow("Connect using", self.connect_urls)
+        self.public_urls = QPlainTextEdit(
+            "\n".join(
+                url for url in self.settings.connection_urls if url not in self.settings.lan_urls
+            )
+        )
+        self.public_urls.setPlaceholderText("Tailscale or HTTPS proxy, one per line")
+        self.public_urls.setMaximumHeight(60)
+        form.addRow("Other web URLs", self.public_urls)
         address_help = QLabel(
-            "Local only by default. For another PC, enable HTTPS or LAN HTTP, select this PC's "
-            "IP and allow the port in the OS firewall. Add proxy or Tailscale URLs above."
+            "Local only by default. For another PC, enable HTTPS or LAN HTTP, tick what it will "
+            "use and allow the port in the OS firewall. Other web URLs open no listener."
         )
         address_help.setWordWrap(True)
         form.addRow(address_help)
@@ -363,14 +376,25 @@ class Dashboard(QDialog):
         def update_lan_fields():
             secure = self.lan_tls.isChecked()
             listening = secure or self.allow_lan_http.isChecked()
-            self.lan_bind_address.setEnabled(listening)
             self.ca_button.setEnabled(secure)
             form.setRowVisible(self.fields["tls_port"], secure)
             form.setRowVisible(self.ca_button, secure)
-            form.setRowVisible(self.lan_bind_address, listening)
+            form.setRowVisible(self.regenerate_ca_button, secure)
+            form.setRowVisible(self.lan_addresses, listening)
+            form.setRowVisible(self.connect_urls, listening)
+
+        def update_connect_urls():
+            urls = self._network_preview().lan_urls
+            self.connect_urls.setText("\n".join(urls) or "Tick an address above.")
 
         self.allow_lan_http.toggled.connect(update_lan_fields)
         self.lan_tls.toggled.connect(update_lan_fields)
+        self.allow_lan_http.toggled.connect(update_connect_urls)
+        self.lan_tls.toggled.connect(update_connect_urls)
+        self.lan_addresses.changed.connect(update_connect_urls)
+        self.fields["port"].valueChanged.connect(update_connect_urls)
+        self.fields["tls_port"].valueChanged.connect(update_connect_urls)
+        update_connect_urls()
         update_lan_fields()
         layout.addWidget(network)
 
@@ -385,6 +409,25 @@ class Dashboard(QDialog):
         ):
             limits.addRow(label, number(key, maximum))
         layout.addWidget(resources)
+
+        job_setup = QGroupBox("Commands before each job")
+        job_setup_layout = QVBoxLayout(job_setup)
+        self.job_setup = QPlainTextEdit("\n".join(self.settings.job_setup_commands))
+        self.job_setup.setPlaceholderText(
+            '$env:OMP_NUM_THREADS = "4"\nconda activate orca'
+            if self.settings.execution_os == "windows"
+            else "export OMP_NUM_THREADS=4\nconda activate orca"
+        )
+        self.job_setup.setMaximumHeight(70)
+        job_setup_layout.addWidget(self.job_setup)
+        job_setup_help = QLabel(
+            "Runs at the start of every new job, before the client's own commands, in the job's "
+            "shell. Applies to all users after a restart. Environment variables set here last "
+            "for that job."
+        )
+        job_setup_help.setWordWrap(True)
+        job_setup_layout.addWidget(job_setup_help)
+        layout.addWidget(job_setup)
 
         storage = QGroupBox("Job working directory")
         storage_layout = QVBoxLayout(storage)
@@ -683,11 +726,48 @@ class Dashboard(QDialog):
             table.setSortingEnabled(sorting)
             table.blockSignals(signals)
 
+    def _network_preview(self):
+        """The network settings as currently chosen in the form."""
+        listening = self.allow_lan_http.isChecked() or self.lan_tls.isChecked()
+        addresses = self.lan_addresses.addresses() if listening else []
+        return replace(
+            self.settings,
+            allow_lan_http=self.allow_lan_http.isChecked(),
+            lan_tls=self.lan_tls.isChecked(),
+            port=self.fields["port"].value(),
+            tls_port=self.fields["tls_port"].value(),
+            lan_bind_address=next(iter(addresses), ""),
+            lan_extra_addresses=addresses[1:],
+            lan_hostname=self.lan_addresses.hostname() if addresses else "",
+        )
+
+    def _confirm_ca_replacement(self, candidate):
+        """A `.local` name needs a new CA, which every connecting PC must trust again."""
+        if not candidate.lan_hostname:
+            return True
+        from ..tls import needs_new_ca, retire_ca
+
+        if not needs_new_ca(candidate):
+            return True
+        answer = QMessageBox.question(
+            self,
+            "Replace the local CA?",
+            f"The current local CA cannot issue a certificate for {candidate.lan_hostname}, "
+            "so it must be replaced.\n\nEvery PC and browser that trusts it must trust the new "
+            "CA, and older Job Manager releases cannot do so. Replace it?",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            self.message.setText(f"Not saved. {candidate.lan_hostname} needs a new local CA.")
+            return False
+        retire_ca(candidate)
+        return True
+
     def save_settings(self):
         if self._pending_lifecycle:
             self.message.setText("Wait for the server operation to finish before saving configuration.")
             return False
         try:
+            preview = self._network_preview()
             urls = [
                 url for url in self.public_urls.toPlainText().split()
                 if url.rstrip("/") not in self.settings.lan_urls
@@ -696,25 +776,56 @@ class Dashboard(QDialog):
                 self.settings,
                 python_executable=self.python_path.text().strip(),
                 job_dir=self.job_dir.text().strip(),
+                job_setup_commands=[
+                    line.strip()
+                    for line in self.job_setup.toPlainText().splitlines()
+                    if line.strip()
+                ],
                 public_url="",
                 public_urls=urls,
                 allow_lan_http=self.allow_lan_http.isChecked(),
                 lan_tls=self.lan_tls.isChecked(),
-                lan_bind_address=(
-                    self.lan_bind_address.currentData()
-                    if self.allow_lan_http.isChecked() or self.lan_tls.isChecked() else ""
-                ),
+                lan_bind_address=preview.lan_bind_address,
+                lan_extra_addresses=preview.lan_extra_addresses,
+                lan_hostname=preview.lan_hostname,
                 **{key: field.mb() if isinstance(field, GBSpinBox) else field.value()
                    for key, field in self.fields.items()},
             )
-            candidate.validate().save(self.config)
+            candidate.validate()
+            if not self._confirm_ca_replacement(candidate):
+                return False
+            candidate.save(self.config)
             self.settings = candidate
-            self.public_urls.setPlainText("\n".join(candidate.connection_urls))
+            self.public_urls.setPlainText(
+                "\n".join(url for url in candidate.connection_urls if url not in candidate.lan_urls)
+            )
             self.message.setText(f"Saved {self.config}. Choose Server > Restart to apply.")
             return True
         except Exception as exc:
             self.message.setText(str(exc))
             return False
+
+    def regenerate_ca(self):
+        if not self.save_settings():
+            return
+        from ..tls import ca_path, retire_ca
+
+        if ca_path(self.settings).exists():
+            answer = QMessageBox.question(
+                self,
+                "Regenerate the local CA?",
+                "A new CA and server certificate replace the current ones. Every PC and browser "
+                "that trusts the current CA must trust the new one. The old files move to a "
+                "retired- folder. Restart the server to use the new CA. Regenerate it?",
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+            try:
+                retire_ca(self.settings)
+            except (OSError, ValueError) as exc:
+                self.message.setText(f"The CA was not regenerated: {exc}")
+                return
+        self.show_local_ca()
 
     def show_local_ca(self):
         if not self.save_settings():

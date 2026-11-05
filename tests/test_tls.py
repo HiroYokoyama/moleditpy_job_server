@@ -191,7 +191,7 @@ def test_https_loopback_origins_are_allowed_only_when_local_https_is_enabled(tmp
 
 
 @pytest.mark.parametrize(
-    "url", ["http://192.168.1.20:8767", "https://8.8.8.8", "https://host.local"]
+    "url", ["http://192.168.1.20:8767", "https://8.8.8.8", "https://host.example"]
 )
 def test_ca_bootstrap_rejects_nonlocal_or_nonhttps_urls(url):
     with pytest.raises(ValueError):

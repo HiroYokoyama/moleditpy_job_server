@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
 )
 
 from .units import GBSpinBox, FocusSpinBox
-from .network import lan_address_selector
+from .network import LanAddressList
 
 
 class SetupDialog(QDialog):
@@ -37,9 +37,9 @@ class SetupDialog(QDialog):
         note("1. Connection — local access works without extra configuration.")
         form = QFormLayout()
         self.addresses = QPlainTextEdit(dashboard.public_urls.toPlainText())
-        self.addresses.setPlaceholderText("One origin per line (LAN / Tailscale / HTTPS proxy)")
+        self.addresses.setPlaceholderText("Tailscale or HTTPS proxy, one per line")
         self.addresses.setMaximumHeight(90)
-        form.addRow("Web access URLs", self.addresses)
+        form.addRow("Other web URLs", self.addresses)
         self.lan_tls = QCheckBox("Enable local HTTPS with a persistent local CA")
         self.lan_tls.setChecked(dashboard.lan_tls.isChecked())
         form.addRow(self.lan_tls)
@@ -50,13 +50,14 @@ class SetupDialog(QDialog):
         self.allow_lan_http = QCheckBox("Allow trusted LAN HTTP (passwords and jobs are unencrypted)")
         self.allow_lan_http.setChecked(dashboard.allow_lan_http.isChecked())
         form.addRow(self.allow_lan_http)
-        self.lan_bind_address = lan_address_selector(dashboard.lan_bind_address.currentData())
-        form.addRow("LAN listen address", self.lan_bind_address)
+        self.lan_addresses = LanAddressList(
+            dashboard.lan_addresses.addresses(), dashboard.lan_addresses.hostname()
+        )
+        form.addRow("Reachable from other PCs at", self.lan_addresses)
 
         def update_lan_fields():
             listening = self.allow_lan_http.isChecked() or self.lan_tls.isChecked()
-            self.lan_bind_address.setEnabled(listening)
-            form.setRowVisible(self.lan_bind_address, listening)
+            form.setRowVisible(self.lan_addresses, listening)
             form.setRowVisible(self.tls_port, self.lan_tls.isChecked())
 
         self.allow_lan_http.toggled.connect(update_lan_fields)
@@ -136,12 +137,7 @@ class SetupDialog(QDialog):
         dashboard.allow_lan_http.setChecked(self.allow_lan_http.isChecked())
         dashboard.lan_tls.setChecked(self.lan_tls.isChecked())
         dashboard.fields["tls_port"].setValue(self.tls_port.value())
-        address = self.lan_bind_address.currentData()
-        index = dashboard.lan_bind_address.findData(address)
-        if index < 0:
-            dashboard.lan_bind_address.addItem(address, address)
-            index = dashboard.lan_bind_address.findData(address)
-        dashboard.lan_bind_address.setCurrentIndex(index)
+        dashboard.lan_addresses.select(self.lan_addresses.addresses(), self.lan_addresses.hostname())
         dashboard.fields["cpus"].setValue(self.cpus.value())
         dashboard.fields["memory_mb"].set_mb(self.memory.mb())
         dashboard.python_path.setText(self.python.text().strip())

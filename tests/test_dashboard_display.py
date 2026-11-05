@@ -50,11 +50,11 @@ def test_lan_selection_saves_and_copies_the_direct_url(dashboard):
     from PySide6.QtWidgets import QApplication
     from job_server.settings import Settings
 
-    assert not dashboard.lan_bind_address.isEnabled()
+    assert dashboard.lan_addresses.isHidden()
     dashboard.allow_lan_http.setChecked(True)
-    assert dashboard.lan_bind_address.isEnabled()
-    dashboard.lan_bind_address.addItem("192.168.1.20", "192.168.1.20")
-    dashboard.lan_bind_address.setCurrentIndex(dashboard.lan_bind_address.count() - 1)
+    assert not dashboard.lan_addresses.isHidden()
+    dashboard.lan_addresses.select(["192.168.1.20"])
+    assert "http://192.168.1.20:8766" in dashboard.connect_urls.text()
     assert dashboard.save_settings()
     saved = Settings.load(dashboard.config)
     assert saved.lan_bind_address == "192.168.1.20"
@@ -441,10 +441,124 @@ def test_job_working_directory_is_saved_and_default_stays_empty(dashboard, tmp_p
 def test_network_rows_appear_only_when_they_apply(dashboard):
     assert dashboard.fields["tls_port"].isHidden()
     assert dashboard.ca_button.isHidden()
-    assert dashboard.lan_bind_address.isHidden()
+    assert dashboard.lan_addresses.isHidden()
     dashboard.allow_lan_http.setChecked(True)
-    assert not dashboard.lan_bind_address.isHidden()
+    assert not dashboard.lan_addresses.isHidden()
     assert dashboard.fields["tls_port"].isHidden()
     dashboard.lan_tls.setChecked(True)
     assert not dashboard.fields["tls_port"].isHidden()
     assert not dashboard.ca_button.isHidden()
+
+
+def test_several_addresses_and_a_local_name_are_saved(dashboard):
+    from job_server.settings import Settings
+
+    dashboard.lan_tls.setChecked(True)
+    dashboard.lan_addresses.select(["192.168.1.20", "10.0.0.5"], "your-pc.local")
+    assert "https://your-pc.local:8767" in dashboard.connect_urls.text()
+    assert dashboard.save_settings()
+    saved = Settings.load(dashboard.config)
+    assert set(saved.lan_addresses) == {"192.168.1.20", "10.0.0.5"}
+    assert saved.lan_hostname == "your-pc.local"
+    assert dashboard.public_urls.toPlainText() == ""
+
+
+def test_only_one_local_name_can_be_ticked(dashboard):
+    from PySide6.QtCore import Qt
+
+    dashboard.lan_tls.setChecked(True)
+    dashboard.lan_addresses.select(["192.168.1.20"], "first.local")
+    second = dashboard.lan_addresses.add_entry("second.local")
+    second.setCheckState(Qt.CheckState.Checked)
+    assert dashboard.lan_addresses.hostname() == "second.local"
+
+
+def test_local_name_follows_the_enabled_schemes(dashboard):
+    dashboard.allow_lan_http.setChecked(True)
+    dashboard.lan_tls.setChecked(True)
+    dashboard.lan_addresses.select(["192.168.1.20"], "your-pc.local")
+    assert "https://your-pc.local:8767" in dashboard.connect_urls.text()
+    assert "http://your-pc.local:8766" in dashboard.connect_urls.text()
+    dashboard.lan_tls.setChecked(False)
+    assert "https://your-pc.local" not in dashboard.connect_urls.text()
+    assert "http://your-pc.local:8766" in dashboard.connect_urls.text()
+    assert dashboard.save_settings()
+
+
+def test_job_setup_commands_are_saved_without_blank_lines(dashboard):
+    from job_server.settings import Settings
+
+    dashboard.job_setup.setPlainText("  conda activate orca  \n\nmodule load orca\n")
+    assert dashboard.save_settings()
+    assert Settings.load(dashboard.config).job_setup_commands == [
+        "conda activate orca",
+        "module load orca",
+    ]
+
+
+@pytest.mark.parametrize("accept", [False, True])
+def test_a_local_name_replaces_the_ca_only_when_accepted(dashboard, monkeypatch, accept):
+    from PySide6.QtWidgets import QMessageBox
+    from job_server.settings import Settings
+    from job_server.tls import ca_fingerprint, ensure_certificates
+
+    dashboard.lan_tls.setChecked(True)
+    dashboard.lan_addresses.select(["192.168.1.20"])
+    assert dashboard.save_settings()
+    ensure_certificates(dashboard.settings)
+    before = ca_fingerprint(dashboard.settings)
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *args: QMessageBox.StandardButton.Yes if accept else QMessageBox.StandardButton.No,
+    )
+    dashboard.lan_addresses.select(["192.168.1.20"], "your-pc.local")
+    assert dashboard.save_settings() is accept
+    assert Settings.load(dashboard.config).lan_hostname == ("your-pc.local" if accept else "")
+    if accept:
+        ensure_certificates(dashboard.settings)
+        assert ca_fingerprint(dashboard.settings) != before
+        assert list((dashboard.settings.root / "tls").glob("retired-*/ca.pem"))
+    else:
+        assert ca_fingerprint(dashboard.settings) == before
+
+
+@pytest.mark.parametrize("accept", [False, True])
+def test_regenerate_ca_replaces_it_only_when_accepted(dashboard, monkeypatch, accept):
+    from PySide6.QtWidgets import QMessageBox
+    from job_server.tls import ca_fingerprint, ensure_certificates
+
+    shown = []
+    monkeypatch.setattr(dashboard, "show_local_ca", lambda: shown.append(True))
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *args: QMessageBox.StandardButton.Yes if accept else QMessageBox.StandardButton.No,
+    )
+    assert dashboard.regenerate_ca_button.isHidden()
+    dashboard.lan_tls.setChecked(True)
+    assert not dashboard.regenerate_ca_button.isHidden()
+    dashboard.lan_addresses.select(["192.168.1.20"])
+    assert dashboard.save_settings()
+    ensure_certificates(dashboard.settings)
+    before = ca_fingerprint(dashboard.settings)
+    dashboard.regenerate_ca()
+    assert bool(shown) is accept
+    if accept:
+        ensure_certificates(dashboard.settings)
+        assert ca_fingerprint(dashboard.settings) != before
+        assert list((dashboard.settings.root / "tls").glob("retired-*/ca.pem"))
+    else:
+        assert ca_fingerprint(dashboard.settings) == before
+
+
+def test_regenerate_without_a_ca_creates_one_without_asking(dashboard, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    shown = []
+    monkeypatch.setattr(dashboard, "show_local_ca", lambda: shown.append(True))
+    monkeypatch.setattr(QMessageBox, "question", lambda *args: pytest.fail("asked"))
+    dashboard.lan_tls.setChecked(True)
+    dashboard.lan_addresses.select(["192.168.1.20"])
+    dashboard.regenerate_ca()
+    assert shown

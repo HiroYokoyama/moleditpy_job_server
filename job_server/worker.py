@@ -45,7 +45,9 @@ def main(config, job_id):
             if settings.execution_os == "wsl"
             else str(work)
         )
-        script, payload = build_wrapper(spec, execution_dir, windows)
+        script, payload = build_wrapper(
+            spec, execution_dir, windows, settings.job_setup_commands
+        )
         wrapper = work / ("moleditpy_run.ps1" if windows else "moleditpy_run.sh")
         wrapper.write_text(script, encoding="utf-8-sig" if windows else "utf-8", newline="\n")
         if payload:

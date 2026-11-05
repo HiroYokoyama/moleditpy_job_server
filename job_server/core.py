@@ -60,7 +60,7 @@ def render_command(template, values, windows=False):
     return re.sub(r"\{(\w+)\}|\[(\w+)\]", replace, template)
 
 
-def build_wrapper(spec, workdir, windows=False):
+def build_wrapper(spec, workdir, windows=False, setup_commands=()):
     preset_type, shell, powershell = execution_core()
     files = spec["files"]
     input_name = files[0]["path"] if files else ""
@@ -76,7 +76,10 @@ def build_wrapper(spec, workdir, windows=False):
         walltime=str(resources["walltime_seconds"]),
     )
     values = placeholder_values(input_name, preset, spec["name"], str(workdir))
-    rendered = render_command(spec["command"], values, windows)
+    # The administrator's setup lines are not a template, so they keep any literal braces.
+    rendered = "\n".join(
+        [*setup_commands, render_command(spec["command"], values, windows)]
+    )
     # Upstream substitution is bypassed after quoting, including literal braces in filenames.
     marker = "__MOLEDITPY_SERVER_PAYLOAD__"
     preset.command_template = marker

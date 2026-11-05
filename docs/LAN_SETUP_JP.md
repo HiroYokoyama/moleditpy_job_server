@@ -33,7 +33,8 @@ Job Server 0.5.0 は `127.0.0.1` でしか待ち受けません。
 
 1. **Job Server > Settings** を開きます。
 2. **Enable local HTTPS with a persistent local CA** を有効にします。
-3. **LAN listen address** で、この PC の LAN IP を選びます。
+3. **Reachable from other PCs at** で、この PC の LAN IP にチェックを入れます。複数のネットワークに
+   つながっている場合は、複数選べます。できる URL は **Connect using** に表示されます。
 4. 保存して **Server > Restart** を選びます。サーバーが止まっている場合は **Start** です。
 5. **Create / show CA certificate...** を開き、SHA-256 指紋を表示しておきます。
 6. LAN IP で待ち受けていることを確認します。手順 6〜9 は Windows 用です。Linux と Mac は
@@ -183,6 +184,30 @@ PC がサーバーの CA を信頼するまで、`https://192.168.1.20:8767` を
 Windows で信頼を取り消すには、`certmgr.msc` を開き、**信頼されたルート証明機関** にある
 **MoleditPy Job Server Local CA** を削除します。
 
+## CA を作り直す
+
+CA の鍵が漏れた可能性があるときは、**Job Server > Settings > Regenerate CA certificate...** を選んで、
+サーバーを再起動します。すべての PC とブラウザーで、前述の手順で新しい CA を信頼し、古い CA を削除して
+ください。古いファイルはデータディレクトリの `tls` フォルダーにある `retired-` フォルダーへ移動します。
+
+## .local 名で接続する
+
+`https://your-pc.local:8767` なら、サーバー PC の IP が変わっても同じ URL で接続できます。Job Server 0.6.2
+以上と、`.local` 名に対応した Job Manager が必要です。**Allow trusted LAN HTTP** が有効なら、暗号化なしの
+`http://your-pc.local:8766` も使えます。`.local` 名は LAN 内のどの機器でも名乗れるので、HTTP は機器を信頼
+できる LAN でだけ使ってください。
+
+1. 別の PC から名前を解決できるか確認します: `ping your-pc.local`。Windows、Mac、Avahi の入った Linux は
+   PC 名を通知します。ゲストネットワークや管理されたネットワークでは遮断されることがあります。
+2. サーバー PC の **Reachable from other PCs at** で `your-pc.local` にもチェックを入れます。LAN IP の
+   チェックは外さないでください。サーバーは IP アドレスで待ち受け、名前はそのどれかに解決されます。
+3. 保存して再起動します。CA はこの 1 つの名前だけに限定されるので、この名前なしで作った CA や別の名前の
+   CA は置き換えが必要で、Settings が先に確認します。置き換えると、
+   すべての PC とブラウザーで、前述の手順で新しい CA を信頼し、古い CA を削除してください。古いファイルは
+   データディレクトリの `tls` フォルダーにある `retired-` フォルダーへ移動します。
+4. Job Manager で **Server URL** を `https://your-pc.local:8767` にして、**Trust local server CA...** を
+   選びます。
+
 ## Tailscale
 
 両方の PC が同じ tailnet にサインインしている必要があります。使うのは非公開の Tailscale Serve
@@ -194,7 +219,7 @@ Windows で信頼を取り消すには、`certmgr.msc` を開き、**信頼さ�
    tailscale serve --bg http://127.0.0.1:8766
    ```
 
-2. その URL を **Job Server > Settings > Web access URLs** に追加し、保存して再起動します。
+2. その URL を **Job Server > Settings > Other web URLs** に追加し、保存して再起動します。
 3. Job Manager の **Server URL** に `https://your-pc.your-tailnet.ts.net` を入れます。
 4. **Sign in to Job Server...** を選びます。公開された正規の証明書を使うので、
    **Trust local server CA...** は不要です。
@@ -204,7 +229,8 @@ Windows で信頼を取り消すには、`certmgr.msc` を開き、**信頼さ�
 パスワード、トークン、ジョブの内容は、LAN の通信を傍受できる人に読まれます。信頼できる LAN でだけ
 使ってください。
 
-1. サーバー PC で **Allow trusted LAN HTTP** を有効にし、**LAN listen address** を選んで、
+1. サーバー PC で **Allow trusted LAN HTTP** を有効にし、**Reachable from other PCs at** でアドレスに
+   チェックを入れて、
    保存して再起動します。
 2. ローカル HTTPS の手順 7〜9、または [サーバーが Linux または Mac の場合](#サーバーが-linux-または-mac-の場合) を、
    ポート `8766` で実行します。Windows ではルール名も別にします。
@@ -223,7 +249,9 @@ Windows で信頼を取り消すには、`certmgr.msc` を開き、**信頼さ�
 | `Set-NetConnectionProfile` が権限エラーになる | 管理者でない、ドメインネットワーク、グループポリシー | 管理者で再実行する。それでも失敗するなら管理者に相談するか Tailscale を使う |
 | `8767` への `http://` が失敗する | このポートは HTTPS 専用 | `https://` を使うか、`http://` ならポート `8766` を使う |
 | 証明書エラーになる | CA が信頼されていない、または IP が変わった | **Trust local server CA...** をやり直す。IP が変わったら URL も更新する |
-| ブラウザーで `origin_forbidden` になる | そのアドレスが登録されていない | 正確な origin を **Web access URLs** に追加して再起動する |
+| ブラウザーで `origin_forbidden` になる | そのアドレスが登録されていない | Settings でチェックを入れるか、正確な origin を **Other web URLs** に追加して、再起動する |
+| `.local` 名を解決できない | ネットワークがマルチキャストを遮断している、または PC が名前を通知していない | IP アドレスを使う |
+| `.local` 名は解決できるがタイムアウトする | 解決先のアドレスにチェックが入っていない、またはファイアウォール | そのアドレスにチェックを入れるか、ファイアウォールのルールを追加する |
 
 サーバー PC を組織が管理している場合は、ネットワークプロファイルやファイアウォールのルールを変更する前に
 管理者に確認してください。

@@ -21,7 +21,7 @@ def test_lan_http_requires_explicit_opt_in(host, monkeypatch):
 @pytest.mark.parametrize("host", [
     "8.8.8.8", "0.0.0.0", "169.254.169.254", "100.64.0.1", "192.0.2.1",
     "172.32.0.1", "224.0.0.1", "255.255.255.255", "[::]", "[fe80::1]",
-    "[::ffff:192.168.1.2]", "[fd12::2%25eth0]", "compute.local", "localhost.evil.org",
+    "[::ffff:192.168.1.2]", "[fd12::2%25eth0]", "localhost.evil.org",
     "192.168.1.2.evil.org", "2130706433", "0x7f000001",
 ])
 def test_http_exception_never_accepts_public_special_or_dns_addresses(host):
@@ -71,3 +71,12 @@ def test_lan_http_cannot_follow_redirects():
 
     with pytest.raises(ClientError, match="redirects are forbidden"):
         NoRedirect().redirect_request(None, None, 302, "", {}, "http://8.8.8.8")
+
+
+def test_local_name_over_http_needs_the_lan_http_opt_in():
+    assert validate_server_url("http://Your-PC.local:8766", True) == "http://your-pc.local:8766"
+    with pytest.raises(ValueError):
+        validate_server_url("http://your-pc.local:8766")
+    for url in ("http://a.b.local", "http://example.com", "http://local"):
+        with pytest.raises(ValueError):
+            validate_server_url(url, True)

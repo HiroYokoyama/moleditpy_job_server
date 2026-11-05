@@ -31,9 +31,12 @@ class Settings:
     public_urls: list[str] = field(default_factory=list)
     allow_lan_http: bool = False
     lan_bind_address: str = ""
+    lan_extra_addresses: list[str] = field(default_factory=list)
+    lan_hostname: str = ""
     lan_tls: bool = False
     tls_port: int = 8767
     python_executable: str = ""
+    job_setup_commands: list[str] = field(default_factory=list)
 
     @property
     def connection_urls(self):
@@ -46,17 +49,25 @@ class Settings:
         return next(iter(self.lan_urls), "")
 
     @property
-    def lan_urls(self):
+    def lan_addresses(self):
+        """Every private IP this server listens on, the main one first."""
         if not self.lan_bind_address:
             return []
-        host = self.lan_bind_address
-        if ":" in host:
-            host = f"[{host}]"
+        return list(dict.fromkeys([self.lan_bind_address, *self.lan_extra_addresses]))
+
+    @property
+    def lan_urls(self):
         urls = []
-        if self.lan_tls:
-            urls.append(f"https://{host}:{self.tls_port}")
-        if self.allow_lan_http:
-            urls.append(f"http://{host}:{self.port}")
+        for address in self.lan_addresses:
+            host = f"[{address}]" if ":" in address else address
+            if self.lan_tls:
+                urls.append(f"https://{host}:{self.tls_port}")
+            if self.allow_lan_http:
+                urls.append(f"http://{host}:{self.port}")
+        if self.lan_hostname and self.lan_tls:
+            urls.append(f"https://{self.lan_hostname}:{self.tls_port}")
+        if self.lan_hostname and self.allow_lan_http:
+            urls.append(f"http://{self.lan_hostname}:{self.port}")
         return urls
 
     @property
@@ -89,7 +100,7 @@ class Settings:
         for key in ("trusted_users_only", "allow_privileged", "web_ui", "allow_lan_http", "lan_tls"):
             if type(getattr(self, key)) is not bool:
                 raise ValueError(f"{key} must be a boolean")
-        from .connection import validate_server_url
+        from .connection import is_mdns_name, validate_server_url
         from .listeners import validate_lan_address
 
         if not isinstance(self.lan_bind_address, str):
@@ -106,6 +117,26 @@ class Settings:
             self.lan_bind_address = validate_lan_address(self.lan_bind_address)
             if self.lan_tls and self.tls_port == self.port:
                 raise ValueError("HTTP and HTTPS require different ports")
+
+        if type(self.lan_extra_addresses) is not list:
+            raise ValueError("lan_extra_addresses must be a list of private IP addresses")
+        if self.lan_extra_addresses and not self.lan_bind_address:
+            raise ValueError("Select a main LAN address before adding others")
+        self.lan_extra_addresses = [
+            address
+            for address in dict.fromkeys(
+                validate_lan_address(address) for address in self.lan_extra_addresses
+            )
+            if address != self.lan_bind_address
+        ]
+        if not isinstance(self.lan_hostname, str):
+            raise ValueError("lan_hostname must be a .local name or empty")
+        if self.lan_hostname:
+            self.lan_hostname = self.lan_hostname.lower()
+            if not is_mdns_name(self.lan_hostname):
+                raise ValueError("The LAN name must be one label followed by .local")
+            if not self.lan_bind_address:
+                raise ValueError("Select a LAN address for the .local name to lead to")
 
         if type(self.public_urls) is not list or any(type(url) is not str for url in self.public_urls):
             raise ValueError("public_urls must be a list of origin strings")
@@ -134,6 +165,7 @@ class Settings:
         if self.execution_os not in {"linux", "windows", "wsl"}:
             raise ValueError("Invalid executor")
         self._validate_job_dir()
+        self._validate_job_setup()
         if not self.trusted_users_only:
             raise ValueError(
                 "This server supports trusted users only; OS isolation is not implemented"
@@ -152,6 +184,15 @@ class Settings:
             ):
                 raise ValueError("Invalid WSL settings")
         return self
+
+    def _validate_job_setup(self):
+        commands = self.job_setup_commands
+        if type(commands) is not list or any(type(command) is not str for command in commands):
+            raise ValueError("Job setup commands must be a list of lines")
+        if any("\n" in command or "\r" in command or "\0" in command for command in commands):
+            raise ValueError("Each job setup command must be one line")
+        if sum(len(command) for command in commands) > 65536:
+            raise ValueError("Job setup commands are too long")
 
     def _validate_job_dir(self):
         if not isinstance(self.job_dir, str):
