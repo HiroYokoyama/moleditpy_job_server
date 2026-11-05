@@ -46,6 +46,8 @@ must then trust the new CA.
 `job_setup_commands` are written by the server's administrator and run at the start of every
 user's job, in that job's context. They are not shown in a job's API view, so do not treat them
 as a place for secrets: a job can read its own script and environment.
+A trusted local CA must name both DNS and IP subtrees, because a name type with no subtree is
+unrestricted; clients refuse a CA missing either, even with a matching fingerprint.
 A private same-host reverse proxy remains supported. Clients opt in separately,
 bypass environment proxies for HTTP and refuse redirects. Other DNS names and public, link-local,
 unspecified and reserved IP addresses are excluded from the exception. Enrollment passwords,

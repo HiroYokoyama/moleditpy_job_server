@@ -50,6 +50,12 @@ def _require_local_name_constraints(certificate):
     permitted = extension.value.permitted_subtrees
     if not extension.critical or not permitted:
         raise ValueError(message)
+    # Constraints apply per name type: a type with no subtree remains unrestricted.
+    if not (
+        any(isinstance(name, x509.DNSName) for name in permitted)
+        and any(isinstance(name, x509.IPAddress) for name in permitted)
+    ):
+        raise ValueError(message)
     # A CA may name this one PC under `.local`, never `.local` as a whole.
     mdns_names = [
         name.value
