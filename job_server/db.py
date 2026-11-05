@@ -57,6 +57,7 @@ class Database:
                 ("priority", "ALTER TABLE jobs ADD COLUMN priority INTEGER NOT NULL DEFAULT 0"),
                 ("force_run", "ALTER TABLE jobs ADD COLUMN force_run INTEGER NOT NULL DEFAULT 0"),
                 ("force_actor", "ALTER TABLE jobs ADD COLUMN force_actor TEXT"),
+                ("work_root", "ALTER TABLE jobs ADD COLUMN work_root TEXT NOT NULL DEFAULT ''"),
             ):
                 if name not in columns:
                     self.connection.execute(statement)

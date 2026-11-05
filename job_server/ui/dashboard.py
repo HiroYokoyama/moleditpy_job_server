@@ -317,17 +317,9 @@ class Dashboard(QDialog):
     def _settings(self):
         page = QWidget()
         layout = QVBoxLayout(page)
-        form = QFormLayout()
         self.fields = {}
-        for key, label, maximum in (
-            ("port", "HTTP / local administration port", 65535),
-            ("tls_port", "HTTPS port", 65535),
-            ("cpus", "CPU budget", 4096),
-            ("memory_mb", "Memory budget", 2147483647),
-            ("max_active_per_user", "Active jobs per user", 10000),
-            ("max_queued_per_user", "Queued jobs per user", 100000),
-            ("storage_quota_mb", "Storage per user/job", 2147483647),
-        ):
+
+        def number(key, maximum):
             if key.endswith("_mb"):
                 field = GBSpinBox(maximum)
                 field.set_mb(getattr(self.settings, key))
@@ -336,14 +328,18 @@ class Dashboard(QDialog):
                 field.setRange(1, maximum)
                 field.setValue(getattr(self.settings, key))
             self.fields[key] = field
-            form.addRow(label, field)
-        self.public_urls = QPlainTextEdit("\n".join(self.settings.connection_urls))
-        self.public_urls.setPlaceholderText("One origin per line (LAN / Tailscale / HTTPS proxy)")
-        self.public_urls.setMaximumHeight(110)
-        form.addRow("Web access URLs", self.public_urls)
+            return field
+
+        network = QGroupBox("Network")
+        form = QFormLayout(network)
+        form.addRow("Local administration port (HTTP)", number("port", 65535))
         self.lan_tls = QCheckBox("Enable local HTTPS with a persistent local CA")
         self.lan_tls.setChecked(self.settings.lan_tls)
         form.addRow(self.lan_tls)
+        form.addRow("HTTPS port", number("tls_port", 65535))
+        self.ca_button = QPushButton("Create / show CA certificate...")
+        self.ca_button.clicked.connect(self.show_local_ca)
+        form.addRow("", self.ca_button)
         self.allow_lan_http = QCheckBox("Allow unencrypted HTTP on trusted LAN addresses")
         self.allow_lan_http.setChecked(self.settings.allow_lan_http)
         self.allow_lan_http.setToolTip(
@@ -352,28 +348,72 @@ class Dashboard(QDialog):
         )
         form.addRow(self.allow_lan_http)
         self.lan_bind_address = lan_address_selector(self.settings.lan_bind_address)
-        def update_lan_fields():
-            self.lan_bind_address.setEnabled(self.allow_lan_http.isChecked() or self.lan_tls.isChecked())
-            self.ca_button.setEnabled(self.lan_tls.isChecked())
-
-        self.ca_button = QPushButton("Create / show CA certificate...")
-        self.ca_button.clicked.connect(self.show_local_ca)
-        self.allow_lan_http.toggled.connect(update_lan_fields)
-        self.lan_tls.toggled.connect(update_lan_fields)
         form.addRow("LAN listen address", self.lan_bind_address)
-        form.addRow("", self.ca_button)
-        update_lan_fields()
+        self.public_urls = QPlainTextEdit("\n".join(self.settings.connection_urls))
+        self.public_urls.setPlaceholderText("One origin per line (LAN / Tailscale / HTTPS proxy)")
+        self.public_urls.setMaximumHeight(80)
+        form.addRow("Web access URLs", self.public_urls)
         address_help = QLabel(
-            "Paste the HTTPS URL you open in your browser (shown by tailscale serve). "
-            "Select a LAN listen address for direct access. Local HTTPS creates a persistent CA; "
-            "use Create / show CA certificate to export its public certificate and fingerprint. "
-            "Register proxy/browser origins above. LAN HTTP requires a private IP address and "
-            "an explicit opt-in; passwords, tokens and jobs are unencrypted. "
-            "Save, then choose Server > Restart."
+            "Local only by default. For another PC, enable HTTPS or LAN HTTP, select this PC's "
+            "IP and allow the port in the OS firewall. Add proxy or Tailscale URLs above."
         )
         address_help.setWordWrap(True)
         form.addRow(address_help)
-        layout.addLayout(form)
+
+        def update_lan_fields():
+            secure = self.lan_tls.isChecked()
+            listening = secure or self.allow_lan_http.isChecked()
+            self.lan_bind_address.setEnabled(listening)
+            self.ca_button.setEnabled(secure)
+            form.setRowVisible(self.fields["tls_port"], secure)
+            form.setRowVisible(self.ca_button, secure)
+            form.setRowVisible(self.lan_bind_address, listening)
+
+        self.allow_lan_http.toggled.connect(update_lan_fields)
+        self.lan_tls.toggled.connect(update_lan_fields)
+        update_lan_fields()
+        layout.addWidget(network)
+
+        resources = QGroupBox("Resources")
+        limits = QFormLayout(resources)
+        for key, label, maximum in (
+            ("cpus", "CPU budget", 4096),
+            ("memory_mb", "Memory budget", 2147483647),
+            ("max_active_per_user", "Active jobs per user", 10000),
+            ("max_queued_per_user", "Queued jobs per user", 100000),
+            ("storage_quota_mb", "Storage per user/job", 2147483647),
+        ):
+            limits.addRow(label, number(key, maximum))
+        layout.addWidget(resources)
+
+        storage = QGroupBox("Job working directory")
+        storage_layout = QVBoxLayout(storage)
+        location = QHBoxLayout()
+        self.job_dir = QLineEdit(self.settings.job_dir)
+        self.job_dir.setPlaceholderText(f"Default: {self.settings.root}")
+        location.addWidget(self.job_dir)
+        browse_jobs = QPushButton("Browse...")
+
+        def choose_job_dir():
+            path = QFileDialog.getExistingDirectory(
+                self, "Select job working directory", self.job_dir.text()
+            )
+            if path:
+                self.job_dir.setText(path)
+
+        browse_jobs.clicked.connect(choose_job_dir)
+        location.addWidget(browse_jobs)
+        storage_layout.addLayout(location)
+        job_help = QLabel(
+            "Applies to new jobs after a restart; existing jobs stay where they are. "
+            "Job files keep the folder's permissions, so choose a private folder."
+        )
+        job_help.setWordWrap(True)
+        storage_layout.addWidget(job_help)
+        layout.addWidget(storage)
+
+        runtime_box = QGroupBox("Daemon Python runtime")
+        runtime_layout = QVBoxLayout(runtime_box)
         runtime = QHBoxLayout()
         self.python_path = QLineEdit(self.settings.python_executable)
         self.python_path.setPlaceholderText(
@@ -394,16 +434,15 @@ class Dashboard(QDialog):
 
         browse.clicked.connect(choose_python)
         runtime.addWidget(browse)
-        layout.addWidget(QLabel("Daemon Python runtime"))
-        layout.addLayout(runtime)
-        layout.addWidget(
-            QLabel(
-                "Local administration uses 127.0.0.1. The optional LAN listener uses the selected IP.\n"
-                "Allow the server port in your OS firewall for trusted LAN clients.\n"
-                "Executor and approved WSL distribution/root can be set in the JSON configuration.\n"
-                "Stopping or reloading the GUI preserves running jobs."
-            )
+        runtime_layout.addLayout(runtime)
+        runtime_note = QLabel(
+            "Executor and WSL settings are in the JSON configuration. "
+            "Stopping or reloading this window preserves running jobs."
         )
+        runtime_note.setWordWrap(True)
+        runtime_layout.addWidget(runtime_note)
+        layout.addWidget(runtime_box)
+        layout.addWidget(QLabel("After saving, choose Server > Restart to apply changes."))
         self.save_settings_button = QPushButton("Save configuration")
         self.save_settings_button.clicked.connect(self.save_settings)
         layout.addWidget(self.save_settings_button)
@@ -656,6 +695,7 @@ class Dashboard(QDialog):
             candidate = replace(
                 self.settings,
                 python_executable=self.python_path.text().strip(),
+                job_dir=self.job_dir.text().strip(),
                 public_url="",
                 public_urls=urls,
                 allow_lan_http=self.allow_lan_http.isChecked(),

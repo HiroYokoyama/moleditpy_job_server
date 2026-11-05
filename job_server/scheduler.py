@@ -152,7 +152,9 @@ class Scheduler:
                 control = self.settings.root / "control" / job["id"]
                 control.mkdir(exist_ok=True, mode=0o700)
                 self.settings.save(control / "settings.json")
-                atomic_json(control / "request.json", {"spec": spec})
+                atomic_json(
+                    control / "request.json", {"spec": spec, "work_root": job["work_root"]}
+                )
                 c.execute(
                     "UPDATE jobs SET state='RUNNING',started_at=?,force_run=0,force_actor=NULL WHERE id=? AND state='PENDING'",
                     (time.time(), job["id"]),
