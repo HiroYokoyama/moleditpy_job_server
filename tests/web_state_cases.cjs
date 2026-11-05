@@ -159,7 +159,7 @@ async function connectionFailure() {
   app.context.fetch=async()=>({ok:false,status:403,json:async()=>({code:'origin_forbidden',message:'Browser origins are not permitted'})});
   await app.call('safe')(()=>app.call('refresh')());
   assert.equal(app.get('#connection-text').textContent,'Connection failed');
-  assert.match(app.get('#login-status').textContent,/Settings → Web address/);
+  assert.match(app.get('#login-status').textContent,/Settings → Web access URLs/);
   assert.ok(app.get('#login-status').textContent.includes(app.context.location.origin));
   assert.ok(app.context.document.body.classList.contains('signed-out'));
 }
