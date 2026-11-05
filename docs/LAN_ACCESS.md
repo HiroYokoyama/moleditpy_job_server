@@ -58,7 +58,8 @@ setting Web access URLs alone does not open a LAN listener.
 
 ## Firewall
 
-The application does not change firewall rules. On a Windows Private network,
+The application does not change firewall rules. For Linux and Mac, see
+[Server on Linux or Mac](LAN_SETUP.md#server-on-linux-or-mac). On a Windows Private network,
 run the following in a separate administrator PowerShell, replacing the example
 IP and port. Run Job Server under its normal non-administrator account.
 

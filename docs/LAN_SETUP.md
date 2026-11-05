@@ -36,7 +36,8 @@ cannot connect.
 3. Under **LAN listen address**, select the PC's LAN IP.
 4. Save, then choose **Server > Restart**, or **Start** if the server is off.
 5. Open **Create / show CA certificate...** and keep the SHA-256 fingerprint in view.
-6. Confirm the server is listening on the LAN IP:
+6. Confirm the server is listening on the LAN IP. Steps 6 to 9 are for Windows; for
+   Linux or Mac, see [Server on Linux or Mac](#server-on-linux-or-mac).
 
    ```powershell
    Get-NetTCPConnection -State Listen -LocalPort 8766,8767 | Select-Object LocalAddress,LocalPort
@@ -63,6 +64,52 @@ cannot connect.
    New-NetFirewallRule -Name "MoleditPy-Job-Server-LAN-HTTPS" -DisplayName "Job Server LAN HTTPS" -Direction Inbound -Action Allow -Protocol TCP -LocalAddress 192.168.1.20 -LocalPort 8767 -RemoteAddress LocalSubnet -Profile Private
    ```
 
+### Server on Linux or Mac
+
+Steps 6 to 9 above are for Windows. On Linux or Mac, do the following instead. Each rule
+stays in place after a restart. If no firewall is active, no rule is needed.
+
+Confirm the server is listening on the LAN IP:
+
+```bash
+# Linux
+ss -ltn | grep -E ':(8766|8767)'
+# Mac
+lsof -nP -iTCP -sTCP:LISTEN | grep -E ':(8766|8767)'
+```
+
+**Linux with ufw** (Ubuntu and Debian). Check `sudo ufw status` first; use your own subnet
+in place of `192.168.1.0/24`.
+
+```bash
+sudo ufw allow from 192.168.1.0/24 to 192.168.1.20 port 8767 proto tcp
+```
+
+**Linux with firewalld** (Fedora and RHEL). Check `sudo firewall-cmd --state` first. Use
+your interface's zone from `sudo firewall-cmd --get-active-zones` in place of `public`.
+
+```bash
+sudo firewall-cmd --permanent --zone=public --add-rich-rule='rule family="ipv4" source address="192.168.1.0/24" destination address="192.168.1.20" port port="8767" protocol="tcp" accept'
+sudo firewall-cmd --reload
+```
+
+**Mac.** The built-in firewall allows or blocks applications rather than ports, so it
+cannot limit access to one subnet. Check its state first:
+
+```bash
+/usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate
+```
+
+If it is on, allow the Python that runs Job Server. Replace the path with the output of
+`python3 -c "import os, sys; print(os.path.realpath(sys.executable))"` in that environment.
+
+```bash
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add /path/to/python3
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp /path/to/python3
+```
+
+CI tests the server on Windows and Linux, not as a Mac server.
+
 ### On the client PC
 
 1. Check that the port is reachable. `-k` skips certificate checks, so use it only for
@@ -71,6 +118,8 @@ cannot connect.
    ```powershell
    curl.exe -k https://192.168.1.20:8767/api/v1/health
    ```
+
+   On Linux or Mac, use `curl` instead of `curl.exe`.
 
    A response containing `"status":"ok"` means the connection works.
 
@@ -158,7 +207,8 @@ this only on a trusted LAN.
 
 1. On the server PC, enable **Allow trusted LAN HTTP**, select the **LAN listen address**,
    save and restart.
-2. Follow steps 7 to 9 of Local HTTPS, using port `8766` and a separate rule name.
+2. Follow steps 7 to 9 of Local HTTPS, or [Server on Linux or Mac](#server-on-linux-or-mac),
+   using port `8766` and, on Windows, a separate rule name.
 3. In Job Manager, set **Server URL** to `http://192.168.1.20:8766`.
 4. Enable **Allow trusted LAN HTTP (unencrypted)**.
 5. Choose **Sign in to Job Server...**.

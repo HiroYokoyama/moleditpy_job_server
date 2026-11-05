@@ -36,7 +36,8 @@ Job Server 0.5.0 は `127.0.0.1` でしか待ち受けません。
 3. **LAN listen address** で、この PC の LAN IP を選びます。
 4. 保存して **Server > Restart** を選びます。サーバーが止まっている場合は **Start** です。
 5. **Create / show CA certificate...** を開き、SHA-256 指紋を表示しておきます。
-6. LAN IP で待ち受けていることを確認します。
+6. LAN IP で待ち受けていることを確認します。手順 6〜9 は Windows 用です。Linux と Mac は
+   [サーバーが Linux または Mac の場合](#サーバーが-linux-または-mac-の場合) を参照してください。
 
    ```powershell
    Get-NetTCPConnection -State Listen -LocalPort 8766,8767 | Select-Object LocalAddress,LocalPort
@@ -63,6 +64,53 @@ Job Server 0.5.0 は `127.0.0.1` でしか待ち受けません。
    New-NetFirewallRule -Name "MoleditPy-Job-Server-LAN-HTTPS" -DisplayName "Job Server LAN HTTPS" -Direction Inbound -Action Allow -Protocol TCP -LocalAddress 192.168.1.20 -LocalPort 8767 -RemoteAddress LocalSubnet -Profile Private
    ```
 
+### サーバーが Linux または Mac の場合
+
+上の手順 6〜9 は Windows 用です。Linux と Mac では、代わりに次を実行します。どのルールも再起動後に
+残ります。ファイアウォールが動いていなければ、ルールは不要です。
+
+LAN IP で待ち受けていることを確認します。
+
+```bash
+# Linux
+ss -ltn | grep -E ':(8766|8767)'
+# Mac
+lsof -nP -iTCP -sTCP:LISTEN | grep -E ':(8766|8767)'
+```
+
+**Linux の ufw**(Ubuntu、Debian)。先に `sudo ufw status` で状態を確認してください。
+`192.168.1.0/24` は実際のサブネットに置き換えます。
+
+```bash
+sudo ufw allow from 192.168.1.0/24 to 192.168.1.20 port 8767 proto tcp
+```
+
+**Linux の firewalld**(Fedora、RHEL)。先に `sudo firewall-cmd --state` で状態を確認してください。
+`public` は `sudo firewall-cmd --get-active-zones` で表示されるゾーンに置き換えます。
+
+```bash
+sudo firewall-cmd --permanent --zone=public --add-rich-rule='rule family="ipv4" source address="192.168.1.0/24" destination address="192.168.1.20" port port="8767" protocol="tcp" accept'
+sudo firewall-cmd --reload
+```
+
+**Mac。** 標準のファイアウォールはポートではなくアプリ単位で許可するので、接続元をサブネットに
+絞れません。先に状態を確認します。
+
+```bash
+/usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate
+```
+
+オンになっていれば、Job Server を動かしている Python を許可します。パスは、その環境で
+`python3 -c "import os, sys; print(os.path.realpath(sys.executable))"` を実行した結果に
+置き換えます。
+
+```bash
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add /path/to/python3
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp /path/to/python3
+```
+
+CI でテストしているサーバーは Windows と Linux で、Mac のサーバーはテストしていません。
+
 ### 接続元の PC での設定
 
 1. ポートに届くことを確認します。`-k` は証明書の検証を省略するので、認証情報を送らない
@@ -71,6 +119,8 @@ Job Server 0.5.0 は `127.0.0.1` でしか待ち受けません。
    ```powershell
    curl.exe -k https://192.168.1.20:8767/api/v1/health
    ```
+
+   Linux と Mac では `curl.exe` の代わりに `curl` を使います。
 
    応答に `"status":"ok"` が含まれていれば接続できています。
 
@@ -156,7 +206,8 @@ Windows で信頼を取り消すには、`certmgr.msc` を開き、**信頼さ�
 
 1. サーバー PC で **Allow trusted LAN HTTP** を有効にし、**LAN listen address** を選んで、
    保存して再起動します。
-2. ローカル HTTPS の手順 7〜9 を、ポート `8766` と別のルール名で実行します。
+2. ローカル HTTPS の手順 7〜9、または [サーバーが Linux または Mac の場合](#サーバーが-linux-または-mac-の場合) を、
+   ポート `8766` で実行します。Windows ではルール名も別にします。
 3. Job Manager の **Server URL** に `http://192.168.1.20:8766` を入れます。
 4. **Allow trusted LAN HTTP (unencrypted)** を有効にします。
 5. **Sign in to Job Server...** を選びます。
