@@ -80,6 +80,61 @@ cannot connect.
    on the server PC, and choose **Yes** only if they match.
 5. Choose **Sign in to Job Server...** and enter your username and password.
 
+## Using the Web UI over local HTTPS
+
+A browser shows a certificate warning at `https://192.168.1.20:8767` until the PC trusts
+the server's CA. Do this on each PC that opens the Web UI. It is not needed for Tailscale,
+which has a publicly trusted certificate, or for LAN HTTP, which has no certificate.
+
+The certificate grants trust on that PC to anything this CA signs for private addresses
+and localhost. Trust it only if you trust the server PC and everyone who can run jobs on
+it. See [SECURITY.md](../SECURITY.md).
+
+### 1. Get the certificate
+
+On the server PC, open **Job Server > Settings > Create / show CA certificate...**, choose
+**Export public CA certificate...**, and copy `job-server-ca.pem` to the other PC.
+
+Alternatively, download it on the other PC from
+`https://192.168.1.20:8767/api/v1/tls/ca`, passing the browser's warning for this one
+download. Step 2 is then essential.
+
+### 2. Check the fingerprint
+
+Compare the result with the SHA-256 fingerprint on the server PC. Letter case and colons
+do not matter.
+
+- Windows: use the **last** `Cert Hash(sha256)` line of the output.
+
+  ```powershell
+  certutil -dump job-server-ca.pem
+  ```
+
+- Mac and Linux:
+
+  ```bash
+  openssl x509 -in job-server-ca.pem -noout -fingerprint -sha256
+  ```
+
+### 3. Install it
+
+| Browser and OS | How to install |
+|---|---|
+| Edge or Chrome on Windows | Run `certutil -user -addstore Root job-server-ca.pem` and accept the Windows prompt. Not needed if **Trust local server CA...** in Job Manager already succeeded for this Windows user |
+| Safari or Chrome on Mac | Run `security add-trusted-cert -r trustRoot -k ~/Library/Keychains/login.keychain-db job-server-ca.pem` |
+| Chrome on Linux | Run `certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "MoleditPy Job Server Local CA" -i job-server-ca.pem` (from `libnss3-tools`) |
+| Firefox on any OS | **Settings > Privacy & Security > Certificates > View Certificates > Authorities > Import**, then select **Trust this CA to identify websites** |
+| iPhone or iPad | Open the file, install the profile in **Settings**, then enable it under **General > About > Certificate Trust Settings** |
+| Android | Under **Settings > Security**, install it as a **CA certificate**. The menu location varies by device |
+
+### 4. Open the Web UI
+
+Restart the browser and open `https://192.168.1.20:8767`. If the server PC's IP changes,
+the CA stays the same, so only the URL changes.
+
+To remove the trust on Windows, open `certmgr.msc` and delete **MoleditPy Job Server Local
+CA** under **Trusted Root Certification Authorities**.
+
 ## Tailscale
 
 Both PCs must be signed in to the same tailnet. Use private Tailscale Serve only. Never
