@@ -199,6 +199,7 @@ def create_app(settings=None, dispatch=True):
                 "dependencies",
                 "queue_priority",
                 "force_run",
+                "job_folders",
             ],
             "max_chunk_bytes": settings.max_chunk_bytes,
             "resources": scheduler.resources(),
@@ -280,6 +281,40 @@ def create_app(settings=None, dispatch=True):
                 (p["user_id"], limit, offset),
             )
         ]
+
+    @app.get(prefix + "/browse")
+    def browse_folders(
+        p=Depends(principal), path: str = Query("", max_length=1061),
+        offset: int = Query(0, ge=0, le=2**63 - 1), limit: int = Query(1000, ge=1, le=1000),
+    ):
+        from .browse import listing
+
+        return listing(jobs, path, p, offset, limit)
+
+    @app.get(prefix + "/browse/stat")
+    def browse_stat(p=Depends(principal), path: str = Query("", max_length=1061), digest: bool = False):
+        from .browse import metadata
+
+        return metadata(jobs, path, p, digest)
+
+    @app.get(prefix + "/jobs/{job_id}/archive")
+    def download_folder(job_id: str, p=Depends(principal), path: str = Query("", max_length=1024)):
+        from .browse import archive
+        from starlette.background import BackgroundTask
+
+        stream = archive(jobs, job_id + ("/" + path if path else ""), p)
+
+        def chunks():
+            try:
+                while data := stream.read(1024 * 1024):
+                    yield data
+            finally:
+                stream.close()
+
+        return StreamingResponse(
+            chunks(), media_type="application/zip", background=BackgroundTask(stream.close),
+            headers={"Content-Disposition": 'attachment; filename="job-folder.zip"'},
+        )
 
     @app.get(prefix + "/jobs/{job_id}")
     def get_job(job_id: str, p=Depends(principal)):

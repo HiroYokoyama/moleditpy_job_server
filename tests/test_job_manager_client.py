@@ -13,7 +13,7 @@ import uvicorn
 from job_server.api import create_app
 from job_server.settings import Settings
 
-MANAGER = Path(__file__).resolve().parents[2] / "moleditpy_job_manager"
+MANAGER = Path(os.environ.get("JOB_MANAGER_SOURCE", Path(__file__).resolve().parents[2] / "moleditpy_job_manager"))
 
 
 def test_existing_manager_checkout_is_preserved(tmp_path, monkeypatch):
@@ -45,6 +45,33 @@ def manager_types():
         yield HostProfile, Job, SubmitPreset, JobServerBackend
     finally:
         sys.path.remove(str(MANAGER))
+
+
+def test_real_manager_browses_and_downloads_job_folders(manager_types, live_server, tmp_path):
+    import uuid
+
+    HostProfile, _, _, Backend = manager_types
+    url, app = live_server
+    host = HostProfile(backend="job_server", server_url=url,
+                       server_key_path=str(tmp_path / "browser-device.key"))
+    backend = Backend(host)
+    backend.client.enroll("example-client", "synthetic-client-password-123")
+    created = backend.client.request("POST", "/jobs", {"command": "echo synthetic"},
+                                     headers={"Idempotency-Key": str(uuid.uuid4())})
+    identifier = created["id"]
+    backend.client.request("POST", f"/jobs/{identifier}/commit")
+    work = app.state.jobs.directory(identifier)
+    (work / "results" / "empty").mkdir(parents=True)
+    (work / "results" / "output.txt").write_bytes(b"synthetic folder transfer")
+    assert identifier + "/" in backend.list_path("/")
+    assert "results/" in backend.list_path("/" + identifier)
+    info = backend.stat_path(identifier + "/results/output.txt", True)
+    assert info["type"] == "file" and len(info["sha256"]) == 64
+    destination = tmp_path / "downloaded"
+    downloaded, skipped = backend.download_paths([identifier + "/results"], str(destination))
+    assert skipped == [] and len(downloaded) == 1
+    assert (destination / "results/empty").is_dir()
+    assert (destination / "results/output.txt").read_bytes() == b"synthetic folder transfer"
 
 
 @pytest.fixture
