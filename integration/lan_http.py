@@ -1,5 +1,7 @@
 """Overlay the companion's pinned integration without editing the submodule."""
 
+import hashlib
+import json
 from pathlib import Path
 
 
@@ -67,3 +69,10 @@ def patch_lan_http(destination, replace):
     patch("hosts_dialog.py", "        self.profile_form.txt_server_url.setText(host.server_url)",
           "        self.profile_form.txt_server_url.setText(host.server_url)\n"
           "        self.profile_form.chk_server_lan_http.setChecked(host.server_allow_lan_http)")
+    manifest_path = destination / "job_server_client" / "PROVENANCE.json"
+    manifest = json.loads(manifest_path.read_text("utf-8"))
+    manifest["local_overlay"] = "Private LAN HTTP support from integration/lan_http.py"
+    for name in (*manifest["files"], "connection.py"):
+        content = (manifest_path.parent / name).read_text("utf-8")
+        manifest["files"][name] = hashlib.sha256(content.encode()).hexdigest()
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", "utf-8")

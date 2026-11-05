@@ -325,7 +325,9 @@ def build(destination):
 
         patch_lan_http(destination, replace)
         diffs = []
-        for path in sorted(destination.rglob("*.py")):
+        for path in sorted(destination.rglob("*")):
+            if not path.is_file() or path.suffix not in {".py", ".json"}:
+                continue
             original_path = source / path.relative_to(destination)
             original = original_path.read_text("utf-8") if original_path.exists() else ""
             patched = path.read_text("utf-8")

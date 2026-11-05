@@ -72,6 +72,19 @@
 +    ):
 +        raise ValueError("Use HTTPS, or enable LAN HTTP for a private IPv4/IPv6 literal address")
 +    return parts._replace(scheme=parts.scheme.lower(), netloc=parts.netloc.lower(), path="").geturl()
+--- a/job_manager/job_server_client/PROVENANCE.json
++++ b/job_manager/job_server_client/PROVENANCE.json
+@@ -6 +6 @@
+-    "client.py": "6f4af968059e8f46be7ef3d6eeb9b5b65cd10d3f94984e62f50da2a26daa6bb0",
++    "client.py": "60f57935c920f5b4db9a60b15738129257260a66eb9169ea69a6816b87acfa4e",
+@@ -11 +11,2 @@
+-    "__init__.py": "1722f977899ed656e6c96794f308eb2bc66d387b77e635b07dc15ca61f28f7cb"
++    "__init__.py": "1722f977899ed656e6c96794f308eb2bc66d387b77e635b07dc15ca61f28f7cb",
++    "connection.py": "0bd62e99c67c2004e667f9e20d196096c1c5c990aaed86d52f835245ebef7df3"
+@@ -14 +15,2 @@
+-  "additional_permission": "Copyright holder grant in LICENSING.md for the pinned first-party client copies."
++  "additional_permission": "Copyright holder grant in LICENSING.md for the pinned first-party client copies.",
++  "local_overlay": "Private LAN HTTP support from integration/lan_http.py"
 --- a/job_manager/models.py
 +++ b/job_manager/models.py
 @@ -297,0 +298 @@
