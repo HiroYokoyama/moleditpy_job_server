@@ -1,6 +1,6 @@
 import json
 import os
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from .files import atomic_write
@@ -27,7 +27,13 @@ class Settings:
     allow_privileged: bool = False
     web_ui: bool = True
     public_url: str = ""
+    public_urls: list[str] = field(default_factory=list)
+    allow_lan_http: bool = False
     python_executable: str = ""
+
+    @property
+    def connection_urls(self):
+        return list(dict.fromkeys(url for url in [self.public_url, *self.public_urls] if url))
 
     @property
     def root(self):
@@ -42,26 +48,18 @@ class Settings:
         )
 
     def validate(self):
-        for key in ("trusted_users_only", "allow_privileged", "web_ui"):
+        for key in ("trusted_users_only", "allow_privileged", "web_ui", "allow_lan_http"):
             if type(getattr(self, key)) is not bool:
                 raise ValueError(f"{key} must be a boolean")
-        if self.public_url:
-            from urllib.parse import urlsplit
+        from .connection import validate_server_url
 
-            parts = urlsplit(self.public_url)
-            if (
-                parts.scheme != "https"
-                or not parts.hostname
-                or parts.username
-                or parts.password
-                or parts.path not in {"", "/"}
-                or parts.query
-                or parts.fragment
-            ):
-                raise ValueError(
-                    "public_url must be an HTTPS origin, for example https://compute.example.org"
-                )
-            self.public_url = self.public_url.rstrip("/")
+        if type(self.public_urls) is not list or any(type(url) is not str for url in self.public_urls):
+            raise ValueError("public_urls must be a list of origin strings")
+        if self.public_url:
+            self.public_url = validate_server_url(self.public_url, self.allow_lan_http)
+        self.public_urls = list(dict.fromkeys(
+            validate_server_url(url, self.allow_lan_http) for url in self.public_urls
+        ))
         for key in (
             "cpus",
             "memory_mb",

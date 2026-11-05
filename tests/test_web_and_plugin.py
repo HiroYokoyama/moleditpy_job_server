@@ -92,6 +92,19 @@ def test_tailnet_origin_is_permitted_only_after_explicit_configuration(client):
     assert client.get("/api/v1/health", headers={"Origin": "https://other.example.ts.net"}).status_code == 403
 
 
+def test_multiple_origins_are_exact_and_do_not_bypass_authentication(client):
+    settings = client.app.state.settings
+    settings.public_urls = ["https://compute.example.ts.net", "http://192.168.1.2:8080"]
+    settings.allow_lan_http = True
+    settings.validate()
+    for origin in settings.public_urls:
+        assert client.get("/api/v1/health", headers={"Origin": origin}).status_code == 200
+        assert client.get("/api/v1/jobs", headers={"Origin": origin}).status_code == 401
+    for origin in ["http://192.168.1.2:8081", "http://192.168.1.2:8080.evil.org",
+                   "https://compute.example.ts.net.evil.org"]:
+        assert client.get("/api/v1/health", headers={"Origin": origin}).status_code == 403
+
+
 def test_plugin_registration_is_lazy_and_uses_supported_context():
     class Context:
         def __init__(self):

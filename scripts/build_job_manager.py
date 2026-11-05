@@ -12,6 +12,7 @@ from shutil import copytree
 from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 
 def replace(text, before, after):
@@ -320,7 +321,21 @@ def build(destination):
         models = (source / "models.py").read_text("utf-8")
         if 'BACKEND_JOB_SERVER = "job_server"' not in models:
             raise RuntimeError("Upstream server integration is incomplete")
-        return ""
+        from integration.lan_http import patch_lan_http
+
+        patch_lan_http(destination, replace)
+        diffs = []
+        for path in sorted(destination.rglob("*.py")):
+            original_path = source / path.relative_to(destination)
+            original = original_path.read_text("utf-8") if original_path.exists() else ""
+            patched = path.read_text("utf-8")
+            if original != patched:
+                name = path.relative_to(destination).as_posix()
+                diffs.extend(difflib.unified_diff(
+                    original.splitlines(keepends=True), patched.splitlines(keepends=True),
+                    fromfile="a/job_manager/" + name, tofile="b/job_manager/" + name, n=0,
+                ))
+        return "".join(diffs)
     diffs = []
     for name, patcher in PATCHERS.items():
         original = (source / name).read_text("utf-8")

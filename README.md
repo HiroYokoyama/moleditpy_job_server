@@ -185,6 +185,37 @@ overlay. It does not change your sibling Job Manager repository or its upstream 
 `integration/job_manager.patch` records changes for upstream review;
 `integration/server_backend.py` is the additional bridge module.
 
+### Multiple connection addresses and optional LAN HTTP
+
+Keep `public_url` as the primary Web address and add other origins to `public_urls`
+(one per line in Settings or the setup guide). Each origin is explicitly allowed for
+browser requests; no wildcard origins are accepted. Existing configurations still work.
+Server > Copy connection addresses copies the saved origins for sharing.
+
+HTTPS remains recommended. On a trusted LAN, enable **Allow unencrypted HTTP** in
+Settings and set an origin such as `http://192.168.1.20:8080`. HTTP accepts only
+literal RFC 1918 IPv4 addresses or IPv6 ULA addresses, never public IPs, hostnames,
+link-local or unspecified addresses. Passwords, bearer tokens and job contents are
+unencrypted: device signatures do not encrypt traffic or prevent interception.
+Restrict the proxy/firewall to trusted LAN clients. Never forward router ports.
+
+The daemon still binds only to loopback. Put a private LAN HTTP reverse proxy on
+this same PC, listening on the chosen private address and forwarding to
+`http://127.0.0.1:8766`; configuring an origin does not open a LAN listener.
+Save and restart the server after configuration changes.
+
+Python clients must opt in separately:
+
+```python
+client = JobServerClient("http://192.168.1.20:8080", "device.key", allow_lan_http=True)
+```
+
+The generated development companion adds a per-host **Allow trusted LAN HTTP**
+checkbox, used for enrollment and subsequent connections. The normal Job Manager
+release needs the corresponding client update before it can use LAN HTTP.
+HTTPS and localhost remain compatible with existing clients. HTTP clients bypass
+environment proxies and refuse redirects to keep credentials on the selected origin.
+
 ### HTTPS on a private LAN or Tailscale tailnet
 
 **Setting up HTTPS yourself on a LAN can be cumbersome.** It requires a TLS proxy,

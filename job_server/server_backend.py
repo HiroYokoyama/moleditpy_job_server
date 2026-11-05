@@ -17,6 +17,7 @@ class JobServerBackend:
             host.server_ca_file or None,
             host.server_id or None,
             reuse_auth=True,
+            allow_lan_http=getattr(host, "server_allow_lan_http", False),
         )
 
     def submit(self, preset, job, local_files, after_id=None):
