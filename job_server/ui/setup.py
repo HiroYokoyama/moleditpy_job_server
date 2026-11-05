@@ -57,7 +57,6 @@ class SetupDialog(QDialog):
 
         def update_lan_fields():
             listening = self.allow_lan_http.isChecked() or self.lan_tls.isChecked()
-            self.lan_addresses.set_https(self.lan_tls.isChecked())
             form.setRowVisible(self.lan_addresses, listening)
             form.setRowVisible(self.tls_port, self.lan_tls.isChecked())
 

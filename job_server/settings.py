@@ -36,6 +36,7 @@ class Settings:
     lan_tls: bool = False
     tls_port: int = 8767
     python_executable: str = ""
+    job_setup_commands: list[str] = field(default_factory=list)
 
     @property
     def connection_urls(self):
@@ -63,8 +64,10 @@ class Settings:
                 urls.append(f"https://{host}:{self.tls_port}")
             if self.allow_lan_http:
                 urls.append(f"http://{host}:{self.port}")
-        if self.lan_tls and self.lan_hostname:
+        if self.lan_hostname and self.lan_tls:
             urls.append(f"https://{self.lan_hostname}:{self.tls_port}")
+        if self.lan_hostname and self.allow_lan_http:
+            urls.append(f"http://{self.lan_hostname}:{self.port}")
         return urls
 
     @property
@@ -132,8 +135,8 @@ class Settings:
             self.lan_hostname = self.lan_hostname.lower()
             if not is_mdns_name(self.lan_hostname):
                 raise ValueError("The LAN name must be one label followed by .local")
-            if not self.lan_tls:
-                raise ValueError("A .local name requires local HTTPS")
+            if not self.lan_bind_address:
+                raise ValueError("Select a LAN address for the .local name to lead to")
 
         if type(self.public_urls) is not list or any(type(url) is not str for url in self.public_urls):
             raise ValueError("public_urls must be a list of origin strings")
@@ -162,6 +165,7 @@ class Settings:
         if self.execution_os not in {"linux", "windows", "wsl"}:
             raise ValueError("Invalid executor")
         self._validate_job_dir()
+        self._validate_job_setup()
         if not self.trusted_users_only:
             raise ValueError(
                 "This server supports trusted users only; OS isolation is not implemented"
@@ -180,6 +184,15 @@ class Settings:
             ):
                 raise ValueError("Invalid WSL settings")
         return self
+
+    def _validate_job_setup(self):
+        commands = self.job_setup_commands
+        if type(commands) is not list or any(type(command) is not str for command in commands):
+            raise ValueError("Job setup commands must be a list of lines")
+        if any("\n" in command or "\r" in command or "\0" in command for command in commands):
+            raise ValueError("Each job setup command must be one line")
+        if sum(len(command) for command in commands) > 65536:
+            raise ValueError("Job setup commands are too long")
 
     def _validate_job_dir(self):
         if not isinstance(self.job_dir, str):

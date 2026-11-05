@@ -473,13 +473,27 @@ def test_only_one_local_name_can_be_ticked(dashboard):
     assert dashboard.lan_addresses.hostname() == "second.local"
 
 
-def test_local_name_is_dropped_without_https(dashboard):
+def test_local_name_follows_the_enabled_schemes(dashboard):
     dashboard.allow_lan_http.setChecked(True)
     dashboard.lan_tls.setChecked(True)
     dashboard.lan_addresses.select(["192.168.1.20"], "your-pc.local")
+    assert "https://your-pc.local:8767" in dashboard.connect_urls.text()
+    assert "http://your-pc.local:8766" in dashboard.connect_urls.text()
     dashboard.lan_tls.setChecked(False)
-    assert dashboard.lan_addresses.hostname() == ""
-    assert "your-pc.local" not in dashboard.connect_urls.text()
+    assert "https://your-pc.local" not in dashboard.connect_urls.text()
+    assert "http://your-pc.local:8766" in dashboard.connect_urls.text()
+    assert dashboard.save_settings()
+
+
+def test_job_setup_commands_are_saved_without_blank_lines(dashboard):
+    from job_server.settings import Settings
+
+    dashboard.job_setup.setPlainText("  conda activate orca  \n\nmodule load orca\n")
+    assert dashboard.save_settings()
+    assert Settings.load(dashboard.config).job_setup_commands == [
+        "conda activate orca",
+        "module load orca",
+    ]
 
 
 @pytest.mark.parametrize("accept", [False, True])
@@ -507,3 +521,44 @@ def test_a_local_name_replaces_the_ca_only_when_accepted(dashboard, monkeypatch,
         assert list((dashboard.settings.root / "tls").glob("retired-*/ca.pem"))
     else:
         assert ca_fingerprint(dashboard.settings) == before
+
+
+@pytest.mark.parametrize("accept", [False, True])
+def test_regenerate_ca_replaces_it_only_when_accepted(dashboard, monkeypatch, accept):
+    from PySide6.QtWidgets import QMessageBox
+    from job_server.tls import ca_fingerprint, ensure_certificates
+
+    shown = []
+    monkeypatch.setattr(dashboard, "show_local_ca", lambda: shown.append(True))
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *args: QMessageBox.StandardButton.Yes if accept else QMessageBox.StandardButton.No,
+    )
+    assert dashboard.regenerate_ca_button.isHidden()
+    dashboard.lan_tls.setChecked(True)
+    assert not dashboard.regenerate_ca_button.isHidden()
+    dashboard.lan_addresses.select(["192.168.1.20"])
+    assert dashboard.save_settings()
+    ensure_certificates(dashboard.settings)
+    before = ca_fingerprint(dashboard.settings)
+    dashboard.regenerate_ca()
+    assert bool(shown) is accept
+    if accept:
+        ensure_certificates(dashboard.settings)
+        assert ca_fingerprint(dashboard.settings) != before
+        assert list((dashboard.settings.root / "tls").glob("retired-*/ca.pem"))
+    else:
+        assert ca_fingerprint(dashboard.settings) == before
+
+
+def test_regenerate_without_a_ca_creates_one_without_asking(dashboard, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    shown = []
+    monkeypatch.setattr(dashboard, "show_local_ca", lambda: shown.append(True))
+    monkeypatch.setattr(QMessageBox, "question", lambda *args: pytest.fail("asked"))
+    dashboard.lan_tls.setChecked(True)
+    dashboard.lan_addresses.select(["192.168.1.20"])
+    dashboard.regenerate_ca()
+    assert shown

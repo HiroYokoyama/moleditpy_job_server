@@ -185,17 +185,26 @@ the CA stays the same, so only the URL changes.
 To remove the trust on Windows, open `certmgr.msc` and delete **MoleditPy Job Server Local
 CA** under **Trusted Root Certification Authorities**.
 
+## Regenerating the CA
+
+If the CA's key may have been exposed, choose **Job Server > Settings > Regenerate CA
+certificate...**, then restart the server. Every PC and browser must then trust the new CA, as
+above, and should remove the old one. The old files move to a `retired-` folder under the data
+directory's `tls` folder.
+
 ## Using a .local name
 
-`https://your-pc.local:8767` keeps working when the server PC's IP changes. It works over
-local HTTPS only, and needs Job Server 0.6.2 or later and a Job Manager release that accepts
-`.local` CAs.
+`https://your-pc.local:8767` keeps working when the server PC's IP changes. It needs Job
+Server 0.6.2 or later and a Job Manager release that accepts `.local` names. With **Allow trusted
+LAN HTTP** on, `http://your-pc.local:8766` works too, unencrypted. Any device on the LAN can
+answer for a `.local` name, so use HTTP only on a LAN whose devices you trust.
 
 1. Check from the other PC that the name resolves: `ping your-pc.local`. Windows, Mac and
    Linux with Avahi announce the PC's name. A guest network or a managed network may block it.
 2. On the server PC, also tick `your-pc.local` under **Reachable from other PCs at**. Keep the
    LAN IP ticked: the server listens on IP addresses, and the name leads to one of them.
-3. Save and restart. A CA created before this needs replacing, and Settings asks first. Every
+3. Save and restart. The CA is limited to this one name, so a CA created without it, or for
+   another name, needs replacing, and Settings asks first. Every
    PC and browser must then trust the new CA, following the steps above, and should remove the
    old one. The old files move to a `retired-` folder under the data directory's `tls` folder.
 4. In Job Manager, set **Server URL** to `https://your-pc.local:8767` and choose **Trust local

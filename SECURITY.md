@@ -30,19 +30,24 @@ There is no unauthenticated account-creation endpoint.
 
 The daemon binds loopback by default and refuses elevated execution except an explicit isolated-test
 override. Private LAN/Tailscale clients use validated HTTPS by default, terminating on the same host.
-An explicit `allow_lan_http` exception permits unencrypted HTTP to literal RFC 1918 IPv4
+An explicit `allow_lan_http` exception permits unencrypted HTTP to a `.local` name, or to literal RFC 1918 IPv4
 or IPv6 ULA addresses. `lan_bind_address` and `lan_extra_addresses` add a listener on each
 selected private interface while retaining the loopback listener. Enable local HTTPS or opt in to HTTP;
 no wildcard, DNS, public, link-local or loopback LAN address is accepted. The OS must
 own the selected IP; bind failures stop startup and close all opened sockets. The
 application does not change firewall rules. Restrict the port to trusted LAN clients.
-`lan_hostname` adds one `.local` name to the HTTPS certificate. It is HTTPS-only because
-any LAN device can answer for a `.local` name, and only the certificate proves the server.
-The local CA then also permits `.local` names, so a PC trusting it accepts this CA's
-certificate for any such name. A CA created without this permission is never widened;
-replacing it needs the user's confirmation, and each client must then trust the new CA.
+`lan_hostname` adds one `.local` name to the HTTPS certificate. Any LAN device can answer for
+a `.local` name, so over LAN HTTP, where no certificate proves the server, a client can send its
+password and token to the wrong device. HTTPS protects against this.
+The local CA's name constraints then also permit that one name, and subdomains of it, never
+`.local` as a whole; clients refuse a CA that permits more. A CA cannot be widened in place,
+so another name needs a new CA: replacing it needs the user's confirmation, and each client
+must then trust the new CA.
+`job_setup_commands` are written by the server's administrator and run at the start of every
+user's job, in that job's context. They are not shown in a job's API view, so do not treat them
+as a place for secrets: a job can read its own script and environment.
 A private same-host reverse proxy remains supported. Clients opt in separately,
-bypass environment proxies for HTTP and refuse redirects. DNS names and public, link-local,
+bypass environment proxies for HTTP and refuse redirects. Other DNS names and public, link-local,
 unspecified and reserved IP addresses are excluded from the exception. Enrollment passwords,
 bearer tokens and job contents are visible to anyone able to intercept that LAN traffic;
 Ed25519 authentication does not provide transport confidentiality or prevent active interception.

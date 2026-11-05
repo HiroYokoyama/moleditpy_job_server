@@ -22,7 +22,6 @@ class LanAddressList(QListWidget):
         super().__init__()
         self.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self._https = True
         self.setToolTip(
             "Listen on each ticked private address as well as localhost. "
             "No firewall settings are changed automatically."
@@ -38,23 +37,18 @@ class LanAddressList(QListWidget):
         for row in range(self.count()):
             if self.item(row).data(Qt.ItemDataRole.UserRole) == value:
                 return self.item(row)
-        item = QListWidgetItem(label or (f"{value}  (HTTPS only)" if is_mdns_name(value) else value))
+        item = QListWidgetItem(label or value)
         item.setData(Qt.ItemDataRole.UserRole, value)
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
         item.setCheckState(Qt.CheckState.Unchecked)
         self.addItem(item)
-        self._apply_https(item)
         self._fit()
         return item
 
     def select(self, addresses=(), hostname=""):
         wanted = [*addresses, *([hostname] if hostname else [])]
         for value in wanted:
-            self.add_entry(
-                value,
-                (f"{value}  (HTTPS only, " if is_mdns_name(value) else f"{value}  (")
-                + "not currently available)",
-            )
+            self.add_entry(value, f"{value}  (not currently available)")
         with_signals = self.signalsBlocked()
         self.blockSignals(True)
         for row in range(self.count()):
@@ -71,15 +65,7 @@ class LanAddressList(QListWidget):
         return [value for value in self._ticked() if not is_mdns_name(value)]
 
     def hostname(self):
-        if not self._https:
-            return ""
         return next((value for value in self._ticked() if is_mdns_name(value)), "")
-
-    def set_https(self, enabled):
-        self._https = enabled
-        for row in range(self.count()):
-            self._apply_https(self.item(row))
-        self.changed.emit()
 
     def _ticked(self):
         items = (self.item(row) for row in range(self.count()))
@@ -88,15 +74,6 @@ class LanAddressList(QListWidget):
             for item in items
             if item.checkState() == Qt.CheckState.Checked
         ]
-
-    def _apply_https(self, item):
-        if is_mdns_name(item.data(Qt.ItemDataRole.UserRole)):
-            flags = item.flags()
-            item.setFlags(
-                flags | Qt.ItemFlag.ItemIsEnabled
-                if self._https
-                else flags & ~Qt.ItemFlag.ItemIsEnabled
-            )
 
     def _item_changed(self, item):
         value = item.data(Qt.ItemDataRole.UserRole)

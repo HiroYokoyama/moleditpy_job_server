@@ -340,11 +340,14 @@ class Dashboard(QDialog):
         self.ca_button = QPushButton("Create / show CA certificate...")
         self.ca_button.clicked.connect(self.show_local_ca)
         form.addRow("", self.ca_button)
+        self.regenerate_ca_button = QPushButton("Regenerate CA certificate...")
+        self.regenerate_ca_button.clicked.connect(self.regenerate_ca)
+        form.addRow("", self.regenerate_ca_button)
         self.allow_lan_http = QCheckBox("Allow unencrypted HTTP on trusted LAN addresses")
         self.allow_lan_http.setChecked(self.settings.allow_lan_http)
         self.allow_lan_http.setToolTip(
             "Passwords, tokens and job data are readable on the network. "
-            "Only private IPv4/IPv6 literal addresses are accepted; HTTPS remains recommended."
+            "Only private IP addresses and .local names are accepted; HTTPS remains recommended."
         )
         form.addRow(self.allow_lan_http)
         self.lan_addresses = LanAddressList(
@@ -373,10 +376,10 @@ class Dashboard(QDialog):
         def update_lan_fields():
             secure = self.lan_tls.isChecked()
             listening = secure or self.allow_lan_http.isChecked()
-            self.lan_addresses.set_https(secure)
             self.ca_button.setEnabled(secure)
             form.setRowVisible(self.fields["tls_port"], secure)
             form.setRowVisible(self.ca_button, secure)
+            form.setRowVisible(self.regenerate_ca_button, secure)
             form.setRowVisible(self.lan_addresses, listening)
             form.setRowVisible(self.connect_urls, listening)
 
@@ -406,6 +409,25 @@ class Dashboard(QDialog):
         ):
             limits.addRow(label, number(key, maximum))
         layout.addWidget(resources)
+
+        job_setup = QGroupBox("Commands before each job")
+        job_setup_layout = QVBoxLayout(job_setup)
+        self.job_setup = QPlainTextEdit("\n".join(self.settings.job_setup_commands))
+        self.job_setup.setPlaceholderText(
+            '$env:OMP_NUM_THREADS = "4"\nconda activate orca'
+            if self.settings.execution_os == "windows"
+            else "export OMP_NUM_THREADS=4\nconda activate orca"
+        )
+        self.job_setup.setMaximumHeight(70)
+        job_setup_layout.addWidget(self.job_setup)
+        job_setup_help = QLabel(
+            "Runs at the start of every new job, before the client's own commands, in the job's "
+            "shell. Applies to all users after a restart. Environment variables set here last "
+            "for that job."
+        )
+        job_setup_help.setWordWrap(True)
+        job_setup_layout.addWidget(job_setup_help)
+        layout.addWidget(job_setup)
 
         storage = QGroupBox("Job working directory")
         storage_layout = QVBoxLayout(storage)
@@ -754,6 +776,11 @@ class Dashboard(QDialog):
                 self.settings,
                 python_executable=self.python_path.text().strip(),
                 job_dir=self.job_dir.text().strip(),
+                job_setup_commands=[
+                    line.strip()
+                    for line in self.job_setup.toPlainText().splitlines()
+                    if line.strip()
+                ],
                 public_url="",
                 public_urls=urls,
                 allow_lan_http=self.allow_lan_http.isChecked(),
@@ -777,6 +804,28 @@ class Dashboard(QDialog):
         except Exception as exc:
             self.message.setText(str(exc))
             return False
+
+    def regenerate_ca(self):
+        if not self.save_settings():
+            return
+        from ..tls import ca_path, retire_ca
+
+        if ca_path(self.settings).exists():
+            answer = QMessageBox.question(
+                self,
+                "Regenerate the local CA?",
+                "A new CA and server certificate replace the current ones. Every PC and browser "
+                "that trusts the current CA must trust the new one. The old files move to a "
+                "retired- folder. Restart the server to use the new CA. Regenerate it?",
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+            try:
+                retire_ca(self.settings)
+            except (OSError, ValueError) as exc:
+                self.message.setText(f"The CA was not regenerated: {exc}")
+                return
+        self.show_local_ca()
 
     def show_local_ca(self):
         if not self.save_settings():

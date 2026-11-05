@@ -16,7 +16,6 @@ from .files import atomic_write, is_link, open_regular
 from .instance import InstanceLock
 from .trust import (
     CA_PERMITTED_DNS_NAME,
-    CA_PERMITTED_MDNS_NAME,
     CA_PERMITTED_NETWORKS,
     ca_permits_mdns,
     validate_ca,
@@ -58,10 +57,10 @@ def ca_fingerprint(settings):
 
 
 def needs_new_ca(settings):
-    """A `.local` name cannot be issued by a CA created without it, and must be replaced."""
-    if not settings.lan_hostname or not ca_path(settings).exists():
+    """A CA is limited to the `.local` name it was created for; another needs a new CA."""
+    if not settings.lan_tls or not settings.lan_hostname or not ca_path(settings).exists():
         return False
-    return not ca_permits_mdns(validate_ca(_read(ca_path(settings))))
+    return not ca_permits_mdns(validate_ca(_read(ca_path(settings))), settings.lan_hostname)
 
 
 def retire_ca(settings):
@@ -86,13 +85,13 @@ def retire_ca(settings):
         lock.release()
 
 
-def _new_ca(now, mdns=False):
+def _new_ca(now, hostname=""):
     key = ec.generate_private_key(ec.SECP256R1())
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "MoleditPy Job Server Local CA")])
     permitted = [x509.IPAddress(network) for network in CA_PERMITTED_NETWORKS]
     permitted.append(x509.DNSName(CA_PERMITTED_DNS_NAME))
-    if mdns:
-        permitted.append(x509.DNSName(CA_PERMITTED_MDNS_NAME))
+    if hostname:
+        permitted.append(x509.DNSName(hostname))
     certificate = (
         x509.CertificateBuilder()
         .subject_name(name)
@@ -140,7 +139,7 @@ def _ensure_locked(settings, directory):
             "The local CA is incomplete. Restore its certificate and key; do not replace trusted CA files automatically."
         )
     if not ca_file.exists():
-        ca_key, ca = _new_ca(now, mdns=bool(settings.lan_hostname))
+        ca_key, ca = _new_ca(now, settings.lan_hostname)
         _save_secret(
             ca_key_file,
             ca_key.private_bytes(
@@ -152,9 +151,9 @@ def _ensure_locked(settings, directory):
         atomic_write(ca_file, ca.public_bytes(serialization.Encoding.PEM))
     else:
         ca = validate_ca(_read(ca_file))
-        if settings.lan_hostname and not ca_permits_mdns(ca):
+        if settings.lan_hostname and not ca_permits_mdns(ca, settings.lan_hostname):
             raise ValueError(
-                "This local CA cannot issue a certificate for a .local name. "
+                f"This local CA cannot issue a certificate for {settings.lan_hostname}. "
                 "Select the name in Settings and accept replacing the CA."
             )
         ca_key = serialization.load_pem_private_key(_load_secret(ca_key_file), password=None)

@@ -184,16 +184,25 @@ PC がサーバーの CA を信頼するまで、`https://192.168.1.20:8767` を
 Windows で信頼を取り消すには、`certmgr.msc` を開き、**信頼されたルート証明機関** にある
 **MoleditPy Job Server Local CA** を削除します。
 
+## CA を作り直す
+
+CA の鍵が漏れた可能性があるときは、**Job Server > Settings > Regenerate CA certificate...** を選んで、
+サーバーを再起動します。すべての PC とブラウザーで、前述の手順で新しい CA を信頼し、古い CA を削除して
+ください。古いファイルはデータディレクトリの `tls` フォルダーにある `retired-` フォルダーへ移動します。
+
 ## .local 名で接続する
 
-`https://your-pc.local:8767` なら、サーバー PC の IP が変わっても同じ URL で接続できます。使えるのは
-ローカル HTTPS だけで、Job Server 0.6.2 以上と、`.local` の CA に対応した Job Manager が必要です。
+`https://your-pc.local:8767` なら、サーバー PC の IP が変わっても同じ URL で接続できます。Job Server 0.6.2
+以上と、`.local` 名に対応した Job Manager が必要です。**Allow trusted LAN HTTP** が有効なら、暗号化なしの
+`http://your-pc.local:8766` も使えます。`.local` 名は LAN 内のどの機器でも名乗れるので、HTTP は機器を信頼
+できる LAN でだけ使ってください。
 
 1. 別の PC から名前を解決できるか確認します: `ping your-pc.local`。Windows、Mac、Avahi の入った Linux は
    PC 名を通知します。ゲストネットワークや管理されたネットワークでは遮断されることがあります。
 2. サーバー PC の **Reachable from other PCs at** で `your-pc.local` にもチェックを入れます。LAN IP の
    チェックは外さないでください。サーバーは IP アドレスで待ち受け、名前はそのどれかに解決されます。
-3. 保存して再起動します。以前に作った CA は置き換えが必要で、Settings が先に確認します。置き換えると、
+3. 保存して再起動します。CA はこの 1 つの名前だけに限定されるので、この名前なしで作った CA や別の名前の
+   CA は置き換えが必要で、Settings が先に確認します。置き換えると、
    すべての PC とブラウザーで、前述の手順で新しい CA を信頼し、古い CA を削除してください。古いファイルは
    データディレクトリの `tls` フォルダーにある `retired-` フォルダーへ移動します。
 4. Job Manager で **Server URL** を `https://your-pc.local:8767` にして、**Trust local server CA...** を
