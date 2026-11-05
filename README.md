@@ -197,8 +197,8 @@ The HTTPS port defaults to 8767. The server creates a persistent local CA and
 renews its server certificate when needed at startup. Use **Create / show CA
 certificate...** to copy the fingerprint or export the public CA.
 
-Job Manager's **Trust local server CA...** retrieves the CA and checks the
-fingerprint before saving a local CA copy on every platform. Windows also registers
+Job Manager's **Trust local server CA...** retrieves the CA and displays its
+fingerprint for you to compare with the server PC before saving a local CA copy on every platform. Windows also registers
 it in the current user's certificate store; Mac/Linux use the saved connection CA. Username and password share one sign-in
 dialog. Browser trust registration uses the system/browser certificate manager.
 

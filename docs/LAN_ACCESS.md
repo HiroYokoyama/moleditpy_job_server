@@ -28,11 +28,13 @@ with the operating system or browser certificate manager.
 
 1. Create a Job Server host with the copied HTTPS LAN URL.
 2. Choose **Trust local server CA...**.
-3. Paste the full SHA-256 fingerprint displayed on the server PC and confirm.
+3. Compare the displayed SHA-256 fingerprint with the one on the server PC, then
+   choose **Yes** if they match.
 4. Choose **Sign in to Job Server...** and enter username and password.
 
-The CA is retrieved without credentials and accepted only after fingerprint
-verification. A copy is saved under Job Manager's `identity/ca/` on every platform.
+The CA is retrieved without credentials and accepted only after you confirm its
+fingerprint. If the values differ, choose **No**: something else may be answering
+at that address. A copy is saved under Job Manager's `identity/ca/` on every platform.
 On Windows it is also registered in the current user's ROOT store.
 Applications using that store will trust certificates issued by the CA. On
 Mac/Linux it is saved automatically for this connection and entered in the CA

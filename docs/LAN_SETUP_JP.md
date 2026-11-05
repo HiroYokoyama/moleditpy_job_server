@@ -35,7 +35,7 @@ Job Server 0.5.0 は `127.0.0.1` でしか待ち受けません。
 2. **Enable local HTTPS with a persistent local CA** を有効にします。
 3. **LAN listen address** で、この PC の LAN IP を選びます。
 4. 保存して **Server > Restart** を選びます。サーバーが止まっている場合は **Start** です。
-5. **Create / show CA certificate...** を開き、SHA-256 指紋をコピーします。
+5. **Create / show CA certificate...** を開き、SHA-256 指紋を表示しておきます。
 6. LAN IP で待ち受けていることを確認します。
 
    ```powershell
@@ -76,8 +76,62 @@ Job Server 0.5.0 は `127.0.0.1` でしか待ち受けません。
 
 2. Job Manager のホスト設定を開き、**Backend** を **Job Server (HTTPS)** にします。
 3. **Server URL** に `https://192.168.1.20:8767` を入れます。
-4. **Trust local server CA...** を選び、サーバー PC の指紋を貼り付けます。
+4. **Trust local server CA...** を選びます。表示された指紋をサーバー PC の指紋と見比べて、
+   一致しているときだけ **Yes** を選びます。
 5. **Sign in to Job Server...** を選び、ユーザー名とパスワードを入れます。
+
+## ローカル HTTPS で Web UI を使う
+
+PC がサーバーの CA を信頼するまで、`https://192.168.1.20:8767` を開くとブラウザーに証明書の警告が
+出ます。Web UI を開く PC ごとに設定してください。公開された正規の証明書を使う Tailscale と、
+証明書を使わない LAN HTTP では不要です。
+
+この証明書を入れると、その PC は、この CA がプライベートアドレスと localhost 向けに署名したものを
+すべて信頼します。サーバー PC と、そこでジョブを実行できる全員を信頼できるときだけ入れてください。
+詳しくは [SECURITY.md](../SECURITY.md) を参照してください。
+
+### 1. 証明書を入手する
+
+サーバー PC で **Job Server > Settings > Create / show CA certificate...** を開き、
+**Export public CA certificate...** を選んで、`job-server-ca.pem` を別の PC にコピーします。
+
+別の PC で `https://192.168.1.20:8767/api/v1/tls/ca` からダウンロードすることもできます。
+このときはブラウザーの警告をこの 1 回だけ進むことになるので、手順 2 が特に重要です。
+
+### 2. 指紋を確認する
+
+結果をサーバー PC の SHA-256 指紋と見比べます。大文字と小文字、コロンの違いは無視してかまいません。
+
+- Windows: 出力の**最後の** `Cert ハッシュ(sha256)` の行を見ます。
+
+  ```powershell
+  certutil -dump job-server-ca.pem
+  ```
+
+- Mac と Linux:
+
+  ```bash
+  openssl x509 -in job-server-ca.pem -noout -fingerprint -sha256
+  ```
+
+### 3. インストールする
+
+| ブラウザーと OS | インストール方法 |
+|---|---|
+| Windows の Edge / Chrome | `certutil -user -addstore Root job-server-ca.pem` を実行し、Windows の確認を承諾する。同じ Windows ユーザーで Job Manager の **Trust local server CA...** が成功していれば不要 |
+| Mac の Safari / Chrome | `security add-trusted-cert -r trustRoot -k ~/Library/Keychains/login.keychain-db job-server-ca.pem` を実行する |
+| Linux の Chrome | `certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "MoleditPy Job Server Local CA" -i job-server-ca.pem` を実行する(`libnss3-tools` に含まれる) |
+| すべての OS の Firefox | **設定 > プライバシーとセキュリティ > 証明書 > 証明書を表示 > 認証局証明書 > インポート** で読み込み、**この認証局によるウェブサイトの識別を信頼する** を選ぶ |
+| iPhone / iPad | ファイルを開いて **設定** でプロファイルをインストールし、**一般 > 情報 > 証明書信頼設定** で有効にする |
+| Android | **設定 > セキュリティ** から **CA 証明書** としてインストールする。メニューの場所は機種によって異なる |
+
+### 4. Web UI を開く
+
+ブラウザーを再起動して `https://192.168.1.20:8767` を開きます。サーバー PC の IP が変わっても CA は
+同じなので、変わるのは URL だけです。
+
+Windows で信頼を取り消すには、`certmgr.msc` を開き、**信頼されたルート証明機関** にある
+**MoleditPy Job Server Local CA** を削除します。
 
 ## Tailscale
 
