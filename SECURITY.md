@@ -14,6 +14,8 @@ Windows Job Objects manage process lifetime, not file-access isolation. WSL is n
 complete security boundary from its Windows host.
 
 The API enforces owner/admin authorization for each job, log, upload and download.
+Job mutations recheck session validity inside the write transaction so completed
+device revocation, logout or user disable takes effect before the mutation.
 Passwords use scrypt with a random salt (N=32768, r=8, p=1). Enrollment sessions cannot
 submit jobs and are consumed after one successful device registration. Registering an
 additional device requires fresh authentication. Ed25519 nonce signatures bind protocol,

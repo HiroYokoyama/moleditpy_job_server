@@ -6,14 +6,16 @@ import time
 import uuid
 
 from .errors import reject
+from .auth import Auth
 from .files import contained, manifest, open_regular, sha256
 
 TERMINAL = {"DONE", "FAILED", "CANCELLED", "LOST"}
 
 
 class Jobs:
-    def __init__(self, db, settings):
+    def __init__(self, db, settings, auth=None):
         self.db, self.settings = db, settings
+        self.auth = auth if auth is not None else Auth(db, settings)
         for name in ("staging", "jobs", "control", "logs"):
             (settings.root / name).mkdir(exist_ok=True, mode=0o700)
         if settings.execution_os == "wsl":
@@ -73,6 +75,7 @@ class Jobs:
         digest = hashlib.sha256(canonical.encode()).hexdigest()
         owner = principal["user_id"]
         with self.db.transaction() as c:
+            principal = self.auth.current(principal)
             old = c.execute(
                 "SELECT * FROM idempotency_keys WHERE user_id=? AND key=?", (owner, key)
             ).fetchone()
@@ -130,6 +133,7 @@ class Jobs:
 
     def upload(self, job_id, relative, data, content_range, principal):
         with self.db.transaction() as c:
+            principal = self.auth.current(principal)
             job = self.authorize(job_id, principal)
             if job["state"] != "UPLOADING":
                 reject(409, "upload_closed", "Job no longer accepts uploads")
@@ -192,6 +196,7 @@ class Jobs:
 
     def commit(self, job_id, principal):
         with self.db.transaction() as c:
+            principal = self.auth.current(principal)
             job = self.authorize(job_id, principal)
             if job["state"] != "UPLOADING":
                 if job["state"] in {"PENDING", "RUNNING"} | TERMINAL:
@@ -217,6 +222,7 @@ class Jobs:
 
     def cancel(self, job_id, principal):
         with self.db.transaction() as c:
+            principal = self.auth.current(principal)
             job = self.authorize(job_id, principal)
             if job["state"] in TERMINAL:
                 return self.public(job)

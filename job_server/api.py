@@ -27,7 +27,8 @@ from .settings import Settings
 def create_app(settings=None, dispatch=True):
     settings = (settings or Settings()).validate()
     db = Database(settings.root)
-    auth, jobs = Auth(db, settings), Jobs(db, settings)
+    auth = Auth(db, settings)
+    jobs = Jobs(db, settings, auth)
     scheduler = Scheduler(db, jobs, settings)
     lock = InstanceLock(settings.root, port=settings.port)
 
