@@ -318,4 +318,18 @@ async function insecureContext() {
   assert.throws(()=>app.call('randomId')(),/Secure random generation is unavailable/);
 }
 const cases={insecureContext,sessionRestore,submittedAndCompleted,queuedRefresh,queueControls,expiredDownload,keylessLogin,authentication,refresh,details,accountsPolling,accountsOrdering,loginView,connectionFailure,connectionTimeout};
-cases[process.argv[3]]().then(()=>console.log('PASS '+process.argv[3])).catch(error=>{console.error(error);process.exitCode=1;});
+async function runCases() {
+  const selected=process.argv[3]==='all'?Object.keys(cases):[process.argv[3]];
+  for(const name of selected){
+    console.log('RUN '+name);
+    let timer;
+    try {
+      await Promise.race([
+        cases[name](),
+        new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Scenario timed out: '+name)),5000);}),
+      ]);
+    } finally {clearTimeout(timer);}
+    console.log('PASS '+name);
+  }
+}
+runCases().catch(error=>{console.error(error);process.exitCode=1;});
