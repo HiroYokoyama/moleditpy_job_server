@@ -211,8 +211,8 @@ client = JobServerClient("http://192.168.1.20:8080", "device.key", allow_lan_htt
 ```
 
 The generated development companion adds a per-host **Allow trusted LAN HTTP**
-checkbox, used for enrollment and subsequent connections. The normal Job Manager
-release needs the corresponding client update before it can use LAN HTTP.
+checkbox, used for enrollment and subsequent connections. Use a Job Manager release that includes the matching per-host LAN HTTP option;
+older Job Manager releases require HTTPS for remote connections.
 HTTPS and localhost remain compatible with existing clients. HTTP clients bypass
 environment proxies and refuse redirects to keep credentials on the selected origin.
 
