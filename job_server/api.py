@@ -169,8 +169,12 @@ def create_app(settings=None, dispatch=True):
 
         if not settings.lan_tls or not ca_path(settings).is_file():
             reject(404, "not_found", "Local HTTPS is not configured")
+        from .trust import validate_ca
+        from cryptography.hazmat.primitives import serialization
+
+        certificate = validate_ca(_read(ca_path(settings)))
         return Response(
-            _read(ca_path(settings)), media_type="application/x-pem-file",
+            certificate.public_bytes(serialization.Encoding.PEM), media_type="application/x-pem-file",
             headers={"Content-Disposition": 'attachment; filename="job-server-ca.pem"'},
         )
 

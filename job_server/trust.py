@@ -54,7 +54,12 @@ def fetch_server_ca(url, expected_fingerprint):
     if parts.scheme != "https":
         raise ValueError("CA bootstrap requires an HTTPS server URL")
     # Only the explicit local/private-address exception may bootstrap trust.
-    validate_server_url(parts._replace(scheme="http").geturl(), allow_lan_http=True)
+    try:
+        validate_server_url(parts._replace(scheme="http").geturl(), allow_lan_http=True)
+    except ValueError:
+        raise ValueError(
+            "CA bootstrap requires localhost or a private LAN IP. Publicly trusted HTTPS does not need local CA registration."
+        ) from None
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.check_hostname = False
@@ -79,8 +84,12 @@ def trust_windows_user_ca(pem, expected_fingerprint):
     crypt.CertOpenSystemStoreW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
     crypt.CertOpenSystemStoreW.restype = wintypes.HANDLE
     crypt.CertAddEncodedCertificateToStore.argtypes = [
-        wintypes.HANDLE, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD,
-        wintypes.DWORD, ctypes.c_void_p,
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.c_void_p,
     ]
     crypt.CertAddEncodedCertificateToStore.restype = wintypes.BOOL
     crypt.CertCloseStore.argtypes = [wintypes.HANDLE, wintypes.DWORD]

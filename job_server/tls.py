@@ -52,18 +52,36 @@ def ca_fingerprint(settings):
 def _new_ca(now):
     key = ec.generate_private_key(ec.SECP256R1())
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "MoleditPy Job Server Local CA")])
-    permitted = [x509.IPAddress(ip_network(value)) for value in (
-        "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7", "127.0.0.0/8", "::1/128",
-    )]
+    permitted = [
+        x509.IPAddress(ip_network(value))
+        for value in (
+            "10.0.0.0/8",
+            "172.16.0.0/12",
+            "192.168.0.0/16",
+            "fc00::/7",
+            "127.0.0.0/8",
+            "::1/128",
+        )
+    ]
     permitted.append(x509.DNSName("localhost"))
     certificate = (
-        x509.CertificateBuilder().subject_name(name).issuer_name(name)
-        .public_key(key.public_key()).serial_number(x509.random_serial_number())
-        .not_valid_before(now - timedelta(minutes=5)).not_valid_after(now + timedelta(days=1825))
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(minutes=5))
+        .not_valid_after(now + timedelta(days=1825))
         .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
-        .add_extension(x509.KeyUsage(False, False, False, False, False, True, True, False, False), critical=True)
+        .add_extension(
+            x509.KeyUsage(False, False, False, False, False, True, True, False, False),
+            critical=True,
+        )
         .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False)
-        .add_extension(x509.NameConstraints(permitted_subtrees=permitted, excluded_subtrees=None), critical=True)
+        .add_extension(
+            x509.NameConstraints(permitted_subtrees=permitted, excluded_subtrees=None),
+            critical=True,
+        )
         .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
         .sign(key, hashes.SHA256())
     )
@@ -89,19 +107,30 @@ def _ensure_locked(settings, directory):
     now = datetime.now(timezone.utc)
     ca_file, ca_key_file = directory / "ca.pem", directory / "ca-key.bin"
     if ca_file.exists() != ca_key_file.exists():
-        raise ValueError("The local CA is incomplete. Restore its certificate and key; do not replace trusted CA files automatically.")
+        raise ValueError(
+            "The local CA is incomplete. Restore its certificate and key; do not replace trusted CA files automatically."
+        )
     if not ca_file.exists():
         ca_key, ca = _new_ca(now)
-        _save_secret(ca_key_file, ca_key.private_bytes(
-            serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption(),
-        ))
+        _save_secret(
+            ca_key_file,
+            ca_key.private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.PKCS8,
+                serialization.NoEncryption(),
+            ),
+        )
         atomic_write(ca_file, ca.public_bytes(serialization.Encoding.PEM))
     else:
         ca = x509.load_pem_x509_certificate(_read(ca_file))
         ca_key = serialization.load_pem_private_key(_load_secret(ca_key_file), password=None)
         if not isinstance(ca_key, ec.EllipticCurvePrivateKey):
             raise ValueError("Invalid local CA key")
-        if ca.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo) != ca_key.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo):
+        if ca.public_key().public_bytes(
+            serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+        ) != ca_key.public_key().public_bytes(
+            serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+        ):
             raise ValueError("The local CA key does not match its certificate")
         ca.verify_directly_issued_by(ca)
         if not ca.extensions.get_extension_for_class(x509.BasicConstraints).value.ca:
@@ -123,10 +152,20 @@ def _ensure_locked(settings, directory):
             names = leaf.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
             renew = (
                 set(names.get_values_for_type(x509.IPAddress)) != addresses
+                or leaf.extensions.get_extension_for_class(x509.BasicConstraints).value.ca
+                or ExtendedKeyUsageOID.SERVER_AUTH
+                not in leaf.extensions.get_extension_for_class(x509.ExtendedKeyUsage).value
+                or not leaf.extensions.get_extension_for_class(
+                    x509.KeyUsage
+                ).value.digital_signature
                 or leaf.not_valid_after_utc <= now + timedelta(days=30)
                 or leaf.not_valid_before_utc > now
-                or leaf.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
-                != key.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
+                or leaf.public_key().public_bytes(
+                    serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+                )
+                != key.public_key().public_bytes(
+                    serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+                )
             )
         except (ValueError, TypeError, x509.ExtensionNotFound):
             renew = True
@@ -135,23 +174,51 @@ def _ensure_locked(settings, directory):
         password = secrets.token_urlsafe(48).encode("ascii")
         leaf = (
             x509.CertificateBuilder()
-            .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "MoleditPy Job Server")]))
-            .issuer_name(ca.subject).public_key(key.public_key()).serial_number(x509.random_serial_number())
+            .subject_name(
+                x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "MoleditPy Job Server")])
+            )
+            .issuer_name(ca.subject)
+            .public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
             .not_valid_before(now - timedelta(minutes=5))
             .not_valid_after(min(now + timedelta(days=365), ca.not_valid_after_utc))
             .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
-            .add_extension(x509.SubjectAlternativeName([
-                x509.DNSName("localhost"), *[x509.IPAddress(address) for address in sorted(addresses, key=str)],
-            ]), critical=False)
-            .add_extension(x509.KeyUsage(True, False, False, False, False, False, False, False, False), critical=True)
+            .add_extension(
+                x509.SubjectAlternativeName(
+                    [
+                        x509.DNSName("localhost"),
+                        *[x509.IPAddress(address) for address in sorted(addresses, key=str)],
+                    ]
+                ),
+                critical=False,
+            )
+            .add_extension(
+                x509.KeyUsage(True, False, False, False, False, False, False, False, False),
+                critical=True,
+            )
             .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False)
-            .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()), critical=False)
+            .add_extension(
+                x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()),
+                critical=False,
+            )
             .sign(ca_key, hashes.SHA256())
         )
         _save_secret(password_file, password)
-        atomic_write(key_file, key.private_bytes(
-            serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
-            serialization.BestAvailableEncryption(password),
-        ))
-        atomic_write(certificate_file, leaf.public_bytes(serialization.Encoding.PEM) + ca.public_bytes(serialization.Encoding.PEM))
-    return {"certfile": str(certificate_file), "keyfile": str(key_file), "password": password.decode("ascii")}
+        atomic_write(
+            key_file,
+            key.private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.PKCS8,
+                serialization.BestAvailableEncryption(password),
+            ),
+        )
+        atomic_write(
+            certificate_file,
+            leaf.public_bytes(serialization.Encoding.PEM)
+            + ca.public_bytes(serialization.Encoding.PEM),
+        )
+    return {
+        "certfile": str(certificate_file),
+        "keyfile": str(key_file),
+        "password": password.decode("ascii"),
+    }
