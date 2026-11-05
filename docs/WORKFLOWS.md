@@ -8,13 +8,13 @@ PyPI publication reuses the distributions already attached to a GitHub Release.
 | Tests | Main/dev pushes, pull requests, manual, reusable | Python 3.11/3.12/3.13 on Linux/Windows; Qt, native execution, coverage/JUnit reports, wheel/sdist and server plugin ZIP with checksums; test-only companion build/validation, Linux/Windows patched Job Manager regression and real HTTP client compatibility |
 | Security | Main/dev pushes, pull requests, weekly, manual, reusable | Dependency advisories, Bandit source analysis, credential signatures in tracked source and Git history |
 | Release | `vX.Y.Z` tag push or manual on main | Validate both version declarations, rerun Tests and Security, build/validate three assets, create a GitHub release; registry registration requires explicit opt-in |
-| Publish to PyPI | Published release or manual on main | Download the released wheel/sdist, verify release checksums, exercise the installed wheel, publish with OIDC/PEP 740 attestations, attach attestations to the GitHub Release |
+| Publish to PyPI | Release workflow dispatch, published release or manual on main | Download the released wheel/sdist, verify release checksums, exercise the installed wheel, publish with OIDC/PEP 740 attestations, attach attestations to the GitHub Release |
 | Installed Job Manager integration | Manual only | Install the latest stable Job Manager from PyPI alongside a built server wheel or a selected PyPI server version; test GUI/CLI/daemon integration on Ubuntu Python 3.11–3.14 and Windows/macOS 3.12 |
 | Update Plugin Registry | After Release, or manual with an existing release tag | Verify the release includes `job_server_X.Y.Z.zip`, send the existing `plugin_release` registry dispatch |
 
 To prepare a release, update `PLUGIN_VERSION` in `job_server/__init__.py` and
-`project.version` in `pyproject.toml` together. Update README version text/badge as
-well. Commit the change, then run **Actions → Release → Run workflow** on main with
+`project.version` in `pyproject.toml` together. README does not carry a release
+version or versioned ZIP filename. Commit the change, then run **Actions → Release → Run workflow** on main with
 the matching version (without `v`), or push its `vX.Y.Z` tag. Publication occurs only
 after Tests and Security succeed. An existing tag must point to the selected commit;
 existing release assets are never overwritten by this workflow. Releases are published as ordinary GitHub Releases.
@@ -25,15 +25,27 @@ plugin ZIP. The pinned companion `job_manager_job_server.zip` is built and
 validated only for testing; it is not uploaded with release/distribution assets
 or included in the release checksums. Use the normal Job Manager release.
 
-Registration is disabled by default. Leave the manual Release input **register**
-unchecked (`false`). Tag releases register only when the repository variable
-**REGISTER_PLUGIN** is explicitly `true`. Publishing Job Server 0.3.0 does not
-register it in the public plugin catalog.
+## Plugin registry update
 
-If registration is authorized later, set repository Actions secret **REGISTRY_PAT**
-to a token authorized to dispatch `HiroYokoyama/moleditpy-plugins`, then explicitly
-run Update Plugin Registry for the published tag. No token value belongs in source.
-Configuring the secret alone does not opt tag releases into registration.
+For an authorized release that should update the plugin catalog:
+
+- Manual **Release**: enable the **register** input. Its default is `false`;
+  `REGISTER_PLUGIN=true` does not override a manual release's input.
+- Tag push: registration runs when the repository variable `REGISTER_PLUGIN` is `true`.
+- Existing release: run **Update Plugin Registry** with its published tag.
+
+```sh
+gh workflow run release.yml --ref main -f version=X.Y.Z -F register=true
+gh workflow run registry.yml --ref main -f tag=vX.Y.Z
+```
+
+`REGISTRY_PAT` must be authorized to dispatch `HiroYokoyama/moleditpy-plugins`.
+After dispatch, confirm the downstream **Auto-Register Remote Plugin** run succeeds
+and `REGISTRY/plugins.json` contains the expected version and ZIP download URL.
+A published GitHub Release does not by itself confirm the catalog was updated.
+No token value belongs in source.
+
+Direct LAN setup and troubleshooting: [LAN access](LAN_ACCESS.md).
 
 ## PyPI publication
 
@@ -57,8 +69,9 @@ pushes, pull requests and publication do not start it automatically.
 It leaves the plugin registry unchanged.
 
 A release published with GitHub's default Actions token does not trigger other
-release-event workflows. After the Release workflow finishes, manually run
-Publish to PyPI. Releases published outside that token also trigger it automatically.
+release-event workflows. The Release workflow therefore explicitly dispatches Publish to PyPI after the
+GitHub Release is created. For recovery, dispatch Publish to PyPI manually with
+the existing release version. Releases published outside that token also trigger it automatically.
 
 Install the headless daemon with `python -m pip install moleditpy-job-server`.
 Add `[gui]` only for the optional MoleditPy administration dialogs. Python 3.11+

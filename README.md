@@ -143,7 +143,7 @@ within the last five minutes. Desktop device credentials remain separate.
 
 CLI commands accept `--config /path/to/settings.json` before or after the command.
 Persistent data defaults to `~/.moleditpy/job_server/`, outside installed plugin code.
-The listener starts only on explicit `serve` or GUI Start and binds **127.0.0.1**.
+The listener starts only on explicit `serve` or GUI Start and binds **127.0.0.1** by default. Direct LAN HTTP listening is optional.
 
 ### MoleditPy plugin
 
@@ -187,22 +187,23 @@ overlay. It does not change your sibling Job Manager repository or its upstream 
 
 ### Multiple connection addresses and optional LAN HTTP
 
-Keep `public_url` as the primary Web address and add other origins to `public_urls`
-(one per line in Settings or the setup guide). Each origin is explicitly allowed for
-browser requests; no wildcard origins are accepted. Existing configurations still work.
-Server > Copy connection addresses copies the saved origins for sharing.
+In **Settings**, enter one origin per line in **Web access URLs**. Existing
+`public_url` and `public_urls` configurations appear in this single field.
+Browser requests use an exact origin allowlist, without wildcards.
 
-HTTPS remains recommended. On a trusted LAN, enable **Allow unencrypted HTTP** in
-Settings and set an origin such as `http://192.168.1.20:8080`. HTTP accepts only
-literal RFC 1918 IPv4 addresses or IPv6 ULA addresses, never public IPs, hostnames,
-link-local or unspecified addresses. Passwords, bearer tokens and job contents are
-unencrypted: device signatures do not encrypt traffic or prevent interception.
-Restrict the proxy/firewall to trusted LAN clients. Never forward router ports.
+For direct access from another LAN PC, enable **Allow unencrypted HTTP**, select
+this PC's private IP in **LAN HTTP listen address**, save, then choose
+**Server > Restart**. The daemon adds a listener on that specific private IP and
+keeps localhost available for administration. The LAN URL is allowed automatically;
+use **Server > Copy connection addresses** to copy it. Allow the server TCP port
+through the OS firewall for trusted LAN clients. No separate proxy is needed for
+this direct HTTP connection. See [LAN access setup](docs/LAN_ACCESS.md).
 
-The daemon still binds only to loopback. Put a private LAN HTTP reverse proxy on
-this same PC, listening on the chosen private address and forwarding to
-`http://127.0.0.1:8766`; configuring an origin does not open a LAN listener.
-Save and restart the server after configuration changes.
+HTTPS remains recommended. HTTP accepts only literal RFC 1918 IPv4 addresses or
+IPv6 ULA addresses. The default remains **Local only**; wildcard, public, DNS and
+link-local listen addresses are rejected. Passwords, bearer tokens and job contents
+are unencrypted. Never forward router ports or use public tunnels. Tailscale Serve
+and other private HTTPS proxies can continue to use the loopback listener.
 
 Python clients must opt in separately:
 
@@ -240,8 +241,8 @@ certificates and forwards connections to the local Job Server.
    **Hosts → Server URL**, then use **Sign in / register device**. Use the printed
    hostname, not the server's LAN IP, and do not append `:8766` to that HTTPS URL.
 5. To use the browser UI, paste that same HTTPS URL in Job Server's
-   **Settings → Web address (remote access)**, save the configuration, then
-   choose **Server → Restart**. The JSON setting is `public_url`. This enables browser access at that address. Other website addresses remain rejected.
+   **Settings → Web access URLs**, save the configuration, then
+   choose **Server → Restart**. The JSON setting is `public_urls` (one origin per list entry). This enables browser access at that address. Other website addresses remain rejected.
 
 The daemon stays on loopback and ignores forwarded headers. HTTP on
 `127.0.0.1:8766` is the local connection from Tailscale Serve to Job Server; remote
@@ -256,7 +257,7 @@ publishes to the internet and **must never be used with Job Server**.
 For a LAN without Tailscale, terminate HTTPS in a proxy on the server PC, restrict
 it with your firewall to trusted local clients, and configure certificate trust on
 each client. Job Manager's host profile supports a CA certificate file for your
-own certificate authority. Set `public_url` to the proxy's exact HTTPS origin if
+own certificate authority. Add the proxy's exact HTTPS origin to `public_urls` if
 using the browser UI. Python clients validate TLS and refuse redirects. Never
 forward the service through an internet-facing proxy or router port mapping.
 

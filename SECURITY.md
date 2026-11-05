@@ -26,16 +26,22 @@ server's data directory. It works with the daemon running; a SQLite write
 transaction atomically prevents creation when an enabled administrator exists.
 There is no unauthenticated HTTP bootstrap endpoint.
 
-The daemon binds loopback and refuses elevated execution except an explicit isolated-test
+The daemon binds loopback by default and refuses elevated execution except an explicit isolated-test
 override. Private LAN/Tailscale clients use validated HTTPS by default, terminating on the same host.
 An explicit `allow_lan_http` exception permits unencrypted HTTP to literal RFC 1918 IPv4
-or IPv6 ULA addresses through a private same-host reverse proxy. Clients opt in separately,
+or IPv6 ULA addresses. An optional `lan_bind_address` adds a listener on one specific
+private interface while retaining the loopback listener. It requires the HTTP opt-in;
+no wildcard, DNS, public, link-local or loopback LAN address is accepted. The OS must
+own the selected IP; bind failures stop startup and close all opened sockets. The
+application does not change firewall rules. Restrict the port to trusted LAN clients.
+A private same-host reverse proxy remains supported. Clients opt in separately,
 bypass environment proxies for HTTP and refuse redirects. DNS names and public, link-local,
 unspecified and reserved IP addresses are excluded from the exception. Enrollment passwords,
 bearer tokens and job contents are visible to anyone able to intercept that LAN traffic;
 Ed25519 authentication does not provide transport confidentiality or prevent active interception.
 Only use this exception on a trusted LAN with a restricted proxy/firewall. All registered
-`public_url`/`public_urls` origins are checked exactly; adding an origin never opens a listener.
+`public_url`/`public_urls` origins are checked exactly. The direct LAN origin is included automatically; adding
+an origin alone never opens a listener.
 Forwarded headers are ignored. Only exact configured browser origins are accepted;
 there is no permissive CORS response. Web sign-in uses password verification and a short-lived opaque token held only in
 tab-scoped session storage for reload recovery. It does not save passwords or
