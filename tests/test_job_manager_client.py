@@ -51,6 +51,8 @@ def test_real_manager_browses_and_downloads_job_folders(manager_types, live_serv
     import uuid
 
     HostProfile, _, _, Backend = manager_types
+    if not hasattr(Backend, "list_path"):
+        pytest.skip("Folder browsing requires Job Manager 3.9.4 or newer")
     url, app = live_server
     host = HostProfile(backend="job_server", server_url=url,
                        server_key_path=str(tmp_path / "browser-device.key"))
