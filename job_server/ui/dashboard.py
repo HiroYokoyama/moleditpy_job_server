@@ -3,6 +3,9 @@ from ._qt_callbacks import connect_queued
 import os
 import subprocess
 import time
+from collections import deque
+from urllib.parse import urlsplit
+from urllib.error import URLError
 from datetime import datetime
 from dataclasses import replace
 from pathlib import Path
@@ -92,12 +95,15 @@ class Dashboard(QDialog):
         self.settings = Settings.load(self.config) if self.config.exists() else Settings()
         self.client = JobServerClient(
             f"http://127.0.0.1:{self.settings.port}",
-            self.settings.root / "identity" / "admin-device.key",
+            self.settings.root / "identity" / "admin-device.key", timeout=3,
         )
         self.pool = QThreadPool(self)
         self.pool.setMaxThreadCount(1)
         self._tasks = set()
         self.busy = False
+        self._pending_tasks = deque()
+        self._pending_lifecycle = set()
+        self._active_lifecycle = None
         self.setup_dialog = None
         self._setup_checked = False
         self.detail_dialog = None
@@ -142,9 +148,9 @@ class Dashboard(QDialog):
         files.addSeparator()
         action(files, "Close", self.close)
         server = self.menu_bar.addMenu("Server")
-        action(server, "Start", self.start_daemon)
-        action(server, "Stop (preserve jobs)", self.stop_daemon)
-        action(server, "Restart", self.restart_daemon)
+        self.start_action = action(server, "Start", self.start_daemon)
+        self.stop_action = action(server, "Stop (preserve jobs)", self.stop_daemon)
+        self.restart_action = action(server, "Restart", self.restart_daemon)
         server.addSeparator()
         action(server, "Refresh", self.refresh)
         action(server, "Copy connection addresses", self.copy_connection_addresses)
@@ -385,16 +391,23 @@ class Dashboard(QDialog):
                 "Stopping or reloading the GUI preserves running jobs."
             )
         )
-        button = QPushButton("Save configuration")
-        button.clicked.connect(self.save_settings)
-        layout.addWidget(button)
+        self.save_settings_button = QPushButton("Save configuration")
+        self.save_settings_button.clicked.connect(self.save_settings)
+        layout.addWidget(self.save_settings_button)
         layout.addStretch()
         self.tabs.addTab(page, "Settings")
 
-    def task(self, call, on_ok=None, *, interactive=True, success_message=None, on_error=None):
+    def task(self, call, on_ok=None, *, interactive=True, success_message=None, on_error=None, on_start=None):
         if self.busy:
+            if interactive:
+                self._pending_tasks.append((call, on_ok, success_message, on_error, on_start))
+                self.message.setText("Operation queued; waiting for the current operation to finish.")
+            return
+        if not interactive and self._pending_tasks:
             return
         self.busy = True
+        if on_start:
+            on_start()
         task = Task(call)
         self._tasks.add(task)
 
@@ -405,6 +418,7 @@ class Dashboard(QDialog):
                 on_ok(value)
             if success_message:
                 QMessageBox.information(self, "Success", success_message)
+            self._run_pending_task()
 
         def failed(message):
             self._tasks.discard(task)
@@ -414,14 +428,33 @@ class Dashboard(QDialog):
                 on_error(message)
             if interactive:
                 QMessageBox.warning(self, "Job Server", message)
+            self._run_pending_task()
 
         connect_queued(task.signals.finished, finished, self, (object,), cleanup=(task.signals.finished, task.signals.failed))
         connect_queued(task.signals.failed, failed, self, (str,), cleanup=(task.signals.finished, task.signals.failed))
         self.pool.start(task)
 
+    def _run_pending_task(self):
+        if self._pending_tasks and not self.busy:
+            call, on_ok, success_message, on_error, on_start = self._pending_tasks.popleft()
+            self.task(call, on_ok, success_message=success_message, on_error=on_error, on_start=on_start)
+
     def refresh(self):
+        if self._pending_lifecycle:
+            if self._active_lifecycle:
+                title, started = self._active_lifecycle
+                self.message.setText(f"{title} ({time.monotonic() - started:.0f}s)")
+            return
+
         def work():
-            health = self.client.request("GET", "/health", authenticated=False)
+            try:
+                health = self.client.request("GET", "/health", authenticated=False)
+            except URLError as exc:
+                if isinstance(exc.reason, ConnectionRefusedError):
+                    return {"offline": True}
+                raise
+            except ConnectionRefusedError:
+                return {"offline": True}
             if not self.client.key_path.exists():
                 return {"health": health}
             try:
@@ -437,6 +470,13 @@ class Dashboard(QDialog):
                 return {"health": health, "error": str(exc)}
 
         def display(data):
+            if self._pending_lifecycle:
+                return
+            if data.get("offline"):
+                self.message.setText("Server is OFF. Choose Server > Start.")
+                self.set_status("offline", "Server is OFF", "Choose Server > Start when ready.")
+                self._clear_dashboard()
+                return
             version = data["health"]["server_version"]
             self.message.setText(f"Running at {self.client.url} — {version}")
             if "resources" not in data:
@@ -503,6 +543,9 @@ class Dashboard(QDialog):
             )
 
         def unavailable(_):
+            if self._pending_lifecycle:
+                return
+            self.message.setText("Server is not responding. Check Server > Start or File > Open Logs.")
             self.set_status(
                 "offline", "Server offline",
                 "No daemon answers on this port. Choose Server > Start; "
@@ -585,6 +628,9 @@ class Dashboard(QDialog):
             table.blockSignals(signals)
 
     def save_settings(self):
+        if self._pending_lifecycle:
+            self.message.setText("Wait for the server operation to finish before saving configuration.")
+            return False
         try:
             urls = [
                 url for url in self.public_urls.toPlainText().split()
@@ -614,13 +660,14 @@ class Dashboard(QDialog):
     def require_own_daemon(self):
         from ..daemon_ownership import verify_local_daemon
 
-        verify_local_daemon(self.settings.root, self.settings.port)
+        verify_local_daemon(self.settings.root, urlsplit(self.client.url).port)
 
     def _start_daemon(self):
-        url = f"http://127.0.0.1:{self.settings.port}"
+        settings = self.settings
+        url = f"http://127.0.0.1:{settings.port}"
         if self.client.url != url:
             self.client = JobServerClient(
-                url, self.settings.root / "identity" / "admin-device.key",
+                url, settings.root / "identity" / "admin-device.key", timeout=3,
             )
         try:
             self.client.request("GET", "/health", authenticated=False)
@@ -630,8 +677,8 @@ class Dashboard(QDialog):
         if running:
             self.require_own_daemon()
             return "Daemon is already running; reusing it."
-        self.settings.save(self.config)
-        log_dir = self.settings.root / "logs"
+        settings.save(self.config)
+        log_dir = settings.root / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
         environment = os.environ.copy()
         environment["PYTHONPATH"] = (
@@ -642,9 +689,9 @@ class Dashboard(QDialog):
         with (log_dir / "startup.log").open("ab") as log:
             from ..runtime import python_executable
 
-            subprocess.Popen(
+            process = subprocess.Popen(
                 [
-                    python_executable(self.settings),
+                    python_executable(settings),
                     "-m",
                     "job_server",
                     "serve",
@@ -659,25 +706,65 @@ class Dashboard(QDialog):
                 creationflags=0x08000000 | 0x00000008 if os.name == "nt" else 0,
             )
         self.client = JobServerClient(
-            f"http://127.0.0.1:{self.settings.port}",
-            self.settings.root / "identity" / "admin-device.key",
+            f"http://127.0.0.1:{settings.port}",
+            settings.root / "identity" / "admin-device.key", timeout=3,
         )
-        return "Start requested; see startup.log if the health check stays offline."
+        from ..lifecycle import wait_until_ready
+
+        wait_until_ready(JobServerClient(self.client.url, timeout=1), settings.root, process)
+        return "Server is running. Active jobs are preserved."
+
+    def _server_task(self, name, call, title, done):
+        action = {"start": self.start_action, "stop": self.stop_action, "restart": self.restart_action}[name]
+        if name in self._pending_lifecycle:
+            self.message.setText(f"Server {name} is already pending.")
+            return
+        self._pending_lifecycle.add(name)
+        self.save_settings_button.setEnabled(False)
+        action.setEnabled(False)
+
+        def starting():
+            self._active_lifecycle = (title, time.monotonic())
+            self.message.setText(title)
+            self.set_status("warning", title, "Waiting for the server to confirm completion.")
+
+        def finished(value):
+            self._pending_lifecycle.discard(name)
+            self.save_settings_button.setEnabled(not self._pending_lifecycle)
+            self._active_lifecycle = None
+            action.setEnabled(True)
+            done(value)
+
+        def failed(message):
+            self._pending_lifecycle.discard(name)
+            self.save_settings_button.setEnabled(not self._pending_lifecycle)
+            self._active_lifecycle = None
+            action.setEnabled(True)
+            self.set_status("warning", "Server operation failed", message)
+
+        if self.busy:
+            self.set_status("warning", title + " — queued", "Waiting for the current operation.")
+        self.task(call, finished, on_error=failed, on_start=starting)
+
+    def _server_started(self, message):
+        self.message.setText(message)
+        self.set_status("online", "Server is running", "Ready for connections.")
+        self.refresh()
 
     def start_daemon(self):
-        def started(message):
-            self.message.setText(message)
-            QMessageBox.information(self, "Success", message)
-
-        self.task(self._start_daemon, started)
+        self._server_task("start", self._start_daemon, "Starting server…", self._server_started)
 
     def stop_daemon(self):
         if not self.require_admin_registration():
             return
-        self.task(
-            lambda: self.client.request("POST", "/admin/shutdown"),
-            lambda _: self.message.setText("Daemon stopping; active supervisors are preserved."),
-            success_message="Shutdown requested. Active job supervisors are preserved.",
+        from ..lifecycle import stop_and_wait
+
+        def stopped(_):
+            self.message.setText("Server is OFF. Active job supervisors are preserved.")
+            self.set_status("offline", "Server is OFF", "Active job supervisors are preserved.")
+
+        self._server_task(
+            "stop", lambda: stop_and_wait(self.client, self.settings.root), "Stopping server…", stopped,
         )
 
     def open_web_ui(self):
@@ -689,22 +776,13 @@ class Dashboard(QDialog):
     def restart_daemon(self):
         if not self.require_admin_registration():
             return
-        def work():
-            self.client.request("POST", "/admin/shutdown")
-            deadline = time.monotonic() + 20
-            health_client = JobServerClient(self.client.url, timeout=2)
-            while time.monotonic() < deadline:
-                try:
-                    health_client.request("GET", "/health", authenticated=False)
-                except Exception:
-                    return
-                time.sleep(0.2)
-            raise TimeoutError("Daemon did not stop; inspect its log before restarting")
+        from ..lifecycle import stop_and_wait
 
-        self.task(
-            work,
-            lambda _: self.start_daemon(),
-        )
+        def work():
+            stop_and_wait(self.client, self.settings.root)
+            return self._start_daemon()
+
+        self._server_task("restart", work, "Restarting server…", self._server_started)
 
     def pause(self, value):
         self.task(
@@ -802,16 +880,6 @@ class Dashboard(QDialog):
 
     def _start_and_sign_in(self, credentials=None):
         self._start_daemon()
-        health = JobServerClient(f"http://127.0.0.1:{self.settings.port}", timeout=1)
-        deadline = time.monotonic() + 20
-        while True:
-            try:
-                health.request("GET", "/health", authenticated=False)
-                break
-            except Exception:
-                if time.monotonic() >= deadline:
-                    raise TimeoutError("Server did not start; open File > Open Logs and check the Python runtime") from None
-                time.sleep(0.2)
         self.require_own_daemon()
         if self.client.key_path.exists():
             self.client.authenticate()

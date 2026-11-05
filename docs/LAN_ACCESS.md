@@ -31,6 +31,19 @@ host before signing in. HTTPS remains recommended. HTTP exposes passwords, beare
 tokens, input files and results to interception or modification on the network.
 Never use router port forwarding or a public tunnel.
 
+## Start, stop and restart
+
+Use **Server > Start**, **Stop (preserve jobs)** or **Restart**. The status banner
+shows the operation in progress and elapsed time. Start confirms the daemon is
+ready before reporting success. Stop confirms that the daemon released its lock;
+Restart waits for that confirmation before starting it again. Running job
+supervisors are preserved.
+
+An operation requested during automatic refresh is queued. Duplicate pending
+server commands are ignored, and their menu item stays disabled until completion.
+Configuration saving is disabled during server operations. A stopped server shows
+**Server is OFF**. Startup failures point to **File > Open Logs > startup.log**.
+
 ## Web access URLs
 
 Enter one browser origin per line in **Web access URLs**. Use this field for

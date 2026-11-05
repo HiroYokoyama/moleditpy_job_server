@@ -164,6 +164,7 @@ def test_gui_start_adopts_saved_port(tmp_path, monkeypatch):
 
     monkeypatch.setattr(dialog.client, "request", offline)
     commands = []
+    monkeypatch.setattr("job_server.lifecycle.wait_until_ready", lambda *args: None)
     monkeypatch.setattr(
         "job_server.ui.dashboard.subprocess.Popen", lambda args, **kwargs: commands.append(args)
     )

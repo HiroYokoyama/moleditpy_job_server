@@ -111,6 +111,96 @@ def test_account_menu_is_available_on_every_tab(dashboard, monkeypatch):
         assert not dashboard.tabs.widget(index).findChildren(QPushButton)
 
 
+def test_start_is_queued_during_refresh_and_runs_once(dashboard, monkeypatch):
+    import threading
+    import time
+    from PySide6.QtWidgets import QApplication
+
+    started, release = threading.Event(), threading.Event()
+    calls = []
+    monkeypatch.setattr(dashboard, "refresh", lambda: None)
+    monkeypatch.setattr(dashboard, "_start_daemon", lambda: calls.append("start") or "Server is running.")
+
+    def background():
+        started.set()
+        assert release.wait(5)
+
+    dashboard.task(background, interactive=False)
+    try:
+        assert started.wait(2)
+        dashboard.start_daemon()
+        dashboard.start_daemon()
+        assert not calls
+        assert not dashboard.start_action.isEnabled()
+        assert not dashboard.save_settings_button.isEnabled()
+        assert "queued" in dashboard.connection_status.text()
+    finally:
+        release.set()
+    deadline = time.monotonic() + 5
+    while dashboard.busy and time.monotonic() < deadline:
+        QApplication.processEvents()
+        time.sleep(0.01)
+    assert calls == ["start"]
+    assert dashboard.start_action.isEnabled()
+    assert dashboard.save_settings_button.isEnabled()
+    assert dashboard.status_level == "online"
+
+
+def test_start_failure_restores_controls_and_reports_error(dashboard, monkeypatch):
+    import time
+    from PySide6.QtWidgets import QApplication, QMessageBox
+
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args: warnings.append(args))
+
+    def failed_start():
+        raise RuntimeError("Server exited during startup")
+
+    monkeypatch.setattr(dashboard, "_start_daemon", failed_start)
+    dashboard.start_daemon()
+    assert "Starting" in dashboard.connection_status.text()
+    assert not dashboard.start_action.isEnabled()
+    deadline = time.monotonic() + 5
+    while dashboard.busy and time.monotonic() < deadline:
+        QApplication.processEvents()
+        time.sleep(0.01)
+    assert dashboard.start_action.isEnabled()
+    assert "failed" in dashboard.connection_status.text()
+    assert warnings and "exited during startup" in dashboard.message.text()
+
+
+def test_offline_refresh_is_a_normal_off_state(dashboard, monkeypatch):
+    from urllib.error import URLError
+
+    def offline(*args, **kwargs):
+        raise URLError(ConnectionRefusedError())
+
+    monkeypatch.setattr(dashboard.client, "request", offline)
+    monkeypatch.setattr(dashboard, "task", lambda work, display, **kwargs: display(work()))
+    dashboard.refresh()
+    assert dashboard.connection_status.text() == "Server is OFF"
+    assert dashboard.message.text() == "Server is OFF. Choose Server > Start."
+
+
+def test_restart_waits_for_stop_before_starting(dashboard, monkeypatch):
+    import time
+    from PySide6.QtWidgets import QApplication
+
+    calls = []
+    monkeypatch.setattr(dashboard, "require_admin_registration", lambda: True)
+    monkeypatch.setattr("job_server.lifecycle.stop_and_wait", lambda *args: calls.append("stop"))
+    monkeypatch.setattr(dashboard, "_start_daemon", lambda: calls.append("start") or "Server is running.")
+    monkeypatch.setattr(dashboard, "refresh", lambda: None)
+    dashboard.restart_daemon()
+    assert "Restarting" in dashboard.connection_status.text()
+    deadline = time.monotonic() + 5
+    while dashboard.busy and time.monotonic() < deadline:
+        QApplication.processEvents()
+        time.sleep(0.01)
+    assert calls == ["stop", "start"]
+    assert dashboard.restart_action.isEnabled()
+
+
 def test_refresh_displays_names_status_and_local_access_time(dashboard, monkeypatch):
     dashboard.client.key_path.parent.mkdir(parents=True, exist_ok=True)
     dashboard.client.key_path.write_text("synthetic placeholder")
