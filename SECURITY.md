@@ -64,15 +64,16 @@ and serializes only the public certificate; no key has an HTTP export endpoint.
 
 CA bootstrap is a separate, unauthenticated GET to a fixed public-certificate path
 on a private HTTPS origin. That request alone permits an unverified TLS transport;
-its response is bounded, redirects/proxies are disabled, and the full SHA-256
-fingerprint supplied from the server PC must match before trust is installed.
+its response is bounded and redirects/proxies are disabled. Job Manager displays the
+full SHA-256 fingerprint and installs trust only after the user confirms it, so
+comparing it with the server PC is what detects interception during bootstrap.
 Normal API requests retain certificate-chain and hostname verification. Windows
 registration explicitly targets CurrentUser ROOT, not LocalMachine. Mac/Linux
 use a saved per-connection CA. OS trust applies to other applications using the
 same store and requires explicit user confirmation. Tests mock store changes.
 Clients and the server refuse a CA unless it has critical name constraints limited
-to private addresses and localhost and allows no intermediate CAs, so a matching
-fingerprint alone cannot install a CA that is able to issue for public names.
+to private addresses and localhost and allows no intermediate CAs, so confirming a
+fingerprint cannot install a CA that is able to issue for public names.
 
 Job commands run as the server's OS account, so they can read that account's
 DPAPI-protected or owner-only CA key. A job submitter can therefore forge

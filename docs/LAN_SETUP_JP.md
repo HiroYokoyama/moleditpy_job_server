@@ -35,7 +35,7 @@ Job Server 0.5.0 は `127.0.0.1` でしか待ち受けません。
 2. **Enable local HTTPS with a persistent local CA** を有効にします。
 3. **LAN listen address** で、この PC の LAN IP を選びます。
 4. 保存して **Server > Restart** を選びます。サーバーが止まっている場合は **Start** です。
-5. **Create / show CA certificate...** を開き、SHA-256 指紋をコピーします。
+5. **Create / show CA certificate...** を開き、SHA-256 指紋を表示しておきます。
 6. LAN IP で待ち受けていることを確認します。
 
    ```powershell
@@ -76,7 +76,8 @@ Job Server 0.5.0 は `127.0.0.1` でしか待ち受けません。
 
 2. Job Manager のホスト設定を開き、**Backend** を **Job Server (HTTPS)** にします。
 3. **Server URL** に `https://192.168.1.20:8767` を入れます。
-4. **Trust local server CA...** を選び、サーバー PC の指紋を貼り付けます。
+4. **Trust local server CA...** を選びます。表示された指紋をサーバー PC の指紋と見比べて、
+   一致しているときだけ **Yes** を選びます。
 5. **Sign in to Job Server...** を選び、ユーザー名とパスワードを入れます。
 
 ## Tailscale

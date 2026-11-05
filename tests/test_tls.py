@@ -15,7 +15,12 @@ from cryptography.x509.oid import NameOID
 
 from job_server.settings import Settings
 from job_server.tls import ca_fingerprint, ca_path, ensure_certificates
-from job_server.trust import fetch_server_ca, validate_ca, trust_windows_user_ca
+from job_server.trust import (
+    certificate_fingerprint,
+    fetch_server_ca,
+    trust_windows_user_ca,
+    validate_ca,
+)
 
 
 def configured(tmp_path):
@@ -51,6 +56,18 @@ def test_incomplete_ca_does_not_silently_rotate_trust(tmp_path):
     ca_path(settings).unlink()
     with pytest.raises(ValueError, match="incomplete"):
         ensure_certificates(settings)
+
+
+def test_displayed_fingerprint_matches_the_server_pc(tmp_path):
+    settings = configured(tmp_path)
+    ensure_certificates(settings)
+    assert certificate_fingerprint(ca_path(settings).read_bytes()) == ca_fingerprint(settings)
+
+
+def test_fingerprint_is_not_displayed_for_an_unconstrained_ca():
+    pem, _ = synthetic_ca(permitted=None)
+    with pytest.raises(ValueError, match="CA must"):
+        certificate_fingerprint(pem)
 
 
 def test_wrong_fingerprint_is_rejected_before_trust(tmp_path):
@@ -179,6 +196,8 @@ def test_https_loopback_origins_are_allowed_only_when_local_https_is_enabled(tmp
 def test_ca_bootstrap_rejects_nonlocal_or_nonhttps_urls(url):
     with pytest.raises(ValueError):
         fetch_server_ca(url, "00" * 32)
+    with pytest.raises(ValueError):
+        fetch_server_ca(url)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows certificate store API")
@@ -247,6 +266,7 @@ def test_native_https_bootstrap_and_verified_authentication(tmp_path):
         wait_until_ready(JobServerClient(local, timeout=1), settings.root, process)
         fingerprint = ca_fingerprint(settings)
         received = fetch_server_ca(settings.tls_url, fingerprint)
+        assert fetch_server_ca(settings.tls_url) == received
         assert received == ca_path(settings).read_bytes()
         downloaded = tmp_path / "downloaded-ca.pem"
         downloaded.write_bytes(received)

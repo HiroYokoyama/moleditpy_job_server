@@ -35,7 +35,7 @@ cannot connect.
 2. Enable **Enable local HTTPS with a persistent local CA**.
 3. Under **LAN listen address**, select the PC's LAN IP.
 4. Save, then choose **Server > Restart**, or **Start** if the server is off.
-5. Open **Create / show CA certificate...** and copy the SHA-256 fingerprint.
+5. Open **Create / show CA certificate...** and keep the SHA-256 fingerprint in view.
 6. Confirm the server is listening on the LAN IP:
 
    ```powershell
@@ -76,7 +76,8 @@ cannot connect.
 
 2. In Job Manager, open the host settings and set **Backend** to **Job Server (HTTPS)**.
 3. Set **Server URL** to `https://192.168.1.20:8767`.
-4. Choose **Trust local server CA...** and paste the fingerprint from the server PC.
+4. Choose **Trust local server CA...**. Compare the displayed fingerprint with the one
+   on the server PC, and choose **Yes** only if they match.
 5. Choose **Sign in to Job Server...** and enter your username and password.
 
 ## Tailscale
