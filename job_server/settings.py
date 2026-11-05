@@ -98,8 +98,8 @@ class Settings:
             if type(self.port) is not int or not 1 <= self.port <= 65535:
                 raise ValueError("A LAN listener requires a port between 1 and 65535")
             self.lan_bind_address = validate_lan_address(self.lan_bind_address)
-            if self.lan_tls and self.allow_lan_http and self.tls_port == self.port:
-                raise ValueError("LAN HTTP and HTTPS require different ports")
+            if self.lan_tls and self.tls_port == self.port:
+                raise ValueError("HTTP and HTTPS require different ports")
 
         if type(self.public_urls) is not list or any(type(url) is not str for url in self.public_urls):
             raise ValueError("public_urls must be a list of origin strings")

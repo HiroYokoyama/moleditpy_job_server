@@ -2,11 +2,16 @@ import os
 import socket
 import subprocess
 import sys
+from datetime import datetime, timedelta, timezone
+from ipaddress import ip_network
 from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
 from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.x509.oid import NameOID
 
 from job_server.settings import Settings
 from job_server.tls import ca_fingerprint, ca_path, ensure_certificates
@@ -53,6 +58,119 @@ def test_wrong_fingerprint_is_rejected_before_trust(tmp_path):
     ensure_certificates(settings)
     with pytest.raises(ValueError, match="fingerprint differs"):
         validate_ca(ca_path(settings).read_bytes(), "00" * 32)
+
+
+def synthetic_ca(path_length=0, permitted=None, critical=True):
+    now = datetime.now(timezone.utc)
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Synthetic CA")])
+    builder = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(minutes=5))
+        .not_valid_after(now + timedelta(days=30))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=path_length), critical=True)
+        .add_extension(
+            x509.KeyUsage(False, False, False, False, False, True, True, False, False),
+            critical=True,
+        )
+    )
+    if permitted is not None:
+        builder = builder.add_extension(
+            x509.NameConstraints(permitted_subtrees=permitted, excluded_subtrees=None),
+            critical=critical,
+        )
+    certificate = builder.sign(key, hashes.SHA256())
+    return (
+        certificate.public_bytes(serialization.Encoding.PEM),
+        certificate.fingerprint(hashes.SHA256()).hex(),
+    )
+
+
+LOCAL = [x509.IPAddress(ip_network("192.168.0.0/16")), x509.DNSName("localhost")]
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"permitted": None},
+        {"permitted": [x509.DNSName("example.org")]},
+        {"permitted": [x509.IPAddress(ip_network("8.8.8.0/24"))]},
+        {"permitted": [*LOCAL, x509.DNSName("example.org")]},
+        {"permitted": LOCAL, "critical": False},
+        {"permitted": LOCAL, "path_length": None},
+        {"permitted": LOCAL, "path_length": 1},
+    ],
+)
+def test_matching_fingerprint_cannot_install_a_ca_able_to_issue_beyond_local(arguments):
+    pem, fingerprint = synthetic_ca(**arguments)
+    with pytest.raises(ValueError, match="CA must"):
+        validate_ca(pem, fingerprint)
+
+
+def test_windows_trust_refuses_an_unconstrained_ca_before_opening_the_store(monkeypatch):
+    pem, fingerprint = synthetic_ca(permitted=None)
+    library = Mock()
+    monkeypatch.setattr("job_server.trust.os.name", "nt")
+    monkeypatch.setattr("job_server.trust.ctypes.WinDLL", library, raising=False)
+    with pytest.raises(ValueError, match="CA must"):
+        trust_windows_user_ca(pem, fingerprint)
+    library.assert_not_called()
+
+
+def test_server_refuses_to_issue_from_an_existing_unconstrained_ca(tmp_path):
+    settings = configured(tmp_path)
+    ensure_certificates(settings)
+    pem, _ = synthetic_ca(permitted=None)
+    ca_path(settings).write_bytes(pem)
+    with pytest.raises(ValueError, match="CA must"):
+        ensure_certificates(settings)
+
+
+def test_replaced_ca_reissues_a_leaf_left_over_from_the_previous_ca(tmp_path):
+    settings = configured(tmp_path)
+    first = ensure_certificates(settings)
+    ca_path(settings).unlink()
+    (settings.root / "tls/ca-key.bin").unlink()
+    second = ensure_certificates(settings)
+    leaf = x509.load_pem_x509_certificate(Path(second["certfile"]).read_bytes())
+    ca = x509.load_pem_x509_certificate(ca_path(settings).read_bytes())
+    leaf.verify_directly_issued_by(ca)
+    assert second["password"] != first["password"]
+
+
+def test_https_port_must_differ_from_the_loopback_http_port(tmp_path):
+    settings = Settings(
+        data_dir=str(tmp_path),
+        lan_tls=True,
+        lan_bind_address="192.168.1.20",
+        port=8767,
+        tls_port=8767,
+    )
+    with pytest.raises(ValueError, match="different ports"):
+        settings.validate()
+
+
+def test_https_loopback_origins_are_allowed_only_when_local_https_is_enabled(tmp_path):
+    from fastapi.testclient import TestClient
+    from job_server.api import create_app
+
+    def status(settings, origin):
+        return (
+            TestClient(create_app(settings, dispatch=False))
+            .get("/api/v1/health", headers={"Origin": origin})
+            .status_code
+        )
+
+    enabled = configured(tmp_path / "enabled")
+    assert status(enabled, f"https://127.0.0.1:{enabled.tls_port}") == 200
+    assert status(enabled, f"https://localhost:{enabled.tls_port}") == 200
+    assert status(enabled, "https://127.0.0.1:1") == 403
+    disabled = Settings(data_dir=str(tmp_path / "disabled"))
+    assert status(disabled, f"https://127.0.0.1:{disabled.tls_port}") == 403
 
 
 @pytest.mark.parametrize(

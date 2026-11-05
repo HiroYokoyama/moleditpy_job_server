@@ -3,9 +3,10 @@
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
-from ipaddress import ip_address, ip_network
+from ipaddress import ip_address
 
 from cryptography import x509
+from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
@@ -13,6 +14,7 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from .credentials import dpapi
 from .files import atomic_write, is_link, open_regular
 from .instance import InstanceLock
+from .trust import CA_PERMITTED_DNS_NAME, CA_PERMITTED_NETWORKS, validate_ca
 
 
 def _read(path):
@@ -52,18 +54,8 @@ def ca_fingerprint(settings):
 def _new_ca(now):
     key = ec.generate_private_key(ec.SECP256R1())
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "MoleditPy Job Server Local CA")])
-    permitted = [
-        x509.IPAddress(ip_network(value))
-        for value in (
-            "10.0.0.0/8",
-            "172.16.0.0/12",
-            "192.168.0.0/16",
-            "fc00::/7",
-            "127.0.0.0/8",
-            "::1/128",
-        )
-    ]
-    permitted.append(x509.DNSName("localhost"))
+    permitted = [x509.IPAddress(network) for network in CA_PERMITTED_NETWORKS]
+    permitted.append(x509.DNSName(CA_PERMITTED_DNS_NAME))
     certificate = (
         x509.CertificateBuilder()
         .subject_name(name)
@@ -122,7 +114,7 @@ def _ensure_locked(settings, directory):
         )
         atomic_write(ca_file, ca.public_bytes(serialization.Encoding.PEM))
     else:
-        ca = x509.load_pem_x509_certificate(_read(ca_file))
+        ca = validate_ca(_read(ca_file))
         ca_key = serialization.load_pem_private_key(_load_secret(ca_key_file), password=None)
         if not isinstance(ca_key, ec.EllipticCurvePrivateKey):
             raise ValueError("Invalid local CA key")
@@ -132,11 +124,6 @@ def _ensure_locked(settings, directory):
             serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
         ):
             raise ValueError("The local CA key does not match its certificate")
-        ca.verify_directly_issued_by(ca)
-        if not ca.extensions.get_extension_for_class(x509.BasicConstraints).value.ca:
-            raise ValueError("The local CA certificate is not a CA")
-        if not ca.not_valid_before_utc <= now < ca.not_valid_after_utc:
-            raise ValueError("The local CA is expired or not yet valid. Renew trust explicitly.")
 
     certificate_file, key_file = directory / "server.pem", directory / "server-key.pem"
     password_file = directory / "server-key-password.bin"
@@ -167,7 +154,7 @@ def _ensure_locked(settings, directory):
                     serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
                 )
             )
-        except (ValueError, TypeError, x509.ExtensionNotFound):
+        except (ValueError, TypeError, x509.ExtensionNotFound, InvalidSignature):
             renew = True
     if renew:
         key = ec.generate_private_key(ec.SECP256R1())

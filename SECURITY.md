@@ -70,6 +70,15 @@ Normal API requests retain certificate-chain and hostname verification. Windows
 registration explicitly targets CurrentUser ROOT, not LocalMachine. Mac/Linux
 use a saved per-connection CA. OS trust applies to other applications using the
 same store and requires explicit user confirmation. Tests mock store changes.
+Clients and the server refuse a CA unless it has critical name constraints limited
+to private addresses and localhost and allows no intermediate CAs, so a matching
+fingerprint alone cannot install a CA that is able to issue for public names.
+
+Job commands run as the server's OS account, so they can read that account's
+DPAPI-protected or owner-only CA key. A job submitter can therefore forge
+certificates for private addresses and localhost on every client that trusts this
+CA, within the name constraints. Allow only trusted users to submit jobs, and
+trust a server's CA only if you trust everyone able to run jobs on that server.
 
 Transfers reject traversal, Windows device names, alternate data streams, reserved wrapper
 paths, links, junctions and hardlinks. Containment checks defend HTTP transfers; they are
