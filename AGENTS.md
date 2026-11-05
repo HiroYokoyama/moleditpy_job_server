@@ -1,7 +1,9 @@
 # Development guidance
 
 Job Server is a LGPL-3.0-or-later LAN computational helper. Keep the default listener off until
-explicit start, bind loopback, and report resource enforcement as advisory.
+explicit start, bind loopback by default, and report resource enforcement as advisory.
+An additional private-interface listener requires an explicit LAN HTTP opt-in and a specific
+private IP address. Keep the loopback listener for local administration; never bind a wildcard.
 
 Run `python -m pytest -q` and `python -m ruff check job_server scripts tests integration setup.py`.
 For integration changes run `python scripts/run_regression.py` against the patched copy.

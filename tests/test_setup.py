@@ -43,6 +43,19 @@ def test_configured_server_skips_automatic_setup_but_guide_remains_available(das
     assert dashboard.setup_dialog.apply_button.text() == "Save configuration"
 
 
+def test_setup_saves_an_explicit_lan_listener(dashboard):
+    dashboard.create_administrator(("fixture-admin", "synthetic-password"))
+    dashboard.open_setup()
+    guide = dashboard.setup_dialog
+    guide.allow_lan_http.setChecked(True)
+    guide.lan_bind_address.addItem("192.168.1.20", "192.168.1.20")
+    guide.lan_bind_address.setCurrentIndex(guide.lan_bind_address.count() - 1)
+    guide.apply()
+    assert not guide.isVisible()
+    saved = Settings.load(dashboard.config)
+    assert saved.allow_lan_http and saved.lan_bind_address == "192.168.1.20"
+
+
 def test_setup_validates_then_creates_and_signs_in_without_second_password_prompt(dashboard, monkeypatch):
     dashboard.open_setup()
     guide = dashboard.setup_dialog
@@ -57,11 +70,11 @@ def test_setup_validates_then_creates_and_signs_in_without_second_password_promp
     assert not calls
     assert not dashboard.has_administrator()
     guide.confirm.setText("x")
-    guide.address.setText("https://compute.example.ts.net/")
+    guide.addresses.setPlainText("https://compute.example.ts.net/")
     guide.apply()
     assert calls == [("admin", "x")]
     assert dashboard.has_administrator()
-    assert Settings.load(dashboard.config).public_url == "https://compute.example.ts.net"
+    assert Settings.load(dashboard.config).connection_urls == ["https://compute.example.ts.net"]
     assert guide.password.text() == guide.confirm.text() == ""
     assert not guide.isVisible()
 

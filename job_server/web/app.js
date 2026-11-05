@@ -58,7 +58,7 @@ async function api(method,path,body,options={}) {
       requireSession(generation);
       if (response.status===401&&!options.public) state.token=null;
       const failure=new Error(error.code==='origin_forbidden'
-        ? 'Remote access needs setup on the server PC. In Job Server, open Settings → Web address and paste '+location.origin+'. Save, then choose Server → Restart.'
+        ? 'Remote access needs setup on the server PC. In Job Server, open Settings → Web access URLs and add '+location.origin+'. Save, then choose Server → Restart.'
         : error.message||'Server request failed');
       failure.status=response.status;failure.code=error.code;throw failure;
     }

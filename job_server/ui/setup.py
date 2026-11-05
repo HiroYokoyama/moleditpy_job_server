@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
 )
 
 from .units import GBSpinBox
+from .network import lan_address_selector
 
 
 class SetupDialog(QDialog):
@@ -28,17 +29,21 @@ class SetupDialog(QDialog):
         note("Set up this server PC. Jobs run as its OS account; allow trusted users only.")
         note("1. Connection — local access works without extra configuration.")
         form = QFormLayout()
-        self.address = QLineEdit(dashboard.public_url.text())
-        self.address.setPlaceholderText("Optional: https://your-pc.your-tailnet.ts.net")
-        form.addRow("Remote Web address", self.address)
         self.addresses = QPlainTextEdit(dashboard.public_urls.toPlainText())
-        self.addresses.setPlaceholderText("Additional origins, one per line")
-        self.addresses.setMaximumHeight(70)
-        form.addRow("Additional Web addresses", self.addresses)
+        self.addresses.setPlaceholderText("One origin per line (LAN / Tailscale / HTTPS proxy)")
+        self.addresses.setMaximumHeight(90)
+        form.addRow("Web access URLs", self.addresses)
         self.allow_lan_http = QCheckBox("Allow trusted LAN HTTP (passwords and jobs are unencrypted)")
         self.allow_lan_http.setChecked(dashboard.allow_lan_http.isChecked())
         form.addRow(self.allow_lan_http)
+        self.lan_bind_address = lan_address_selector(dashboard.lan_bind_address.currentData())
+        self.lan_bind_address.setEnabled(self.allow_lan_http.isChecked())
+        self.allow_lan_http.toggled.connect(self.lan_bind_address.setEnabled)
+        form.addRow("LAN HTTP listen address", self.lan_bind_address)
         layout.addLayout(form)
+        note("For direct LAN HTTP, enable the option and select this PC's private IP. "
+             "Allow the server port in the OS firewall for trusted LAN clients. "
+             "Local only leaves LAN listening disabled.")
         note("For Tailscale, run the command below on this PC and paste its HTTPS URL above. "
              "Use private Tailscale Serve; never Funnel or public port forwarding.")
         command = QLineEdit(f"tailscale serve --bg http://127.0.0.1:{dashboard.settings.port}")
@@ -105,9 +110,14 @@ class SetupDialog(QDialog):
         ):
             self.status.setText("Enter a username and a nonempty password; both passwords must match.")
             return
-        dashboard.public_url.setText(self.address.text().strip())
         dashboard.public_urls.setPlainText(self.addresses.toPlainText())
         dashboard.allow_lan_http.setChecked(self.allow_lan_http.isChecked())
+        address = self.lan_bind_address.currentData()
+        index = dashboard.lan_bind_address.findData(address)
+        if index < 0:
+            dashboard.lan_bind_address.addItem(address, address)
+            index = dashboard.lan_bind_address.findData(address)
+        dashboard.lan_bind_address.setCurrentIndex(index)
         dashboard.fields["cpus"].setValue(self.cpus.value())
         dashboard.fields["memory_mb"].set_mb(self.memory.mb())
         dashboard.python_path.setText(self.python.text().strip())

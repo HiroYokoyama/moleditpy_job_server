@@ -29,11 +29,23 @@ class Settings:
     public_url: str = ""
     public_urls: list[str] = field(default_factory=list)
     allow_lan_http: bool = False
+    lan_bind_address: str = ""
     python_executable: str = ""
 
     @property
     def connection_urls(self):
-        return list(dict.fromkeys(url for url in [self.public_url, *self.public_urls] if url))
+        return list(dict.fromkeys(
+            url for url in [self.public_url, *self.public_urls, self.lan_url] if url
+        ))
+
+    @property
+    def lan_url(self):
+        if not self.lan_bind_address or not self.allow_lan_http:
+            return ""
+        host = self.lan_bind_address
+        if ":" in host:
+            host = f"[{host}]"
+        return f"http://{host}:{self.port}"
 
     @property
     def root(self):
@@ -52,6 +64,16 @@ class Settings:
             if type(getattr(self, key)) is not bool:
                 raise ValueError(f"{key} must be a boolean")
         from .connection import validate_server_url
+        from .listeners import validate_lan_address
+
+        if not isinstance(self.lan_bind_address, str):
+            raise ValueError("lan_bind_address must be a private IP address or empty")
+        if self.lan_bind_address:
+            if not self.allow_lan_http:
+                raise ValueError("Enable LAN HTTP before selecting a LAN listen address")
+            if type(self.port) is not int or not 1 <= self.port <= 65535:
+                raise ValueError("A LAN listener requires a port between 1 and 65535")
+            self.lan_bind_address = validate_lan_address(self.lan_bind_address)
 
         if type(self.public_urls) is not list or any(type(url) is not str for url in self.public_urls):
             raise ValueError("public_urls must be a list of origin strings")

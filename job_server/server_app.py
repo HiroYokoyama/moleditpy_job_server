@@ -4,11 +4,13 @@ import os
 import uvicorn
 
 from .api import create_app
+from .listeners import listener_sockets
 
 
 def serve(settings):
     from .runtime import ensure_secure_dependencies
 
+    settings.validate()
     ensure_secure_dependencies()
     if not settings.allow_privileged:
         if os.name == "nt":
@@ -41,4 +43,8 @@ def serve(settings):
     )
     server = uvicorn.Server(config)
     app.state.shutdown = lambda: setattr(server, "should_exit", True)
-    server.run()
+    try:
+        with listener_sockets(settings) as streams:
+            server.run(sockets=streams)
+    finally:
+        app.state.db.close()

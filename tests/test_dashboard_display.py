@@ -25,8 +25,9 @@ def dashboard(tmp_path):
 def test_multiple_addresses_and_http_opt_in_save_together(dashboard):
     from job_server.settings import Settings
 
-    dashboard.public_url.setText("https://compute.example.ts.net/")
-    dashboard.public_urls.setPlainText("http://192.168.1.2:8080/\nhttps://other.example.ts.net")
+    dashboard.public_urls.setPlainText(
+        "https://compute.example.ts.net/\nhttp://192.168.1.2:8080/\nhttps://other.example.ts.net"
+    )
     assert not dashboard.save_settings()
     dashboard.allow_lan_http.setChecked(True)
     assert dashboard.save_settings()
@@ -43,6 +44,50 @@ def test_copy_connection_addresses_uses_saved_origins(dashboard):
     dashboard.public_urls.setPlainText("https://unsaved.example.org")
     dashboard.copy_connection_addresses()
     assert QApplication.clipboard().text() == "https://compute.example.ts.net"
+
+
+def test_lan_selection_saves_and_copies_the_direct_url(dashboard):
+    from PySide6.QtWidgets import QApplication
+    from job_server.settings import Settings
+
+    assert not dashboard.lan_bind_address.isEnabled()
+    dashboard.allow_lan_http.setChecked(True)
+    assert dashboard.lan_bind_address.isEnabled()
+    dashboard.lan_bind_address.addItem("192.168.1.20", "192.168.1.20")
+    dashboard.lan_bind_address.setCurrentIndex(dashboard.lan_bind_address.count() - 1)
+    assert dashboard.save_settings()
+    saved = Settings.load(dashboard.config)
+    assert saved.lan_bind_address == "192.168.1.20"
+    dashboard.copy_connection_addresses()
+    assert "http://192.168.1.20:8766" in QApplication.clipboard().text()
+    dashboard.allow_lan_http.setChecked(False)
+    assert dashboard.save_settings()
+    assert Settings.load(dashboard.config).lan_bind_address == ""
+
+
+def test_legacy_primary_and_additional_urls_share_one_field(dashboard):
+    from job_server.settings import Settings
+    from job_server.ui.dashboard import Dashboard
+
+    Settings(
+        data_dir=str(dashboard.settings.root),
+        public_url="https://primary.example.org",
+        public_urls=["https://additional.example.org"],
+    ).save(dashboard.config)
+    reopened = Dashboard(config=dashboard.config)
+    reopened.timer.stop()
+    try:
+        assert reopened.public_urls.toPlainText().splitlines() == [
+            "https://primary.example.org", "https://additional.example.org",
+        ]
+        assert reopened.save_settings()
+        saved = Settings.load(dashboard.config)
+        assert saved.public_url == ""
+        assert saved.public_urls == [
+            "https://primary.example.org", "https://additional.example.org",
+        ]
+    finally:
+        reopened.close()
 
 
 def test_account_menu_is_available_on_every_tab(dashboard, monkeypatch):
@@ -152,17 +197,17 @@ def test_disable_uses_hidden_id_instead_of_displayed_username(dashboard, monkeyp
 def test_remote_https_url_can_be_configured_from_gui(dashboard):
     from job_server.settings import Settings
 
-    dashboard.public_url.setText("https://compute.example.ts.net/")
+    dashboard.public_urls.setPlainText("https://compute.example.ts.net/")
     dashboard.save_settings()
-    assert Settings.load(dashboard.config).public_url == "https://compute.example.ts.net"
-    assert dashboard.settings.public_url == "https://compute.example.ts.net"
-    assert dashboard.public_url.text() == "https://compute.example.ts.net"
+    assert Settings.load(dashboard.config).connection_urls == ["https://compute.example.ts.net"]
+    assert dashboard.settings.connection_urls == ["https://compute.example.ts.net"]
+    assert dashboard.public_urls.toPlainText() == "https://compute.example.ts.net"
 
 
 def test_invalid_settings_do_not_change_saved_or_active_configuration(dashboard):
     previous = dashboard.config.read_bytes()
     original = dashboard.settings
-    dashboard.public_url.setText("http://invalid.example")
+    dashboard.public_urls.setPlainText("http://invalid.example")
     dashboard.fields["port"].setValue(8888)
     dashboard.save_settings()
     assert dashboard.config.read_bytes() == previous

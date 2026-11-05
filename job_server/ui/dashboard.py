@@ -40,6 +40,7 @@ from PySide6.QtWidgets import (
 
 from ..client import JobServerClient
 from .units import GBSpinBox, gb
+from .network import lan_address_selector
 from ..settings import Settings
 
 
@@ -274,8 +275,8 @@ class Dashboard(QDialog):
         self.status_dot.setStyleSheet(f"background: {dot}; border-radius: 8px;")
         self.connection_status.setText(headline)
         address = self.client.url
-        if self.settings.public_url:
-            address += "  ·  Web " + self.settings.public_url
+        if self.settings.connection_urls:
+            address += "  ·  Web " + " · ".join(self.settings.connection_urls)
         if version:
             address += "  ·  v" + version
         self.status_detail.setText(address)
@@ -313,7 +314,7 @@ class Dashboard(QDialog):
         form = QFormLayout()
         self.fields = {}
         for key, label, maximum in (
-            ("port", "Private loopback port", 65535),
+            ("port", "Server port", 65535),
             ("cpus", "CPU budget", 4096),
             ("memory_mb", "Memory budget", 2147483647),
             ("max_active_per_user", "Active jobs per user", 10000),
@@ -329,13 +330,10 @@ class Dashboard(QDialog):
                 field.setValue(getattr(self.settings, key))
             self.fields[key] = field
             form.addRow(label, field)
-        self.public_url = QLineEdit(self.settings.public_url)
-        self.public_url.setPlaceholderText("https://server.example.ts.net")
-        form.addRow("Web address (remote access)", self.public_url)
-        self.public_urls = QPlainTextEdit("\n".join(self.settings.public_urls))
-        self.public_urls.setPlaceholderText("One additional origin per line (LAN / Tailscale)")
-        self.public_urls.setMaximumHeight(90)
-        form.addRow("Additional Web addresses", self.public_urls)
+        self.public_urls = QPlainTextEdit("\n".join(self.settings.connection_urls))
+        self.public_urls.setPlaceholderText("One origin per line (LAN / Tailscale / HTTPS proxy)")
+        self.public_urls.setMaximumHeight(110)
+        form.addRow("Web access URLs", self.public_urls)
         self.allow_lan_http = QCheckBox("Allow unencrypted HTTP on trusted LAN addresses")
         self.allow_lan_http.setChecked(self.settings.allow_lan_http)
         self.allow_lan_http.setToolTip(
@@ -343,9 +341,14 @@ class Dashboard(QDialog):
             "Only private IPv4/IPv6 literal addresses are accepted; HTTPS remains recommended."
         )
         form.addRow(self.allow_lan_http)
+        self.lan_bind_address = lan_address_selector(self.settings.lan_bind_address)
+        self.lan_bind_address.setEnabled(self.allow_lan_http.isChecked())
+        self.allow_lan_http.toggled.connect(self.lan_bind_address.setEnabled)
+        form.addRow("LAN HTTP listen address", self.lan_bind_address)
         address_help = QLabel(
             "Paste the HTTPS URL you open in your browser (shown by tailscale serve). "
-            "Register each browser origin above. LAN HTTP requires a private IP address and "
+            "Select a LAN HTTP listen address for direct LAN access. "
+            "Register proxy/browser origins above. LAN HTTP requires a private IP address and "
             "an explicit opt-in; passwords, tokens and jobs are unencrypted. "
             "Save, then choose Server > Restart."
         )
@@ -376,7 +379,8 @@ class Dashboard(QDialog):
         layout.addLayout(runtime)
         layout.addWidget(
             QLabel(
-                "Bind address is always 127.0.0.1. Save takes effect after restarting the daemon.\n"
+                "Local administration uses 127.0.0.1. The optional LAN listener uses the selected IP.\n"
+                "Allow the server port in your OS firewall for trusted LAN clients.\n"
                 "Executor and approved WSL distribution/root can be set in the JSON configuration.\n"
                 "Stopping or reloading the GUI preserves running jobs."
             )
@@ -582,19 +586,25 @@ class Dashboard(QDialog):
 
     def save_settings(self):
         try:
+            urls = [
+                url for url in self.public_urls.toPlainText().split()
+                if url.rstrip("/") != self.settings.lan_url
+            ]
             candidate = replace(
                 self.settings,
                 python_executable=self.python_path.text().strip(),
-                public_url=self.public_url.text().strip(),
-                public_urls=self.public_urls.toPlainText().split(),
+                public_url="",
+                public_urls=urls,
                 allow_lan_http=self.allow_lan_http.isChecked(),
+                lan_bind_address=(
+                    self.lan_bind_address.currentData() if self.allow_lan_http.isChecked() else ""
+                ),
                 **{key: field.mb() if isinstance(field, GBSpinBox) else field.value()
                    for key, field in self.fields.items()},
             )
             candidate.validate().save(self.config)
             self.settings = candidate
-            self.public_url.setText(candidate.public_url)
-            self.public_urls.setPlainText("\n".join(candidate.public_urls))
+            self.public_urls.setPlainText("\n".join(candidate.connection_urls))
             self.message.setText(f"Saved {self.config}. Choose Server > Restart to apply.")
             return True
         except Exception as exc:
