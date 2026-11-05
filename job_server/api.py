@@ -96,8 +96,7 @@ def create_app(settings=None, dispatch=True):
     async def boundary(request, call_next):
         request.state.request_id = str(uuid.uuid4())
         allowed_origins = {f"http://127.0.0.1:{settings.port}", f"http://localhost:{settings.port}"}
-        if settings.public_url:
-            allowed_origins.add(settings.public_url)
+        allowed_origins.update(settings.connection_urls)
         if request.headers.get("origin") and request.headers["origin"] not in allowed_origins:
             return error_response(
                 request, 403, "origin_forbidden", "Browser origins are not permitted"

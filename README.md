@@ -3,14 +3,13 @@
 [![Tests](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/test.yml/badge.svg)](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/test.yml)
 [![Security](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/security.yml/badge.svg)](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/security.yml)
 [![Release](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/release.yml/badge.svg)](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/release.yml)
-[![Version](https://img.shields.io/badge/version-0.4.1-blue)](pyproject.toml)
 [![Downloads](https://img.shields.io/github/downloads/HiroYokoyama/moleditpy_job_server/total)](https://github.com/HiroYokoyama/moleditpy_job_server/releases)
 [![License: GPL v3](https://img.shields.io/badge/License-LGPLv3-blue.svg)](LICENSE)
 [![MoleditPy](https://img.shields.io/badge/MoleditPy-5.x-3577F7)](https://github.com/HiroYokoyama/python_molecular_editor)
 
 A LAN computational helper for MoleditPy Job Manager, with an authenticated shared
 job queue, headless daemon, MoleditPy administration plugin, and browser UI.
-Version **0.4.1**. Access is for trusted users on a private network.
+Access is for trusted users on a private network.
 
 > [!WARNING]
 > **Never expose Job Server to the public internet. Use localhost, a private LAN over HTTPS, or a private Tailscale tailnet only.**
@@ -29,7 +28,7 @@ Job Manager source dependency, rather than a second maintained copy.
 
 ## Use from MoleditPy (plugin workflow)
 
-Install **`job_server_0.4.3.zip`** using MoleditPy's Plugin Installer. Then open
+Install the latest **Job Server ZIP** using MoleditPy's Plugin Installer. Then open
 **Extensions → Job Server…**.
 If required Python libraries are missing, opening a Job Server dialog shows their
 names and installation guidance. Install them in MoleditPy's Python environment
@@ -152,7 +151,7 @@ The listener starts only on explicit `serve` or GUI Start and binds **127.0.0.1*
 python scripts/build_plugin.py
 ```
 
-Install `dist/job_server_0.4.3.zip` using MoleditPy's Plugin Installer. Open
+Install the generated Job Server ZIP in `dist/` using MoleditPy's Plugin Installer. Open
 **Extensions → Job Server…**. The GUI can bootstrap the first
 administrator, start/stop/restart the daemon, pause/resume the queue, manage accounts
 and device keys, and cancel jobs. Reloading or closing the plugin does not stop the daemon.
@@ -185,6 +184,37 @@ The companion is generated from the audited upstream commit and an explicit inte
 overlay. It does not change your sibling Job Manager repository or its upstream branch.
 `integration/job_manager.patch` records changes for upstream review;
 `integration/server_backend.py` is the additional bridge module.
+
+### Multiple connection addresses and optional LAN HTTP
+
+Keep `public_url` as the primary Web address and add other origins to `public_urls`
+(one per line in Settings or the setup guide). Each origin is explicitly allowed for
+browser requests; no wildcard origins are accepted. Existing configurations still work.
+Server > Copy connection addresses copies the saved origins for sharing.
+
+HTTPS remains recommended. On a trusted LAN, enable **Allow unencrypted HTTP** in
+Settings and set an origin such as `http://192.168.1.20:8080`. HTTP accepts only
+literal RFC 1918 IPv4 addresses or IPv6 ULA addresses, never public IPs, hostnames,
+link-local or unspecified addresses. Passwords, bearer tokens and job contents are
+unencrypted: device signatures do not encrypt traffic or prevent interception.
+Restrict the proxy/firewall to trusted LAN clients. Never forward router ports.
+
+The daemon still binds only to loopback. Put a private LAN HTTP reverse proxy on
+this same PC, listening on the chosen private address and forwarding to
+`http://127.0.0.1:8766`; configuring an origin does not open a LAN listener.
+Save and restart the server after configuration changes.
+
+Python clients must opt in separately:
+
+```python
+client = JobServerClient("http://192.168.1.20:8080", "device.key", allow_lan_http=True)
+```
+
+The generated development companion adds a per-host **Allow trusted LAN HTTP**
+checkbox, used for enrollment and subsequent connections. Use a Job Manager release that includes the matching per-host LAN HTTP option;
+older Job Manager releases require HTTPS for remote connections.
+HTTPS and localhost remain compatible with existing clients. HTTP clients bypass
+environment proxies and refuse redirects to keep credentials on the selected origin.
 
 ### HTTPS on a private LAN or Tailscale tailnet
 

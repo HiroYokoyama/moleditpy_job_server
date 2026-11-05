@@ -11,6 +11,8 @@ from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal, Qt
 from PySide6.QtGui import QIcon, QAction, QBrush, QColor
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
+    QPlainTextEdit,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -144,6 +146,7 @@ class Dashboard(QDialog):
         action(server, "Restart", self.restart_daemon)
         server.addSeparator()
         action(server, "Refresh", self.refresh)
+        action(server, "Copy connection addresses", self.copy_connection_addresses)
         action(server, "Copy Tailscale Serve command", lambda: QApplication.clipboard().setText(
             f"tailscale serve --bg http://127.0.0.1:{self.settings.port}"))
         account = self.menu_bar.addMenu("Account")
@@ -162,6 +165,11 @@ class Dashboard(QDialog):
         self.force_action = action(queue, "Force run selected job...", lambda: self.force_run(True))
         self.unforce_action = action(queue, "Cancel force-run request", lambda: self.force_run(False))
         action(queue, "Cancel selected job", self.cancel)
+
+    def copy_connection_addresses(self):
+        urls = self.settings.connection_urls or [f"http://127.0.0.1:{self.settings.port}"]
+        QApplication.clipboard().setText("\n".join(urls))
+        self.message.setText(f"Copied {len(urls)} connection address(es). No credentials included.")
 
     def open_logs(self):
         from PySide6.QtCore import QUrl
@@ -324,9 +332,22 @@ class Dashboard(QDialog):
         self.public_url = QLineEdit(self.settings.public_url)
         self.public_url.setPlaceholderText("https://server.example.ts.net")
         form.addRow("Web address (remote access)", self.public_url)
+        self.public_urls = QPlainTextEdit("\n".join(self.settings.public_urls))
+        self.public_urls.setPlaceholderText("One additional origin per line (LAN / Tailscale)")
+        self.public_urls.setMaximumHeight(90)
+        form.addRow("Additional Web addresses", self.public_urls)
+        self.allow_lan_http = QCheckBox("Allow unencrypted HTTP on trusted LAN addresses")
+        self.allow_lan_http.setChecked(self.settings.allow_lan_http)
+        self.allow_lan_http.setToolTip(
+            "Passwords, tokens and job data are readable on the network. "
+            "Only private IPv4/IPv6 literal addresses are accepted; HTTPS remains recommended."
+        )
+        form.addRow(self.allow_lan_http)
         address_help = QLabel(
             "Paste the HTTPS URL you open in your browser (shown by tailscale serve). "
-            "Leave blank for local access only. Save, then choose Server > Restart."
+            "Register each browser origin above. LAN HTTP requires a private IP address and "
+            "an explicit opt-in; passwords, tokens and jobs are unencrypted. "
+            "Save, then choose Server > Restart."
         )
         address_help.setWordWrap(True)
         form.addRow(address_help)
@@ -565,12 +586,15 @@ class Dashboard(QDialog):
                 self.settings,
                 python_executable=self.python_path.text().strip(),
                 public_url=self.public_url.text().strip(),
+                public_urls=self.public_urls.toPlainText().split(),
+                allow_lan_http=self.allow_lan_http.isChecked(),
                 **{key: field.mb() if isinstance(field, GBSpinBox) else field.value()
                    for key, field in self.fields.items()},
             )
             candidate.validate().save(self.config)
             self.settings = candidate
             self.public_url.setText(candidate.public_url)
+            self.public_urls.setPlainText("\n".join(candidate.public_urls))
             self.message.setText(f"Saved {self.config}. Choose Server > Restart to apply.")
             return True
         except Exception as exc:
@@ -650,7 +674,7 @@ class Dashboard(QDialog):
         from PySide6.QtCore import QUrl
         from PySide6.QtGui import QDesktopServices
 
-        QDesktopServices.openUrl(QUrl(self.settings.public_url or self.client.url))
+        QDesktopServices.openUrl(QUrl(next(iter(self.settings.connection_urls), self.client.url)))
 
     def restart_daemon(self):
         if not self.require_admin_registration():

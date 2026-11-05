@@ -9,12 +9,11 @@ from scripts.build_job_manager import build
 def test_companion_job_manager_routes_use_backend_not_transport(tmp_path):
     target = tmp_path / "job_manager"
     patch = build(target)
-    assert patch == ""
+    assert "server_allow_lan_http" in patch
     assert "Job Server (HTTPS)" in (target / "host_profile_form.py").read_text("utf-8")
-    assert (target / "server_backend.py").read_bytes() == (
-        Path(__file__).resolve().parents[1]
-        / "upstream/job_manager/job_manager/server_backend.py"
-    ).read_bytes()
+    assert (target / "job_server_client/connection.py").read_text("utf-8") == (
+        Path(__file__).resolve().parents[1] / "job_server/connection.py"
+    ).read_text("utf-8")
     code = r"""
 import os
 os.environ['QT_QPA_PLATFORM']='offscreen'
@@ -25,6 +24,12 @@ host=HostProfile(backend='job_server',server_url='https://compute.example.org',s
 assert host.is_job_server and not host.uses_remote_runner
 assert HostProfile.from_dict(host.to_dict()).server_url==host.server_url
 assert host.target==host.server_url
+lan=HostProfile(backend='job_server',server_url='http://192.168.1.4:8766',server_allow_lan_http=True)
+assert HostProfile.from_dict(lan.to_dict()).server_allow_lan_http
+from job_manager.server_backend import validate_server_url
+assert validate_server_url(lan.server_url, True)==lan.server_url
+from job_manager.job_server_client.client import JobServerClient
+assert JobServerClient(lan.server_url, allow_lan_http=True).url==lan.server_url
 job=Job(server_job_id='remote',server_id='server',owner_user_id='owner',execution_os='linux')
 assert Job.from_dict(job.to_dict()).server_job_id=='remote'
 from job_manager.poller import _PollTask
@@ -49,6 +54,9 @@ index=dialog.cmb_backend.findData('job_server')
 assert index>=0
 dialog.cmb_backend.setCurrentIndex(index)
 assert 'LAN computational helper' in dialog.lbl_backend_hint.text()
+dialog.profile_form.chk_server_lan_http.setChecked(True)
+dialog.profile_form.txt_server_url.setText(lan.server_url)
+assert dialog.profile_form._collect(HostProfile()).server_allow_lan_http
 dialog.close()
 service.shutdown()
 print('companion integration passed')

@@ -1,0 +1,131 @@
+--- a/job_manager/host_profile_form.py
++++ b/job_manager/host_profile_form.py
+@@ -153,0 +154,3 @@
++        self.chk_server_lan_http = QCheckBox("Allow trusted LAN HTTP (unencrypted)")
++        self.chk_server_lan_http.setToolTip("Passwords, tokens and job data are readable on the network. Private IP addresses only.")
++        form.addRow("", self.chk_server_lan_http)
+@@ -335,0 +339 @@
++            allow_lan_http=self.chk_server_lan_http.isChecked(),
+@@ -345,0 +350 @@
++            self.chk_server_lan_http,
+@@ -356,0 +362 @@
++        host.server_allow_lan_http = self.chk_server_lan_http.isChecked()
+@@ -406 +412 @@
+-            host.server_url = validate_server_url(host.server_url) if host.server_url else ""
++            host.server_url = validate_server_url(host.server_url, host.server_allow_lan_http) if host.server_url else ""
+--- a/job_manager/hosts_dialog.py
++++ b/job_manager/hosts_dialog.py
+@@ -279,0 +280 @@
++        self.profile_form.chk_server_lan_http.setChecked(False)
+@@ -325,0 +327 @@
++        self.profile_form.chk_server_lan_http.setChecked(host.server_allow_lan_http)
+--- a/job_manager/job_server_client/client.py
++++ b/job_manager/job_server_client/client.py
+@@ -13,0 +14 @@
++from .connection import validate_server_url
+@@ -30 +31,2 @@
+-    def __init__(self, url, key_path=None, ca_file=None, server_id=None, timeout=30):
++    def __init__(self, url, key_path=None, ca_file=None, server_id=None, timeout=30, *, allow_lan_http=False):
++        url = validate_server_url(url, allow_lan_http)
+@@ -32,7 +34 @@
+-        if parts.username or parts.password or parts.query or parts.fragment or not parts.hostname:
+-            raise ValueError("Invalid server URL")
+-        if parts.scheme != "https" and not (
+-            parts.scheme == "http" and parts.hostname in {"127.0.0.1", "localhost", "::1"}
+-        ):
+-            raise ValueError("HTTPS is required except for same-machine loopback")
+-        self.url = url.rstrip("/")
++        self.url = url
+@@ -42 +38 @@
+-        if parts.hostname in {"127.0.0.1", "localhost", "::1"}:
++        if parts.scheme == "http" or parts.hostname in {"127.0.0.1", "localhost", "::1"}:
+--- a/job_manager/job_server_client/connection.py
++++ b/job_manager/job_server_client/connection.py
+@@ -0,0 +1,30 @@
++"""Shared origin validation; LAN HTTP is an explicit, literal-address exception."""
++
++from ipaddress import ip_address, ip_network
++from urllib.parse import urlsplit
++
++
++def validate_server_url(url, allow_lan_http=False):
++    if type(allow_lan_http) is not bool:
++        raise ValueError("allow_lan_http must be a boolean")
++    parts = urlsplit(url)
++    if (not parts.hostname or parts.username is not None or parts.password is not None
++            or parts.query or parts.fragment or parts.path not in {"", "/"}
++            or any(c.isspace() or ord(c) < 32 for c in url) or "\\" in url):
++        raise ValueError("Use a server origin without credentials, paths or query strings")
++    if parts.port is not None and not 1 <= parts.port <= 65535:
++        raise ValueError("Invalid server port")
++    loopback = parts.hostname in {"localhost", "127.0.0.1", "::1"}
++    lan = False
++    try:
++        address = ip_address(parts.hostname)
++        lan = any(address in ip_network(network) for network in (
++            "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7"
++        )) and "%" not in parts.hostname
++    except ValueError:
++        pass
++    if parts.scheme != "https" and not (
++        parts.scheme == "http" and (loopback or (allow_lan_http and lan))
++    ):
++        raise ValueError("Use HTTPS, or enable LAN HTTP for a private IPv4/IPv6 literal address")
++    return parts._replace(scheme=parts.scheme.lower(), netloc=parts.netloc.lower(), path="").geturl()
+--- a/job_manager/job_server_client/PROVENANCE.json
++++ b/job_manager/job_server_client/PROVENANCE.json
+@@ -6 +6 @@
+-    "client.py": "6f4af968059e8f46be7ef3d6eeb9b5b65cd10d3f94984e62f50da2a26daa6bb0",
++    "client.py": "60f57935c920f5b4db9a60b15738129257260a66eb9169ea69a6816b87acfa4e",
+@@ -11 +11,2 @@
+-    "__init__.py": "1722f977899ed656e6c96794f308eb2bc66d387b77e635b07dc15ca61f28f7cb"
++    "__init__.py": "1722f977899ed656e6c96794f308eb2bc66d387b77e635b07dc15ca61f28f7cb",
++    "connection.py": "0bd62e99c67c2004e667f9e20d196096c1c5c990aaed86d52f835245ebef7df3"
+@@ -14 +15,2 @@
+-  "additional_permission": "Copyright holder grant in LICENSING.md for the pinned first-party client copies."
++  "additional_permission": "Copyright holder grant in LICENSING.md for the pinned first-party client copies.",
++  "local_overlay": "Private LAN HTTP support from integration/lan_http.py"
+--- a/job_manager/models.py
++++ b/job_manager/models.py
+@@ -297,0 +298 @@
++    server_allow_lan_http: bool = False
+--- a/job_manager/server_backend.py
++++ b/job_manager/server_backend.py
+@@ -9 +9 @@
+-from urllib.parse import urlsplit
++from .job_server_client.connection import validate_server_url
+@@ -32,20 +31,0 @@
+-def validate_server_url(url):
+-    parts = urlsplit(url)
+-    if (
+-        not parts.hostname
+-        or parts.username
+-        or parts.password
+-        or parts.query
+-        or parts.fragment
+-        or parts.path not in {"", "/"}
+-    ):
+-        raise ValueError("Use a Job Server origin without credentials, paths or query strings")
+-    if parts.port is not None and not 1 <= parts.port <= 65535:
+-        raise ValueError("Invalid server port")
+-    if parts.scheme != "https" and not (
+-        parts.scheme == "http" and parts.hostname in {"localhost", "127.0.0.1", "::1"}
+-    ):
+-        raise ValueError("HTTPS is required for LAN/Tailscale; HTTP is allowed only on localhost")
+-    return url.rstrip("/")
+-
+-
+@@ -56 +36 @@
+-def show_enrollment(parent, url, key_field, ca_file, on_done=None):
++def show_enrollment(parent, url, key_field, ca_file, on_done=None, *, allow_lan_http=False):
+@@ -64 +44 @@
+-        url = validate_server_url(url)
++        url = validate_server_url(url, allow_lan_http)
+@@ -87 +67 @@
+-        client = JobServerClient(url, path, ca_file or None)
++        client = JobServerClient(url, path, ca_file or None, allow_lan_http=allow_lan_http)
+@@ -120 +100 @@
+-            validate_server_url(host.server_url),
++            validate_server_url(host.server_url, host.server_allow_lan_http),
+@@ -123,0 +104 @@
++            allow_lan_http=host.server_allow_lan_http,

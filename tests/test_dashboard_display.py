@@ -22,6 +22,29 @@ def dashboard(tmp_path):
     app.processEvents()
 
 
+def test_multiple_addresses_and_http_opt_in_save_together(dashboard):
+    from job_server.settings import Settings
+
+    dashboard.public_url.setText("https://compute.example.ts.net/")
+    dashboard.public_urls.setPlainText("http://192.168.1.2:8080/\nhttps://other.example.ts.net")
+    assert not dashboard.save_settings()
+    dashboard.allow_lan_http.setChecked(True)
+    assert dashboard.save_settings()
+    saved = Settings.load(dashboard.config)
+    assert saved.allow_lan_http
+    assert len(saved.connection_urls) == 3
+
+
+def test_copy_connection_addresses_uses_saved_origins(dashboard):
+    from PySide6.QtWidgets import QApplication
+
+    dashboard.public_urls.setPlainText("https://compute.example.ts.net/")
+    assert dashboard.save_settings()
+    dashboard.public_urls.setPlainText("https://unsaved.example.org")
+    dashboard.copy_connection_addresses()
+    assert QApplication.clipboard().text() == "https://compute.example.ts.net"
+
+
 def test_account_menu_is_available_on_every_tab(dashboard, monkeypatch):
     assert dashboard.windowTitle() == "Job Server"
     assert [action.text() for action in dashboard.menu_bar.actions()] == [

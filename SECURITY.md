@@ -27,7 +27,15 @@ transaction atomically prevents creation when an enabled administrator exists.
 There is no unauthenticated HTTP bootstrap endpoint.
 
 The daemon binds loopback and refuses elevated execution except an explicit isolated-test
-override. Private LAN/Tailscale clients must use validated HTTPS terminating on the same host.
+override. Private LAN/Tailscale clients use validated HTTPS by default, terminating on the same host.
+An explicit `allow_lan_http` exception permits unencrypted HTTP to literal RFC 1918 IPv4
+or IPv6 ULA addresses through a private same-host reverse proxy. Clients opt in separately,
+bypass environment proxies for HTTP and refuse redirects. DNS names and public, link-local,
+unspecified and reserved IP addresses are excluded from the exception. Enrollment passwords,
+bearer tokens and job contents are visible to anyone able to intercept that LAN traffic;
+Ed25519 authentication does not provide transport confidentiality or prevent active interception.
+Only use this exception on a trusted LAN with a restricted proxy/firewall. All registered
+`public_url`/`public_urls` origins are checked exactly; adding an origin never opens a listener.
 Forwarded headers are ignored. Only exact configured browser origins are accepted;
 there is no permissive CORS response. Web sign-in uses password verification and a short-lived opaque token held only in
 tab-scoped session storage for reload recovery. It does not save passwords or
