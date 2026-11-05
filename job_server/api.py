@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, Header, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from starlette.exceptions import HTTPException
@@ -27,7 +27,8 @@ from .settings import Settings
 def create_app(settings=None, dispatch=True):
     settings = (settings or Settings()).validate()
     db = Database(settings.root)
-    auth, jobs = Auth(db, settings), Jobs(db, settings)
+    auth = Auth(db, settings)
+    jobs = Jobs(db, settings, auth)
     scheduler = Scheduler(db, jobs, settings)
     lock = InstanceLock(settings.root, port=settings.port)
 
@@ -96,6 +97,10 @@ def create_app(settings=None, dispatch=True):
     async def boundary(request, call_next):
         request.state.request_id = str(uuid.uuid4())
         allowed_origins = {f"http://127.0.0.1:{settings.port}", f"http://localhost:{settings.port}"}
+        if settings.lan_tls:
+            allowed_origins.update(
+                {f"https://127.0.0.1:{settings.tls_port}", f"https://localhost:{settings.tls_port}"}
+            )
         allowed_origins.update(settings.connection_urls)
         if request.headers.get("origin") and request.headers["origin"] not in allowed_origins:
             return error_response(
@@ -159,7 +164,23 @@ def create_app(settings=None, dispatch=True):
 
     @app.get(prefix + "/health")
     def health():
-        return {"status": "ok", "api_version": "1", "server_version": PLUGIN_VERSION}
+        ready = getattr(app.state, "listeners_ready", lambda: True)()
+        return {"status": "ok" if ready else "starting", "api_version": "1", "server_version": PLUGIN_VERSION}
+
+    @app.get(prefix + "/tls/ca")
+    def public_ca():
+        from .tls import ca_path, _read
+
+        if not settings.lan_tls or not ca_path(settings).is_file():
+            reject(404, "not_found", "Local HTTPS is not configured")
+        from .trust import validate_ca
+        from cryptography.hazmat.primitives import serialization
+
+        certificate = validate_ca(_read(ca_path(settings)))
+        return Response(
+            certificate.public_bytes(serialization.Encoding.PEM), media_type="application/x-pem-file",
+            headers={"Content-Disposition": 'attachment; filename="job-server-ca.pem"'},
+        )
 
     @app.get(prefix + "/capabilities")
     def capabilities(p=Depends(principal)):

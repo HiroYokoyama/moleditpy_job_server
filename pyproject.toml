@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "moleditpy-job-server"
-version = "0.5.0"
+version = "0.6.0"
 description = "MoleditPy authenticated job server — LAN computational helper"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -30,7 +30,7 @@ Issues = "https://github.com/HiroYokoyama/moleditpy_job_server/issues"
 include = ["job_server*"]
 
 [tool.setuptools.package-data]
-job_server = ["web/*.html", "web/*.css", "web/*.js", "web/*.png"]
+job_server = ["web/*.html", "web/*.css", "web/*.js", "web/*.png", "web/*.txt", "web/*.json"]
 
 [tool.ruff]
 target-version = "py311"

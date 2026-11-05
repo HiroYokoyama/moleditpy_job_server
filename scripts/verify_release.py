@@ -44,7 +44,7 @@ def safe_members(names):
             raise ValueError("Archive contains an unsafe path")
         if any(part in {"__pycache__", ".git", "test-results"} for part in path.parts):
             raise ValueError("Archive contains development artifacts")
-        if path.name in {"server.db", "settings.json"} or path.suffix in {".key", ".pem", ".env"}:
+        if path.name in {"server.db", "settings.json", "ca-key.bin", "server-key-password.bin"} or path.suffix in {".key", ".pem", ".env"}:
             raise ValueError("Archive contains runtime credentials or configuration")
 
 
@@ -61,6 +61,8 @@ def verify_artifacts(version, root=ROOT):
         safe_members(archive.namelist())
         archive.getinfo("job_server/_execution/schedulers/base.py")
         archive.getinfo("job_server/web/app.js")
+        for name in ("sha256.min.js", "sha256.LICENSE.txt", "sha256.PROVENANCE.json"):
+            archive.getinfo("job_server/web/" + name)
     with tarfile.open(source) as archive:
         safe_members(archive.getnames())
         if any(member.issym() or member.islnk() for member in archive.getmembers()):

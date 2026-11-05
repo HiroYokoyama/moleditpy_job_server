@@ -36,6 +36,8 @@ def test_release_checksums_cover_only_distributed_assets(tmp_path):
     with ZipFile(wheel, "w") as archive:
         archive.writestr("job_server/_execution/schedulers/base.py", "fixture")
         archive.writestr("job_server/web/app.js", "fixture")
+        for name in ("sha256.min.js", "sha256.LICENSE.txt", "sha256.PROVENANCE.json"):
+            archive.writestr("job_server/web/" + name, "fixture")
     with tarfile.open(source, "w:gz"):
         pass
     assets = [server, wheel, source]
@@ -65,7 +67,7 @@ def test_release_accepts_matching_source_version():
 
 
 @pytest.mark.parametrize(
-    "path", ["../outside", "/absolute", "x\\file", "x/.git/config", "x/device.key"]
+    "path", ["../outside", "/absolute", "x\\file", "x/.git/config", "x/device.key", "tls/ca-key.bin", "tls/server-key-password.bin"]
 )
 def test_artifact_paths_reject_escape_and_credentials(path):
     with pytest.raises(ValueError):

@@ -28,7 +28,7 @@ def main():
         if (
             name.startswith(("test-results/", "dist/", "build/"))
             or name.endswith((".db", ".key", ".pem", ".p12", ".env"))
-            or Path(name).name == "settings.json"
+            or Path(name).name in {"settings.json", "ca-key.bin", "server-key-password.bin"}
         ):
             issues.append((name, "Unexpected runtime/credential artifact in index"))
             continue

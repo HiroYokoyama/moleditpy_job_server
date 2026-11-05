@@ -9,6 +9,7 @@ import pytest
 from job_server.auth import signing_message
 from .conftest import enroll
 from .test_security import new_device
+from .conftest import reserve
 
 
 @pytest.mark.parametrize("action", ["revoke", "disable"])
@@ -146,3 +147,42 @@ def test_admin_writes_recheck_revoked_session(client, alice, monkeypatch, operat
     assert client.get("/api/v1/me", headers=alice["headers"]).status_code == 200
     assert client.app.state.db.metadata("paused") == "false"
     assert shutdowns == []
+
+
+@pytest.mark.parametrize("operation", ["create", "upload", "commit", "cancel"])
+@pytest.mark.parametrize("action", ["revoke", "disable"])
+def test_job_writes_recheck_session_after_dependency(client, alice, monkeypatch, operation, action):
+    import hashlib
+
+    job_id = None
+    if operation != "create":
+        files = [{"path": "input.txt", "size": 1, "sha256": hashlib.sha256(b"x").hexdigest()}]
+        job_id = reserve(client, alice, files=files if operation == "upload" else []).json()["id"]
+    auth = client.app.state.auth
+    original = auth.principal
+
+    def revoke_after_dependency(*args, **kwargs):
+        principal = original(*args, **kwargs)
+        if action == "revoke":
+            auth.revoke(alice["device_id"], alice["user"]["id"])
+        else:
+            with client.app.state.db.transaction() as connection:
+                connection.execute("UPDATE users SET enabled=0 WHERE id=?", (alice["user"]["id"],))
+                connection.execute("DELETE FROM sessions WHERE user_id=?", (alice["user"]["id"],))
+        return principal
+
+    monkeypatch.setattr(auth, "principal", revoke_after_dependency)
+    if operation == "create":
+        response = reserve(client, alice)
+    elif operation == "upload":
+        response = client.put(
+            f"/api/v1/jobs/{job_id}/files/input.txt", content=b"x", headers=alice["headers"]
+        )
+    else:
+        response = client.post(f"/api/v1/jobs/{job_id}/{operation}", headers=alice["headers"])
+    assert response.status_code == 401
+    if job_id:
+        assert client.app.state.db.one("SELECT state FROM jobs WHERE id=?", (job_id,))["state"] == "UPLOADING"
+        assert not (client.app.state.jobs.directory(job_id, True) / "input.txt").exists()
+    else:
+        assert client.app.state.db.rows("SELECT id FROM jobs") == []
