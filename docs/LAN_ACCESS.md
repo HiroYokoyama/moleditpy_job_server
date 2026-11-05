@@ -1,5 +1,7 @@
 # LAN access
 
+For a step-by-step setup, see [LAN_SETUP.md](LAN_SETUP.md) ([日本語](LAN_SETUP_JP.md)).
+
 ## Local HTTPS
 
 1. Open **Job Server > Settings**.
