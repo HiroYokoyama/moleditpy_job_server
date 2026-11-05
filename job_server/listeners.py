@@ -43,8 +43,21 @@ def available_lan_addresses():
 def listener_sockets(settings):
     settings.validate()
     addresses = ["127.0.0.1"]
-    if settings.lan_bind_address:
+    if settings.lan_bind_address and settings.allow_lan_http:
         addresses.append(settings.lan_bind_address)
+    with bound_sockets(addresses, settings.port) as streams:
+        yield streams
+
+
+@contextmanager
+def tls_listener_sockets(settings):
+    settings.validate()
+    with bound_sockets(["127.0.0.1", settings.lan_bind_address], settings.tls_port) as streams:
+        yield streams
+
+
+@contextmanager
+def bound_sockets(addresses, port):
     with ExitStack() as stack:
         streams = []
         for address in addresses:
@@ -57,10 +70,10 @@ def listener_sockets(settings):
             if family == socket.AF_INET6:
                 stream.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
             try:
-                stream.bind((address, settings.port))
+                stream.bind((address, port))
             except OSError as exc:
                 raise RuntimeError(
-                    f"Cannot listen on {address}:{settings.port}. "
+                    f"Cannot listen on {address}:{port}. "
                     "Select an address assigned to this PC and an unused port."
                 ) from exc
             streams.append(stream)

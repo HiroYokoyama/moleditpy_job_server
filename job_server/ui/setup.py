@@ -33,15 +33,26 @@ class SetupDialog(QDialog):
         self.addresses.setPlaceholderText("One origin per line (LAN / Tailscale / HTTPS proxy)")
         self.addresses.setMaximumHeight(90)
         form.addRow("Web access URLs", self.addresses)
+        self.lan_tls = QCheckBox("Enable local HTTPS with a persistent local CA")
+        self.lan_tls.setChecked(dashboard.lan_tls.isChecked())
+        form.addRow(self.lan_tls)
+        self.tls_port = QSpinBox()
+        self.tls_port.setRange(1, 65535)
+        self.tls_port.setValue(dashboard.fields["tls_port"].value())
+        form.addRow("HTTPS port", self.tls_port)
         self.allow_lan_http = QCheckBox("Allow trusted LAN HTTP (passwords and jobs are unencrypted)")
         self.allow_lan_http.setChecked(dashboard.allow_lan_http.isChecked())
         form.addRow(self.allow_lan_http)
         self.lan_bind_address = lan_address_selector(dashboard.lan_bind_address.currentData())
-        self.lan_bind_address.setEnabled(self.allow_lan_http.isChecked())
-        self.allow_lan_http.toggled.connect(self.lan_bind_address.setEnabled)
-        form.addRow("LAN HTTP listen address", self.lan_bind_address)
+        def update_lan_fields():
+            self.lan_bind_address.setEnabled(self.allow_lan_http.isChecked() or self.lan_tls.isChecked())
+
+        self.allow_lan_http.toggled.connect(update_lan_fields)
+        self.lan_tls.toggled.connect(update_lan_fields)
+        update_lan_fields()
+        form.addRow("LAN listen address", self.lan_bind_address)
         layout.addLayout(form)
-        note("For direct LAN HTTP, enable the option and select this PC's private IP. "
+        note("For direct LAN access, enable local HTTPS or trusted LAN HTTP and select this PC's private IP. "
              "Allow the server port in the OS firewall for trusted LAN clients. "
              "Local only leaves LAN listening disabled.")
         note("For Tailscale, run the command below on this PC and paste its HTTPS URL above. "
@@ -112,6 +123,8 @@ class SetupDialog(QDialog):
             return
         dashboard.public_urls.setPlainText(self.addresses.toPlainText())
         dashboard.allow_lan_http.setChecked(self.allow_lan_http.isChecked())
+        dashboard.lan_tls.setChecked(self.lan_tls.isChecked())
+        dashboard.fields["tls_port"].setValue(self.tls_port.value())
         address = self.lan_bind_address.currentData()
         index = dashboard.lan_bind_address.findData(address)
         if index < 0:

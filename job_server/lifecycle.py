@@ -20,17 +20,18 @@ def directory_is_idle(root):
 def wait_until_ready(client, root, process, timeout=20):
     deadline = time.monotonic() + timeout
     while True:
-        if process.poll() is not None:
+        if process is not None and process.poll() is not None:
             raise RuntimeError("Server exited during startup. Open File > Open Logs > startup.log.")
         try:
-            client.request("GET", "/health", authenticated=False)
+            health = client.request("GET", "/health", authenticated=False)
         except (OSError, HTTPException, ValueError):
             pass
         else:
             from urllib.parse import urlsplit
 
-            verify_local_daemon(root, urlsplit(client.url).port)
-            return
+            if health.get("status") == "ok":
+                verify_local_daemon(root, urlsplit(client.url).port)
+                return
         if time.monotonic() >= deadline:
             raise TimeoutError("Server did not become ready. Open File > Open Logs > startup.log.")
         time.sleep(0.15)

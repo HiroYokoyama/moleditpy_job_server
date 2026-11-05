@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, Header, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from starlette.exceptions import HTTPException
@@ -160,7 +160,19 @@ def create_app(settings=None, dispatch=True):
 
     @app.get(prefix + "/health")
     def health():
-        return {"status": "ok", "api_version": "1", "server_version": PLUGIN_VERSION}
+        ready = getattr(app.state, "listeners_ready", lambda: True)()
+        return {"status": "ok" if ready else "starting", "api_version": "1", "server_version": PLUGIN_VERSION}
+
+    @app.get(prefix + "/tls/ca")
+    def public_ca():
+        from .tls import ca_path, _read
+
+        if not settings.lan_tls or not ca_path(settings).is_file():
+            reject(404, "not_found", "Local HTTPS is not configured")
+        return Response(
+            _read(ca_path(settings)), media_type="application/x-pem-file",
+            headers={"Content-Disposition": 'attachment; filename="job-server-ca.pem"'},
+        )
 
     @app.get(prefix + "/capabilities")
     def capabilities(p=Depends(principal)):

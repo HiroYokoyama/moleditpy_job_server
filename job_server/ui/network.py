@@ -13,7 +13,7 @@ def lan_address_selector(selected=""):
     field.setCurrentIndex(max(0, field.findData(selected)))
     field.setToolTip(
         "Listen on this private interface as well as localhost. "
-        "Requires LAN HTTP permission. Allow the server port in the OS firewall "
+        "Enable local HTTPS or allow LAN HTTP. Allow the server port in the OS firewall "
         "for trusted LAN clients. No firewall settings are changed automatically."
     )
     return field

@@ -30,22 +30,42 @@ class Settings:
     public_urls: list[str] = field(default_factory=list)
     allow_lan_http: bool = False
     lan_bind_address: str = ""
+    lan_tls: bool = False
+    tls_port: int = 8767
     python_executable: str = ""
 
     @property
     def connection_urls(self):
         return list(dict.fromkeys(
-            url for url in [self.public_url, *self.public_urls, self.lan_url] if url
+            url for url in [self.public_url, *self.public_urls, *self.lan_urls] if url
         ))
 
     @property
     def lan_url(self):
-        if not self.lan_bind_address or not self.allow_lan_http:
+        return next(iter(self.lan_urls), "")
+
+    @property
+    def lan_urls(self):
+        if not self.lan_bind_address:
+            return []
+        host = self.lan_bind_address
+        if ":" in host:
+            host = f"[{host}]"
+        urls = []
+        if self.lan_tls:
+            urls.append(f"https://{host}:{self.tls_port}")
+        if self.allow_lan_http:
+            urls.append(f"http://{host}:{self.port}")
+        return urls
+
+    @property
+    def tls_url(self):
+        if not self.lan_tls or not self.lan_bind_address:
             return ""
         host = self.lan_bind_address
         if ":" in host:
             host = f"[{host}]"
-        return f"http://{host}:{self.port}"
+        return f"https://{host}:{self.tls_port}"
 
     @property
     def root(self):
@@ -60,7 +80,7 @@ class Settings:
         )
 
     def validate(self):
-        for key in ("trusted_users_only", "allow_privileged", "web_ui", "allow_lan_http"):
+        for key in ("trusted_users_only", "allow_privileged", "web_ui", "allow_lan_http", "lan_tls"):
             if type(getattr(self, key)) is not bool:
                 raise ValueError(f"{key} must be a boolean")
         from .connection import validate_server_url
@@ -68,12 +88,18 @@ class Settings:
 
         if not isinstance(self.lan_bind_address, str):
             raise ValueError("lan_bind_address must be a private IP address or empty")
+        if type(self.tls_port) is not int or not 1 <= self.tls_port <= 65535:
+            raise ValueError("Invalid HTTPS port")
+        if self.lan_tls and not self.lan_bind_address:
+            raise ValueError("Select a private LAN address for local HTTPS")
         if self.lan_bind_address:
-            if not self.allow_lan_http:
-                raise ValueError("Enable LAN HTTP before selecting a LAN listen address")
+            if not (self.allow_lan_http or self.lan_tls):
+                raise ValueError("Enable LAN HTTP or local HTTPS before selecting a LAN listen address")
             if type(self.port) is not int or not 1 <= self.port <= 65535:
                 raise ValueError("A LAN listener requires a port between 1 and 65535")
             self.lan_bind_address = validate_lan_address(self.lan_bind_address)
+            if self.lan_tls and self.allow_lan_http and self.tls_port == self.port:
+                raise ValueError("LAN HTTP and HTTPS require different ports")
 
         if type(self.public_urls) is not list or any(type(url) is not str for url in self.public_urls):
             raise ValueError("public_urls must be a list of origin strings")

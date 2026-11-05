@@ -320,7 +320,8 @@ class Dashboard(QDialog):
         form = QFormLayout()
         self.fields = {}
         for key, label, maximum in (
-            ("port", "Server port", 65535),
+            ("port", "HTTP / local administration port", 65535),
+            ("tls_port", "HTTPS port", 65535),
             ("cpus", "CPU budget", 4096),
             ("memory_mb", "Memory budget", 2147483647),
             ("max_active_per_user", "Active jobs per user", 10000),
@@ -340,6 +341,9 @@ class Dashboard(QDialog):
         self.public_urls.setPlaceholderText("One origin per line (LAN / Tailscale / HTTPS proxy)")
         self.public_urls.setMaximumHeight(110)
         form.addRow("Web access URLs", self.public_urls)
+        self.lan_tls = QCheckBox("Enable local HTTPS with a persistent local CA")
+        self.lan_tls.setChecked(self.settings.lan_tls)
+        form.addRow(self.lan_tls)
         self.allow_lan_http = QCheckBox("Allow unencrypted HTTP on trusted LAN addresses")
         self.allow_lan_http.setChecked(self.settings.allow_lan_http)
         self.allow_lan_http.setToolTip(
@@ -348,12 +352,21 @@ class Dashboard(QDialog):
         )
         form.addRow(self.allow_lan_http)
         self.lan_bind_address = lan_address_selector(self.settings.lan_bind_address)
-        self.lan_bind_address.setEnabled(self.allow_lan_http.isChecked())
-        self.allow_lan_http.toggled.connect(self.lan_bind_address.setEnabled)
-        form.addRow("LAN HTTP listen address", self.lan_bind_address)
+        def update_lan_fields():
+            self.lan_bind_address.setEnabled(self.allow_lan_http.isChecked() or self.lan_tls.isChecked())
+            self.ca_button.setEnabled(self.lan_tls.isChecked())
+
+        self.ca_button = QPushButton("Create / show CA certificate...")
+        self.ca_button.clicked.connect(self.show_local_ca)
+        self.allow_lan_http.toggled.connect(update_lan_fields)
+        self.lan_tls.toggled.connect(update_lan_fields)
+        form.addRow("LAN listen address", self.lan_bind_address)
+        form.addRow("", self.ca_button)
+        update_lan_fields()
         address_help = QLabel(
             "Paste the HTTPS URL you open in your browser (shown by tailscale serve). "
-            "Select a LAN HTTP listen address for direct LAN access. "
+            "Select a LAN listen address for direct access. Local HTTPS creates a persistent CA; "
+            "use Create / show CA certificate to export its public certificate and fingerprint. "
             "Register proxy/browser origins above. LAN HTTP requires a private IP address and "
             "an explicit opt-in; passwords, tokens and jobs are unencrypted. "
             "Save, then choose Server > Restart."
@@ -634,7 +647,7 @@ class Dashboard(QDialog):
         try:
             urls = [
                 url for url in self.public_urls.toPlainText().split()
-                if url.rstrip("/") != self.settings.lan_url
+                if url.rstrip("/") not in self.settings.lan_urls
             ]
             candidate = replace(
                 self.settings,
@@ -642,8 +655,10 @@ class Dashboard(QDialog):
                 public_url="",
                 public_urls=urls,
                 allow_lan_http=self.allow_lan_http.isChecked(),
+                lan_tls=self.lan_tls.isChecked(),
                 lan_bind_address=(
-                    self.lan_bind_address.currentData() if self.allow_lan_http.isChecked() else ""
+                    self.lan_bind_address.currentData()
+                    if self.allow_lan_http.isChecked() or self.lan_tls.isChecked() else ""
                 ),
                 **{key: field.mb() if isinstance(field, GBSpinBox) else field.value()
                    for key, field in self.fields.items()},
@@ -656,6 +671,69 @@ class Dashboard(QDialog):
         except Exception as exc:
             self.message.setText(str(exc))
             return False
+
+    def show_local_ca(self):
+        if not self.save_settings():
+            return
+        settings = self.settings
+
+        def work():
+            from ..tls import ca_path, ca_fingerprint, ensure_certificates
+
+            ensure_certificates(settings)
+            return ca_path(settings).read_bytes(), ca_fingerprint(settings), ca_path(settings)
+
+        def display(info):
+            pem, fingerprint, path = info
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Local HTTPS CA certificate")
+            dialog.resize(650, 270)
+            layout = QFormLayout(dialog)
+            explanation = QLabel("Compare this SHA-256 fingerprint on the connecting PC before trusting the CA. "
+                                 "Only the public certificate is exported.")
+            explanation.setWordWrap(True)
+            layout.addRow(explanation)
+            field = QLineEdit(fingerprint)
+            field.setReadOnly(True)
+            layout.addRow("SHA-256 fingerprint", field)
+            location = QLineEdit(str(path))
+            location.setReadOnly(True)
+            layout.addRow("Public CA certificate", location)
+            copy = QPushButton("Copy fingerprint")
+            copy.clicked.connect(lambda: QApplication.clipboard().setText(fingerprint))
+            layout.addRow(copy)
+            export = QPushButton("Export public CA certificate...")
+
+            def save():
+                target, _ = QFileDialog.getSaveFileName(dialog, "Export public CA", "job-server-ca.pem", "CA certificate (*.pem)")
+                if target:
+                    Path(target).write_bytes(pem)
+
+            export.clicked.connect(save)
+            layout.addRow(export)
+            if os.name == "nt":
+                trust = QPushButton("Trust CA for this Windows user...")
+
+                def install():
+                    if QMessageBox.question(
+                        dialog, "Trust local CA",
+                        "Add this CA to the current Windows user's trusted roots? Applications using "
+                        "that store will trust certificates issued by this CA.\n\nSHA-256: " + fingerprint,
+                    ) != QMessageBox.StandardButton.Yes:
+                        return
+                    from ..trust import trust_windows_user_ca
+                    self.task(lambda: trust_windows_user_ca(pem, fingerprint),
+                              success_message="CA trusted for the current Windows user.")
+
+                trust.clicked.connect(install)
+                layout.addRow(trust)
+            close = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+            close.rejected.connect(dialog.reject)
+            layout.addRow(close)
+            dialog.show()
+            self.ca_dialog = dialog
+
+        self.task(work, display)
 
     def require_own_daemon(self):
         from ..daemon_ownership import verify_local_daemon
@@ -670,12 +748,15 @@ class Dashboard(QDialog):
                 url, settings.root / "identity" / "admin-device.key", timeout=3,
             )
         try:
-            self.client.request("GET", "/health", authenticated=False)
+            health = self.client.request("GET", "/health", authenticated=False)
             running = True
         except Exception:
             running = False
         if running:
             self.require_own_daemon()
+            if health.get("status", "ok") != "ok":
+                from ..lifecycle import wait_until_ready
+                wait_until_ready(JobServerClient(self.client.url, timeout=1), settings.root, None)
             return "Daemon is already running; reusing it."
         settings.save(self.config)
         log_dir = settings.root / "logs"
