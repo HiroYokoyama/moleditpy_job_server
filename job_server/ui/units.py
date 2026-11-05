@@ -1,6 +1,7 @@
 """Memory and storage are stored in MB (API and settings) but shown in GB."""
 
-from PySide6.QtWidgets import QDoubleSpinBox
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QDoubleSpinBox, QSpinBox
 
 MB_PER_GB = 1024
 
@@ -12,7 +13,23 @@ def gb(mb):
     return f"{mb / MB_PER_GB:.1f}".removesuffix(".0")
 
 
-class GBSpinBox(QDoubleSpinBox):
+class FocusedWheel:
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+    def wheelEvent(self, event):
+        if self.hasFocus():
+            super().wheelEvent(event)
+        else:
+            event.ignore()
+
+
+class FocusSpinBox(FocusedWheel, QSpinBox):
+    pass
+
+
+class GBSpinBox(FocusedWheel, QDoubleSpinBox):
     """Edits an MB setting in GB, rounding back to whole MB."""
 
     def __init__(self, maximum_mb, parent=None):

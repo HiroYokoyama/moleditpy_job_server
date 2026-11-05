@@ -191,19 +191,23 @@ In **Settings**, enter one origin per line in **Web access URLs**. Existing
 `public_url` and `public_urls` configurations appear in this single field.
 Browser requests use an exact origin allowlist, without wildcards.
 
-For direct access from another LAN PC, enable **Allow unencrypted HTTP**, select
-this PC's private IP in **LAN HTTP listen address**, save, then choose
-**Server > Restart**. The daemon adds a listener on that specific private IP and
-keeps localhost available for administration. The LAN URL is allowed automatically;
-use **Server > Copy connection addresses** to copy it. Allow the server TCP port
-through the OS firewall for trusted LAN clients. No separate proxy is needed for
-this direct HTTP connection. See [LAN access setup](docs/LAN_ACCESS.md).
+For direct access from another LAN PC, enable **local HTTPS**, select this PC's
+private IP in **LAN listen address**, save, then choose **Server > Restart**.
+The HTTPS port defaults to 8767. The server creates a persistent local CA and
+renews its server certificate when needed at startup. Use **Create / show CA
+certificate...** to copy the fingerprint or export the public CA.
 
-HTTPS remains recommended. HTTP accepts only literal RFC 1918 IPv4 addresses or
-IPv6 ULA addresses. The default remains **Local only**; wildcard, public, DNS and
-link-local listen addresses are rejected. Passwords, bearer tokens and job contents
-are unencrypted. Never forward router ports or use public tunnels. Tailscale Serve
-and other private HTTPS proxies can continue to use the loopback listener.
+Job Manager's **Trust local server CA...** retrieves the CA and checks the
+fingerprint before saving a local CA copy on every platform. Windows also registers
+it in the current user's certificate store; Mac/Linux use the saved connection CA. Username and password share one sign-in
+dialog. Browser trust registration uses the system/browser certificate manager.
+
+The daemon retains localhost HTTP administration. LAN HTTP is also available by
+explicit opt-in and uses the HTTP port, normally 8766. HTTP credentials and job
+contents are unencrypted. All direct listeners require a specific private IP;
+wildcard, public, DNS and link-local bind addresses are rejected. No firewall rules
+are changed automatically. Restrict server ports to trusted LAN clients and never
+use public tunnels or router forwarding. See [LAN setup](docs/LAN_ACCESS.md).
 
 Python clients must opt in separately:
 

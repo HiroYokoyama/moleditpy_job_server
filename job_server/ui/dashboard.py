@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
     QMenuBar,
     QProgressBar,
     QPushButton,
-    QSpinBox,
+    QScrollArea,
     QSizePolicy,
     QAbstractItemView,
     QTabWidget,
@@ -42,7 +42,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..client import JobServerClient
-from .units import GBSpinBox, gb
+from .units import GBSpinBox, FocusSpinBox, gb
 from .network import lan_address_selector
 from ..settings import Settings
 
@@ -332,7 +332,7 @@ class Dashboard(QDialog):
                 field = GBSpinBox(maximum)
                 field.set_mb(getattr(self.settings, key))
             else:
-                field = QSpinBox()
+                field = FocusSpinBox()
                 field.setRange(1, maximum)
                 field.setValue(getattr(self.settings, key))
             self.fields[key] = field
@@ -408,7 +408,11 @@ class Dashboard(QDialog):
         self.save_settings_button.clicked.connect(self.save_settings)
         layout.addWidget(self.save_settings_button)
         layout.addStretch()
-        self.tabs.addTab(page, "Settings")
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidget(page)
+        self.tabs.addTab(scroll, "Settings")
 
     def task(self, call, on_ok=None, *, interactive=True, success_message=None, on_error=None, on_start=None):
         if self.busy:
@@ -678,16 +682,22 @@ class Dashboard(QDialog):
         settings = self.settings
 
         def work():
-            from ..tls import ca_path, ca_fingerprint, ensure_certificates
+            from ..tls import ca_path, ensure_certificates, _read
+            from ..trust import validate_ca
+            from cryptography.hazmat.primitives import hashes, serialization
 
             ensure_certificates(settings)
-            return ca_path(settings).read_bytes(), ca_fingerprint(settings), ca_path(settings)
+            certificate = validate_ca(_read(ca_path(settings)))
+            return (
+                certificate.public_bytes(serialization.Encoding.PEM),
+                certificate.fingerprint(hashes.SHA256()).hex().upper(), ca_path(settings),
+            )
 
         def display(info):
             pem, fingerprint, path = info
             dialog = QDialog(self)
             dialog.setWindowTitle("Local HTTPS CA certificate")
-            dialog.resize(650, 270)
+            dialog.resize(760, 270)
             layout = QFormLayout(dialog)
             explanation = QLabel("Compare this SHA-256 fingerprint on the connecting PC before trusting the CA. "
                                  "Only the public certificate is exported.")

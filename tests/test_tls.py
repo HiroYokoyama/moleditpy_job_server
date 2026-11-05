@@ -55,7 +55,9 @@ def test_wrong_fingerprint_is_rejected_before_trust(tmp_path):
         validate_ca(ca_path(settings).read_bytes(), "00" * 32)
 
 
-@pytest.mark.parametrize("url", ["http://192.168.1.20:8767", "https://8.8.8.8", "https://host.local"])
+@pytest.mark.parametrize(
+    "url", ["http://192.168.1.20:8767", "https://8.8.8.8", "https://host.local"]
+)
 def test_ca_bootstrap_rejects_nonlocal_or_nonhttps_urls(url):
     with pytest.raises(ValueError):
         fetch_server_ca(url, "00" * 32)
@@ -97,8 +99,12 @@ def test_native_https_bootstrap_and_verified_authentication(tmp_path):
         second.bind(("127.0.0.1", 0))
         port, tls_port = first.getsockname()[1], second.getsockname()[1]
     settings = Settings(
-        data_dir=str(tmp_path), port=port, tls_port=tls_port, allow_privileged=True,
-        lan_tls=True, lan_bind_address=addresses[0],
+        data_dir=str(tmp_path),
+        port=port,
+        tls_port=tls_port,
+        allow_privileged=True,
+        lan_tls=True,
+        lan_bind_address=addresses[0],
     )
     config = tmp_path / "settings.json"
     settings.save(config)
@@ -112,7 +118,10 @@ def test_native_https_bootstrap_and_verified_authentication(tmp_path):
     with (tmp_path / "startup.log").open("wb") as log:
         process = subprocess.Popen(
             [sys.executable, "-m", "job_server", "serve", "--config", str(config)],
-            env=environment, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            stdout=log,
+            stderr=subprocess.STDOUT,
             creationflags=0x08000000 if os.name == "nt" else 0,
         )
     try:
@@ -129,7 +138,9 @@ def test_native_https_bootstrap_and_verified_authentication(tmp_path):
         assert client.request("GET", "/jobs") == []
         # The default public-root context must not accept this unregistered local CA.
         with pytest.raises(OSError):
-            JobServerClient(settings.tls_url, timeout=2).request("GET", "/health", authenticated=False)
+            JobServerClient(settings.tls_url, timeout=2).request(
+                "GET", "/health", authenticated=False
+            )
         local_admin = JobServerClient(local, tmp_path / "fixture.key", timeout=3)
         stop_and_wait(local_admin, settings.root)
         assert process.wait(timeout=10) == 0

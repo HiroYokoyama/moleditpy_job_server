@@ -107,13 +107,13 @@ def serve(settings):
         timeout_keep_alive=5,
         timeout_graceful_shutdown=10,
     )
-    server = uvicorn.Server(config)
-    app.state.shutdown = lambda: setattr(server, "should_exit", True)
     try:
         with listener_sockets(settings) as streams:
             if settings.lan_tls:
                 run_https(app, config, settings, streams)
             else:
+                server = uvicorn.Server(config)
+                app.state.shutdown = lambda: setattr(server, "should_exit", True)
                 server.run(sockets=streams)
     finally:
         app.state.db.close()

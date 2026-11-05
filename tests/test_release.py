@@ -67,7 +67,7 @@ def test_release_accepts_matching_source_version():
 
 
 @pytest.mark.parametrize(
-    "path", ["../outside", "/absolute", "x\\file", "x/.git/config", "x/device.key"]
+    "path", ["../outside", "/absolute", "x\\file", "x/.git/config", "x/device.key", "tls/ca-key.bin", "tls/server-key-password.bin"]
 )
 def test_artifact_paths_reject_escape_and_credentials(path):
     with pytest.raises(ValueError):

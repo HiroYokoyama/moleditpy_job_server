@@ -2,10 +2,10 @@
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QPlainTextEdit, QDialog, QDialogButtonBox, QFormLayout, QLabel, QLineEdit, QSpinBox, QVBoxLayout,
+    QCheckBox, QPlainTextEdit, QDialog, QDialogButtonBox, QFormLayout, QLabel, QLineEdit, QVBoxLayout, QScrollArea, QWidget,
 )
 
-from .units import GBSpinBox
+from .units import GBSpinBox, FocusSpinBox
 from .network import lan_address_selector
 
 
@@ -19,7 +19,14 @@ class SetupDialog(QDialog):
         self.setWindowTitle("Job Server setup")
         self.setWindowModality(Qt.WindowModality.WindowModal)
         self.resize(530, 520)
-        layout = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        body = QWidget(scroll)
+        layout = QVBoxLayout(body)
+        scroll.setWidget(body)
+        outer.addWidget(scroll)
 
         def note(text):
             label = QLabel(text)
@@ -36,7 +43,7 @@ class SetupDialog(QDialog):
         self.lan_tls = QCheckBox("Enable local HTTPS with a persistent local CA")
         self.lan_tls.setChecked(dashboard.lan_tls.isChecked())
         form.addRow(self.lan_tls)
-        self.tls_port = QSpinBox()
+        self.tls_port = FocusSpinBox()
         self.tls_port.setRange(1, 65535)
         self.tls_port.setValue(dashboard.fields["tls_port"].value())
         form.addRow("HTTPS port", self.tls_port)
@@ -62,7 +69,7 @@ class SetupDialog(QDialog):
         layout.addWidget(command)
         note("2. Resources — choose how much this server may reserve for jobs.")
         resources = QFormLayout()
-        self.cpus = QSpinBox()
+        self.cpus = FocusSpinBox()
         self.cpus.setRange(1, 4096)
         self.cpus.setValue(dashboard.fields["cpus"].value())
         self.memory = GBSpinBox(2147483647)
@@ -90,7 +97,7 @@ class SetupDialog(QDialog):
                  "window. After saving changes, choose Server > Restart to apply them.")
         self.status = QLabel()
         self.status.setWordWrap(True)
-        layout.addWidget(self.status)
+        outer.addWidget(self.status)
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
         self.apply_button = self.buttons.addButton(
             "Create, start and sign in" if self.initial_admin else "Save configuration",
@@ -98,7 +105,7 @@ class SetupDialog(QDialog):
         )
         self.buttons.accepted.connect(self.apply)
         self.buttons.rejected.connect(self.reject)
-        layout.addWidget(self.buttons)
+        outer.addWidget(self.buttons)
         self.finished.connect(self._finished)
 
     def _finished(self, _):

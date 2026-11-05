@@ -44,7 +44,7 @@ def safe_members(names):
             raise ValueError("Archive contains an unsafe path")
         if any(part in {"__pycache__", ".git", "test-results"} for part in path.parts):
             raise ValueError("Archive contains development artifacts")
-        if path.name in {"server.db", "settings.json"} or path.suffix in {".key", ".pem", ".env"}:
+        if path.name in {"server.db", "settings.json", "ca-key.bin", "server-key-password.bin"} or path.suffix in {".key", ".pem", ".env"}:
             raise ValueError("Archive contains runtime credentials or configuration")
 
 
