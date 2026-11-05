@@ -13,7 +13,7 @@ from urllib.request import HTTPSHandler, ProxyHandler, Request, build_opener
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 
-from .connection import validate_server_url
+from .connection import is_mdns_name, validate_server_url
 
 
 CA_PERMITTED_NETWORKS = tuple(
@@ -28,6 +28,8 @@ CA_PERMITTED_NETWORKS = tuple(
     )
 )
 CA_PERMITTED_DNS_NAME = "localhost"
+# Present only in a CA created for a `.local` name.
+CA_PERMITTED_MDNS_NAME = "local"
 
 
 def normalize_fingerprint(value):
@@ -39,7 +41,10 @@ def normalize_fingerprint(value):
 
 def _require_local_name_constraints(certificate):
     """A trusted local CA must be unable to issue for public names or addresses."""
-    message = "The CA must be limited to private addresses and localhost. No trust was installed."
+    message = (
+        "The CA must be limited to private addresses, localhost and .local names. "
+        "No trust was installed."
+    )
     try:
         extension = certificate.extensions.get_extension_for_class(x509.NameConstraints)
     except x509.ExtensionNotFound:
@@ -49,11 +54,20 @@ def _require_local_name_constraints(certificate):
         raise ValueError(message)
     for name in permitted:
         if isinstance(name, x509.DNSName):
-            allowed = name.value == CA_PERMITTED_DNS_NAME
+            allowed = name.value in {CA_PERMITTED_DNS_NAME, CA_PERMITTED_MDNS_NAME}
         else:
             allowed = isinstance(name, x509.IPAddress) and name.value in CA_PERMITTED_NETWORKS
         if not allowed:
             raise ValueError(message)
+
+
+def ca_permits_mdns(certificate):
+    """Whether this CA can issue a certificate for a `.local` name."""
+    constraints = certificate.extensions.get_extension_for_class(x509.NameConstraints).value
+    return any(
+        isinstance(name, x509.DNSName) and name.value == CA_PERMITTED_MDNS_NAME
+        for name in constraints.permitted_subtrees
+    )
 
 
 def certificate_fingerprint(pem):
@@ -99,12 +113,14 @@ def fetch_server_ca(url, expected_fingerprint=None):
     if parts.scheme != "https":
         raise ValueError("CA bootstrap requires an HTTPS server URL")
     # Only the explicit local/private-address exception may bootstrap trust.
-    try:
-        validate_server_url(parts._replace(scheme="http").geturl(), allow_lan_http=True)
-    except ValueError:
-        raise ValueError(
-            "CA bootstrap requires localhost or a private LAN IP. Publicly trusted HTTPS does not need local CA registration."
-        ) from None
+    if not is_mdns_name(parts.hostname):
+        try:
+            validate_server_url(parts._replace(scheme="http").geturl(), allow_lan_http=True)
+        except ValueError:
+            raise ValueError(
+                "CA bootstrap requires localhost, a private LAN IP or a .local name. "
+                "Publicly trusted HTTPS does not need local CA registration."
+            ) from None
     tls_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     tls_context.minimum_version = ssl.TLSVersion.TLSv1_2
     tls_context.check_hostname = False

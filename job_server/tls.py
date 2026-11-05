@@ -14,7 +14,13 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from .credentials import dpapi
 from .files import atomic_write, is_link, open_regular
 from .instance import InstanceLock
-from .trust import CA_PERMITTED_DNS_NAME, CA_PERMITTED_NETWORKS, validate_ca
+from .trust import (
+    CA_PERMITTED_DNS_NAME,
+    CA_PERMITTED_MDNS_NAME,
+    CA_PERMITTED_NETWORKS,
+    ca_permits_mdns,
+    validate_ca,
+)
 
 
 def _read(path):
@@ -51,11 +57,42 @@ def ca_fingerprint(settings):
     return certificate.fingerprint(hashes.SHA256()).hex().upper()
 
 
-def _new_ca(now):
+def needs_new_ca(settings):
+    """A `.local` name cannot be issued by a CA created without it, and must be replaced."""
+    if not settings.lan_hostname or not ca_path(settings).exists():
+        return False
+    return not ca_permits_mdns(validate_ca(_read(ca_path(settings))))
+
+
+def retire_ca(settings):
+    """Move the CA aside at the user's request; the next start creates a new one."""
+    directory = settings.root / "tls"
+    lock = InstanceLock(directory).acquire()
+    try:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+        retired = directory / f"retired-{stamp}"
+        retired.mkdir(mode=0o700)
+        for name in (
+            "ca.pem",
+            "ca-key.bin",
+            "server.pem",
+            "server-key.pem",
+            "server-key-password.bin",
+        ):
+            if (directory / name).exists():
+                os.replace(directory / name, retired / name)
+        return retired
+    finally:
+        lock.release()
+
+
+def _new_ca(now, mdns=False):
     key = ec.generate_private_key(ec.SECP256R1())
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "MoleditPy Job Server Local CA")])
     permitted = [x509.IPAddress(network) for network in CA_PERMITTED_NETWORKS]
     permitted.append(x509.DNSName(CA_PERMITTED_DNS_NAME))
+    if mdns:
+        permitted.append(x509.DNSName(CA_PERMITTED_MDNS_NAME))
     certificate = (
         x509.CertificateBuilder()
         .subject_name(name)
@@ -103,7 +140,7 @@ def _ensure_locked(settings, directory):
             "The local CA is incomplete. Restore its certificate and key; do not replace trusted CA files automatically."
         )
     if not ca_file.exists():
-        ca_key, ca = _new_ca(now)
+        ca_key, ca = _new_ca(now, mdns=bool(settings.lan_hostname))
         _save_secret(
             ca_key_file,
             ca_key.private_bytes(
@@ -115,6 +152,11 @@ def _ensure_locked(settings, directory):
         atomic_write(ca_file, ca.public_bytes(serialization.Encoding.PEM))
     else:
         ca = validate_ca(_read(ca_file))
+        if settings.lan_hostname and not ca_permits_mdns(ca):
+            raise ValueError(
+                "This local CA cannot issue a certificate for a .local name. "
+                "Select the name in Settings and accept replacing the CA."
+            )
         ca_key = serialization.load_pem_private_key(_load_secret(ca_key_file), password=None)
         if not isinstance(ca_key, ec.EllipticCurvePrivateKey):
             raise ValueError("Invalid local CA key")
@@ -127,7 +169,12 @@ def _ensure_locked(settings, directory):
 
     certificate_file, key_file = directory / "server.pem", directory / "server-key.pem"
     password_file = directory / "server-key-password.bin"
-    addresses = {ip_address("127.0.0.1"), ip_address("::1"), ip_address(settings.lan_bind_address)}
+    addresses = {
+        ip_address("127.0.0.1"),
+        ip_address("::1"),
+        *(ip_address(address) for address in settings.lan_addresses),
+    }
+    dns_names = {"localhost", *([settings.lan_hostname] if settings.lan_hostname else [])}
     renew = True
     password = None
     if all(path.exists() for path in (certificate_file, key_file, password_file)):
@@ -139,6 +186,7 @@ def _ensure_locked(settings, directory):
             names = leaf.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
             renew = (
                 set(names.get_values_for_type(x509.IPAddress)) != addresses
+                or set(names.get_values_for_type(x509.DNSName)) != dns_names
                 or leaf.extensions.get_extension_for_class(x509.BasicConstraints).value.ca
                 or ExtendedKeyUsageOID.SERVER_AUTH
                 not in leaf.extensions.get_extension_for_class(x509.ExtendedKeyUsage).value
@@ -173,7 +221,7 @@ def _ensure_locked(settings, directory):
             .add_extension(
                 x509.SubjectAlternativeName(
                     [
-                        x509.DNSName("localhost"),
+                        *[x509.DNSName(name) for name in sorted(dns_names)],
                         *[x509.IPAddress(address) for address in sorted(addresses, key=str)],
                     ]
                 ),

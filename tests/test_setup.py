@@ -48,8 +48,7 @@ def test_setup_saves_an_explicit_lan_listener(dashboard):
     dashboard.open_setup()
     guide = dashboard.setup_dialog
     guide.allow_lan_http.setChecked(True)
-    guide.lan_bind_address.addItem("192.168.1.20", "192.168.1.20")
-    guide.lan_bind_address.setCurrentIndex(guide.lan_bind_address.count() - 1)
+    guide.lan_addresses.select(["192.168.1.20"])
     guide.apply()
     assert not guide.isVisible()
     saved = Settings.load(dashboard.config)

@@ -33,7 +33,8 @@ cannot connect.
 
 1. Open **Job Server > Settings**.
 2. Enable **Enable local HTTPS with a persistent local CA**.
-3. Under **LAN listen address**, select the PC's LAN IP.
+3. Under **Reachable from other PCs at**, tick the PC's LAN IP. Tick more than one if the
+   PC has several networks. **Connect using** shows the resulting URLs.
 4. Save, then choose **Server > Restart**, or **Start** if the server is off.
 5. Open **Create / show CA certificate...** and keep the SHA-256 fingerprint in view.
 6. Confirm the server is listening on the LAN IP. Steps 6 to 9 are for Windows; for
@@ -184,6 +185,22 @@ the CA stays the same, so only the URL changes.
 To remove the trust on Windows, open `certmgr.msc` and delete **MoleditPy Job Server Local
 CA** under **Trusted Root Certification Authorities**.
 
+## Using a .local name
+
+`https://your-pc.local:8767` keeps working when the server PC's IP changes. It works over
+local HTTPS only, and needs Job Server 0.6.2 or later and a Job Manager release that accepts
+`.local` CAs.
+
+1. Check from the other PC that the name resolves: `ping your-pc.local`. Windows, Mac and
+   Linux with Avahi announce the PC's name. A guest network or a managed network may block it.
+2. On the server PC, also tick `your-pc.local` under **Reachable from other PCs at**. Keep the
+   LAN IP ticked: the server listens on IP addresses, and the name leads to one of them.
+3. Save and restart. A CA created before this needs replacing, and Settings asks first. Every
+   PC and browser must then trust the new CA, following the steps above, and should remove the
+   old one. The old files move to a `retired-` folder under the data directory's `tls` folder.
+4. In Job Manager, set **Server URL** to `https://your-pc.local:8767` and choose **Trust local
+   server CA...**.
+
 ## Tailscale
 
 Both PCs must be signed in to the same tailnet. Use private Tailscale Serve only. Never
@@ -195,7 +212,7 @@ use Funnel or router port forwarding.
    tailscale serve --bg http://127.0.0.1:8766
    ```
 
-2. Add that URL to **Job Server > Settings > Web access URLs**, save and restart.
+2. Add that URL to **Job Server > Settings > Other web URLs**, save and restart.
 3. In Job Manager, set **Server URL** to `https://your-pc.your-tailnet.ts.net`.
 4. Choose **Sign in to Job Server...**. **Trust local server CA...** is not needed,
    because the certificate is publicly trusted.
@@ -205,8 +222,8 @@ use Funnel or router port forwarding.
 Passwords, tokens and job data can be read by anyone able to intercept LAN traffic. Use
 this only on a trusted LAN.
 
-1. On the server PC, enable **Allow trusted LAN HTTP**, select the **LAN listen address**,
-   save and restart.
+1. On the server PC, enable **Allow trusted LAN HTTP**, tick the address under
+   **Reachable from other PCs at**, save and restart.
 2. Follow steps 7 to 9 of Local HTTPS, or [Server on Linux or Mac](#server-on-linux-or-mac),
    using port `8766` and, on Windows, a separate rule name.
 3. In Job Manager, set **Server URL** to `http://192.168.1.20:8766`.
@@ -224,7 +241,9 @@ this only on a trusted LAN.
 | `Set-NetConnectionProfile` fails with a permission error | Not elevated, a domain network, or group policy | Retry as administrator. If it still fails, ask your administrator or use Tailscale |
 | `http://` to port `8767` fails | The port serves HTTPS only | Use `https://`, or `http://` with port `8766` |
 | Certificate error | CA is not trusted, or the IP changed | Run **Trust local server CA...** again. After an IP change, update the URL |
-| `origin_forbidden` in a browser | The address is not registered | Add the exact origin to **Web access URLs** and restart |
+| `origin_forbidden` in a browser | The address is not registered | Tick it in Settings, or add the exact origin to **Other web URLs**, and restart |
+| A `.local` name does not resolve | The network blocks multicast, or the PC does not announce it | Use the IP address |
+| A `.local` name resolves but times out | The name led to an address that is not ticked, or the firewall | Tick that address, or add a firewall rule for it |
 
 If the server PC is managed by your organization, ask its administrator before changing
 the network profile or firewall rules.

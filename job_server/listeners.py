@@ -43,8 +43,8 @@ def available_lan_addresses():
 def listener_sockets(settings):
     settings.validate()
     addresses = ["127.0.0.1"]
-    if settings.lan_bind_address and settings.allow_lan_http:
-        addresses.append(settings.lan_bind_address)
+    if settings.allow_lan_http:
+        addresses.extend(settings.lan_addresses)
     with bound_sockets(addresses, settings.port) as streams:
         yield streams
 
@@ -52,7 +52,7 @@ def listener_sockets(settings):
 @contextmanager
 def tls_listener_sockets(settings):
     settings.validate()
-    with bound_sockets(["127.0.0.1", settings.lan_bind_address], settings.tls_port) as streams:
+    with bound_sockets(["127.0.0.1", *settings.lan_addresses], settings.tls_port) as streams:
         yield streams
 
 

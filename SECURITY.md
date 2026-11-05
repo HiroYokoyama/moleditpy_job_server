@@ -31,11 +31,16 @@ There is no unauthenticated account-creation endpoint.
 The daemon binds loopback by default and refuses elevated execution except an explicit isolated-test
 override. Private LAN/Tailscale clients use validated HTTPS by default, terminating on the same host.
 An explicit `allow_lan_http` exception permits unencrypted HTTP to literal RFC 1918 IPv4
-or IPv6 ULA addresses. An optional `lan_bind_address` adds a listener on one specific
-private interface while retaining the loopback listener. Enable local HTTPS or opt in to HTTP;
+or IPv6 ULA addresses. `lan_bind_address` and `lan_extra_addresses` add a listener on each
+selected private interface while retaining the loopback listener. Enable local HTTPS or opt in to HTTP;
 no wildcard, DNS, public, link-local or loopback LAN address is accepted. The OS must
 own the selected IP; bind failures stop startup and close all opened sockets. The
 application does not change firewall rules. Restrict the port to trusted LAN clients.
+`lan_hostname` adds one `.local` name to the HTTPS certificate. It is HTTPS-only because
+any LAN device can answer for a `.local` name, and only the certificate proves the server.
+The local CA then also permits `.local` names, so a PC trusting it accepts this CA's
+certificate for any such name. A CA created without this permission is never widened;
+replacing it needs the user's confirmation, and each client must then trust the new CA.
 A private same-host reverse proxy remains supported. Clients opt in separately,
 bypass environment proxies for HTTP and refuse redirects. DNS names and public, link-local,
 unspecified and reserved IP addresses are excluded from the exception. Enrollment passwords,

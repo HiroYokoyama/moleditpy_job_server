@@ -6,7 +6,7 @@ For a step-by-step setup, see [LAN_SETUP.md](LAN_SETUP.md) ([日本語](LAN_SETU
 
 1. Open **Job Server > Settings**.
 2. Enable **Enable local HTTPS with a persistent local CA**.
-3. Select this PC's private IP under **LAN listen address**. The default HTTPS
+3. Select this PC's private IP under **Reachable from other PCs at**. The default HTTPS
    port is **8767**; local HTTP administration remains on **8766**.
 4. Save, then choose **Server > Restart**, or **Start** if the server is off.
 5. Use **Server > Copy connection addresses** to copy the HTTPS URL.
@@ -54,7 +54,7 @@ HTTP can be enabled together on different ports.
 
 HTTP exposes passwords, bearer tokens, inputs and results to network interception
 or modification. HTTPS is recommended. The default remains local-only access;
-setting Web access URLs alone does not open a LAN listener.
+setting Other web URLs alone does not open a LAN listener.
 
 ## Firewall
 
@@ -71,7 +71,7 @@ New-NetFirewallRule -Name "MoleditPy-Job-Server-LAN" -DisplayName "Job Server LA
 
 Never use router port forwarding or a public tunnel.
 
-## Web access URLs
+## Other web URLs
 
 Enter one browser origin per line. Use this field for Tailscale Serve or other
 private HTTPS proxy addresses. Existing `public_url` and `public_urls` entries
