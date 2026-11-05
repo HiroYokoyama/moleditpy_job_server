@@ -51,13 +51,17 @@ class SetupDialog(QDialog):
         self.allow_lan_http.setChecked(dashboard.allow_lan_http.isChecked())
         form.addRow(self.allow_lan_http)
         self.lan_bind_address = lan_address_selector(dashboard.lan_bind_address.currentData())
+        form.addRow("LAN listen address", self.lan_bind_address)
+
         def update_lan_fields():
-            self.lan_bind_address.setEnabled(self.allow_lan_http.isChecked() or self.lan_tls.isChecked())
+            listening = self.allow_lan_http.isChecked() or self.lan_tls.isChecked()
+            self.lan_bind_address.setEnabled(listening)
+            form.setRowVisible(self.lan_bind_address, listening)
+            form.setRowVisible(self.tls_port, self.lan_tls.isChecked())
 
         self.allow_lan_http.toggled.connect(update_lan_fields)
         self.lan_tls.toggled.connect(update_lan_fields)
         update_lan_fields()
-        form.addRow("LAN listen address", self.lan_bind_address)
         layout.addLayout(form)
         note("For direct LAN access, enable local HTTPS or trusted LAN HTTP and select this PC's private IP. "
              "Allow the server port in the OS firewall for trusted LAN clients. "

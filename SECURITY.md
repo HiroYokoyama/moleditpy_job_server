@@ -81,6 +81,11 @@ certificates for private addresses and localhost on every client that trusts thi
 CA, within the name constraints. Allow only trusted users to submit jobs, and
 trust a server's CA only if you trust everyone able to run jobs on that server.
 
+An optional job working directory moves new jobs' `staging` and `jobs` folders; the
+database, credentials, control files and TLS material stay in the data directory. Those
+subfolders are owner-only on Unix but keep the parent's permissions on Windows, so choose
+a private location. Each job records its own root, which never comes from a client.
+
 Transfers reject traversal, Windows device names, alternate data streams, reserved wrapper
 paths, links, junctions and hardlinks. Containment checks defend HTTP transfers; they are
 not a sandbox for arbitrary job commands. Job logs, metadata and transfer hashes are

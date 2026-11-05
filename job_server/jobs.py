@@ -4,6 +4,7 @@ import os
 import re
 import time
 import uuid
+from pathlib import Path
 
 from .errors import reject
 from .auth import Auth
@@ -16,8 +17,11 @@ class Jobs:
     def __init__(self, db, settings, auth=None):
         self.db, self.settings = db, settings
         self.auth = auth if auth is not None else Auth(db, settings)
-        for name in ("staging", "jobs", "control", "logs"):
+        for name in ("control", "logs"):
             (settings.root / name).mkdir(exist_ok=True, mode=0o700)
+        # Together, because committing a job renames staging into jobs.
+        for name in ("staging", "jobs"):
+            (settings.job_root / name).mkdir(parents=True, exist_ok=True, mode=0o700)
         if settings.execution_os == "wsl":
             from .executor.wsl import native_root
 
@@ -25,7 +29,10 @@ class Jobs:
                 (native_root(settings) / name).mkdir(parents=True, exist_ok=True)
 
     def directory(self, job_id, staging=False):
-        root = self.settings.root
+        # Each job keeps the root it started in, so changing the setting cannot
+        # lose earlier results or move a job while it is running.
+        job = self.db.one("SELECT work_root FROM jobs WHERE id=?", (job_id,))
+        root = Path(job["work_root"]) if job and job["work_root"] else self.settings.root
         if self.settings.execution_os == "wsl":
             from .executor.wsl import native_root
 
@@ -39,7 +46,7 @@ class Jobs:
         return job
 
     def public(self, job):
-        result = {k: v for k, v in job.items() if k not in {"pid", "process_started", "force_actor"}}
+        result = {k: v for k, v in job.items() if k not in {"work_root", "pid", "process_started", "force_actor"}}
         result["force_run"] = bool(result["force_run"])
         result["spec"] = json.loads(result["spec"])
         if result["state"] == "PENDING" and result["spec"]["after_job"]:
@@ -118,8 +125,15 @@ class Jobs:
                     reject(404, "dependency_missing", "Dependency not found")
             job_id = str(uuid.uuid4())
             c.execute(
-                "INSERT INTO jobs(id,owner_id,spec,state,created_at) VALUES (?,?,?,'UPLOADING',?)",
-                (job_id, owner, canonical, time.time()),
+                "INSERT INTO jobs(id,owner_id,spec,state,created_at,work_root) "
+                "VALUES (?,?,?,'UPLOADING',?,?)",
+                (
+                    job_id,
+                    owner,
+                    canonical,
+                    time.time(),
+                    str(self.settings.job_root) if self.settings.job_dir else "",
+                ),
             )
             for file in spec.files:
                 c.execute(

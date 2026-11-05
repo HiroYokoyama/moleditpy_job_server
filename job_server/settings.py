@@ -9,6 +9,7 @@ from .files import atomic_write
 @dataclass
 class Settings:
     data_dir: str = "~/.moleditpy/job_server"
+    job_dir: str = ""
     port: int = 8766
     cpus: int = 2
     memory_mb: int = 4096
@@ -72,6 +73,11 @@ class Settings:
         return Path(self.data_dir).expanduser().resolve()
 
     @property
+    def job_root(self):
+        """Where new jobs are placed; empty keeps them in the data directory."""
+        return Path(self.job_dir).expanduser().resolve() if self.job_dir else self.root
+
+    @property
     def execution_os(self):
         return (
             ("windows" if os.name == "nt" else "linux")
@@ -127,6 +133,7 @@ class Settings:
             raise ValueError("Invalid port")
         if self.execution_os not in {"linux", "windows", "wsl"}:
             raise ValueError("Invalid executor")
+        self._validate_job_dir()
         if not self.trusted_users_only:
             raise ValueError(
                 "This server supports trusted users only; OS isolation is not implemented"
@@ -145,6 +152,25 @@ class Settings:
             ):
                 raise ValueError("Invalid WSL settings")
         return self
+
+    def _validate_job_dir(self):
+        if not isinstance(self.job_dir, str):
+            raise ValueError("Job working directory must be a path or empty")
+        if not self.job_dir:
+            return
+        if any(ord(c) < 32 for c in self.job_dir):
+            raise ValueError("Job working directory contains invalid characters")
+        path = Path(self.job_dir).expanduser()
+        if not path.is_absolute() or ".." in path.parts:
+            raise ValueError("Job working directory must be an absolute path")
+        if self.execution_os == "wsl":
+            raise ValueError("WSL jobs use wsl_root; leave the job working directory empty")
+        from .files import is_link
+
+        if is_link(path) or (path.exists() and not path.is_dir()):
+            raise ValueError("Job working directory must be a real directory, not a link or file")
+        if self.job_root.is_relative_to(self.root / "tls"):
+            raise ValueError("Job working directory must not be inside the TLS folder")
 
     @classmethod
     def load(cls, path=None):

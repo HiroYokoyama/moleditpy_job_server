@@ -423,3 +423,28 @@ def test_memory_and_storage_are_edited_in_gb_but_saved_in_mb(dashboard):
     saved = Settings.load(dashboard.config)
     assert saved.memory_mb == 16384
     assert saved.storage_quota_mb == 2560
+
+
+def test_job_working_directory_is_saved_and_default_stays_empty(dashboard, tmp_path):
+    from job_server.settings import Settings
+
+    assert dashboard.job_dir.text() == ""
+    assert str(dashboard.settings.root) in dashboard.job_dir.placeholderText()
+    dashboard.job_dir.setText(str(tmp_path / "work"))
+    assert dashboard.save_settings()
+    assert Settings.load(dashboard.config).job_dir == str(tmp_path / "work")
+    dashboard.job_dir.setText("relative")
+    assert not dashboard.save_settings()
+    assert Settings.load(dashboard.config).job_dir == str(tmp_path / "work")
+
+
+def test_network_rows_appear_only_when_they_apply(dashboard):
+    assert dashboard.fields["tls_port"].isHidden()
+    assert dashboard.ca_button.isHidden()
+    assert dashboard.lan_bind_address.isHidden()
+    dashboard.allow_lan_http.setChecked(True)
+    assert not dashboard.lan_bind_address.isHidden()
+    assert dashboard.fields["tls_port"].isHidden()
+    dashboard.lan_tls.setChecked(True)
+    assert not dashboard.fields["tls_port"].isHidden()
+    assert not dashboard.ca_button.isHidden()

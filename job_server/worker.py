@@ -1,6 +1,7 @@
 """Detached supervisor. It owns the payload and outlives daemon/GUI restarts."""
 
 import json
+from pathlib import Path
 import os
 import sys
 import time
@@ -22,8 +23,9 @@ def main(config, job_id):
     control = settings.root / "control" / job_id
     request = json.loads((control / "request.json").read_text("utf-8"))
     spec = request["spec"]
+    work_root = request.get("work_root") or settings.root
     work = (
-        (wsl.native_root(settings) if settings.execution_os == "wsl" else settings.root)
+        (wsl.native_root(settings) if settings.execution_os == "wsl" else Path(work_root))
         / "jobs"
         / job_id
         / "work"
