@@ -269,7 +269,7 @@ class Dashboard(QDialog):
             metrics.addWidget(card, index // 3, index % 3)
         layout.addLayout(metrics)
         filters = QHBoxLayout()
-        self.job_caption = QLabel("Jobs — right-click a job for actions, double-click for details.")
+        self.job_caption = QLabel("Jobs — right-click for actions")
         filters.addWidget(self.job_caption, 1)
         self.job_search = QLineEdit()
         self.job_search.setPlaceholderText("Filter by name, owner or ID")
@@ -828,8 +828,8 @@ class Dashboard(QDialog):
             first = page * JOB_PAGE + 1
             count = len(data["jobs"])
             self.job_caption.setText(
-                f"Jobs {first}–{first + count - 1}, newest first — right-click for actions, "
-                "double-click for details." if count else "No jobs on this page."
+                f"Jobs {first}–{first + count - 1} — right-click for actions" if count
+                else "No jobs on this page."
             )
             self.newer_jobs.setEnabled(page > 0)
             self.older_jobs.setEnabled(count == JOB_PAGE)

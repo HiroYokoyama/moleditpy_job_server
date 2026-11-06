@@ -7,9 +7,9 @@
 [![License: GPL v3](https://img.shields.io/badge/License-LGPLv3-blue.svg)](LICENSE)
 [![MoleditPy](https://img.shields.io/badge/MoleditPy-5.x-3577F7)](https://github.com/HiroYokoyama/python_molecular_editor)
 
-A LAN computational helper for MoleditPy Job Manager, with an authenticated shared
-job queue, headless daemon, MoleditPy administration plugin, and browser UI.
-Access is for trusted users on a private network.
+A shared job queue for one PC on your network. Trusted users submit calculations from
+[Job Manager](https://github.com/HiroYokoyama/moleditpy_job_manager), the browser or
+Python, and an administrator runs the server from MoleditPy or the command line.
 
 > [!WARNING]
 > **Never expose Job Server to the public internet. Use localhost, a private LAN over HTTPS, or a private Tailscale tailnet only.**
@@ -19,98 +19,70 @@ Access is for trusted users on a private network.
 
 ![Job Server desktop dashboard with synthetic jobs](docs/gui-dashboard.png)
 
-![Job Server browser dashboard at desktop size (1440 × 1000)](docs/web-ui.jpg)
+![Job Server browser dashboard with synthetic jobs](docs/web-ui.jpg)
 
-The daemon owns CPU/RAM reservations and a durable SQLite job ledger. Jobs run in
-detached supervisors, so closing MoleditPy or stopping/restarting the daemon preserves
-running calculations. Native Bash and PowerShell wrappers come from an immutable
-Job Manager source dependency, rather than a second maintained copy.
+## What it does
 
-## Use from MoleditPy (plugin workflow)
+- **Queue:** CPU and memory budgets, priorities, dependencies, pause and force run. The
+  dashboard shows what is reserved beside what the whole PC is using right now.
+- **Durable jobs:** jobs run in detached supervisors and a SQLite ledger tracks them, so
+  closing MoleditPy or restarting the daemon does not stop a calculation.
+- **Accounts:** users and administrators, device keys, password changes and resets,
+  enable, disable and delete, with an activity log. See [Accounts](docs/ACCOUNTS.md).
+- **Job folders:** open a job's folder in File Explorer on the server PC, or browse and
+  download it from the Web UI or Job Manager. See [Job folders](docs/JOB_FOLDERS.md).
+- **Local by default:** no listener starts until you ask, and it binds `127.0.0.1`.
+  LAN and Tailscale access are explicit opt-ins.
 
-Install the latest **Job Server ZIP** using MoleditPy's Plugin Installer. Then open
-**Extensions → Job Server…**.
-If required Python libraries are missing, opening a Job Server dialog shows their
-names and installation guidance. Install them in MoleditPy's Python environment
-and retry; no daemon is started by this check.
-The ZIP is available from [GitHub Releases](https://github.com/HiroYokoyama/moleditpy_job_server/releases),
-and the ZIPs are included in the [Tests workflow's build artifacts](https://github.com/HiroYokoyama/moleditpy_job_server/actions/workflows/test.yml).
-Extract the artifact download and install the inner plugin ZIP, or build it from source below.
+## Quick start
 
-You can operate the server from MoleditPy dialogs; the command line is optional:
-
-1. On the **server PC**, open Job Server. If no administrator exists, the
-   **Job Server setup** screen opens. You can reopen it with **File → Setup guide…**.
-2. Set the optional remote Web address and resource budget. Leave the Web address
-   blank for local access. For Tailscale, copy its printed HTTPS URL into the field.
-3. Enter the initial administrator username and password, then choose
-   **Create, start and sign in**. This explicitly saves the configuration, creates
-   the account, starts the daemon and signs in this GUI. No second password prompt
-   is needed. An existing administrator prevents a second bootstrap account.
-4. Use **Queue** to pause/resume the queue or cancel a selected job.
-5. Open **Users & Devices** to view accounts and devices; use **Account** to add
-   users, disable the selected user, or revoke the selected device.
-6. Open **Settings** to configure resource budgets, limits, and the daemon runtime.
-   Save changes, then choose **Server → Restart** to apply them.
-7. Choose **File → Open Web UI** to open the browser interface when you want it.
-
-For an already configured server, the setup screen does not open automatically.
-Use **Account → Sign in / register device…** for its desktop administration window.
-The desktop keeps its registered device credential and can authenticate on later
-uses without saving the administrator password. Initial setup can also be run from
-**Account → Create initial administrator…**; its dialog states that this starts the
-server and signs in the GUI. Closing the guide without applying it creates no
-account and starts no server.
+1. In MoleditPy, install the latest **Job Server ZIP** from
+   [Releases](https://github.com/HiroYokoyama/moleditpy_job_server/releases) with the Plugin Installer.
+2. Open **Extensions → Job Server…**. If Python libraries are missing, it names them.
+3. On first use, the setup guide asks for a resource budget and an administrator, then
+   starts the server and signs in this window. A new server's budget starts at this PC's size.
+4. To reach it from another PC, follow [Connecting from another PC](docs/LAN_SETUP.md) ([日本語](docs/LAN_SETUP_JP.md)).
+5. In [Job Manager](docs/JOB_MANAGER.md), add a Job Server host and choose **Sign in / register device**.
 
 ![Job Server first-run setup](docs/gui-setup.png)
 
-Username and password are entered together in one dialog. Successful actions show
-a **Success** dialog, and interactive errors remain visible until dismissed.
-The administration window and Job Manager register desktop devices. Browser sign-in
-uses a separate temporary session and does not register a device or store a private
-key. Signing in to one does not sign in the others. **Stop** and **Add user** require
-signing in within the administration window first. If its credential file is
-missing, the dialog explains how to register instead of reporting "File not found".
+Closing the window does not stop the daemon. **Server → Stop** stops it and preserves
+running jobs. A portable MoleditPy build needs a Python selected in **Settings → Daemon Python runtime**.
 
-The browser shows only sign-in before authentication. Connection failures and
-an unconfigured remote HTTPS origin appear on that screen instead of leaving
-the page at Connecting. The administration GUI remains available locally for
-initial account setup and explicit server start.
+## Desktop window
 
-For pending jobs, administrators can set **Priority** from -1000 to 1000; higher
-values run first, with FIFO order for ties. **Force run** explicitly overrides
-queue pause, queue order, CPU/memory budgets and per-user active-job limits. It can
-overcommit this PC and requires confirmation. Dependency completion/success rules,
-input validation and one-time dispatch still apply. A forced running job counts
-against the capacity available to subsequent ordinary jobs. These controls operate
-on the server queue through the administration GUI and Web job details.
-Double-click a GUI job, or choose **Queue → Job details…**, to inspect its state,
-command, resource request, dependency, latest output and result file metadata.
+Right-click a job, user or device for its actions. The same actions are in the menus.
 
-![Job Server desktop job details with synthetic output](docs/gui-job-details.png)
+![Users and devices tab with its right-click menu](docs/gui-users.png)
 
-For a remote server, create the initial account on that server PC (for example,
-through a remote desktop session), then register Job Manager on the client PC using
-that account and the server's HTTPS URL. Initial-account creation is not exposed
-as an unauthenticated network operation.
+| Tab | Use it to |
+|---|---|
+| **Dashboard** | See server state, live CPU and memory, reservations and jobs. Filter jobs, open details, set priority, force run, cancel or open the job folder. |
+| **Users & Devices** | Add users or administrators, reset passwords, enable, disable or delete users, switch user and administrator, and revoke devices. Change your own password. |
+| **Activity** | Read recent logins, account changes and job events. |
+| **Settings** | Set the network, budgets, commands run before each job, the job folder and the runtime. Save, then choose **Server → Restart**. |
 
-**Start, Stop, Restart, Users & Devices, Settings, and Open Logs** are available from
-the Job Server window's menus and tabs. The banner at the top of the Dashboard tab shows
-the server state at a glance: green when online and accepting jobs, amber when the queue
-is paused or this window is not signed in, and red when no daemon answers. Closing or reloading the dialog does not stop the daemon;
-running jobs continue when MoleditPy closes. Stop preserves running supervisors.
+Double-click a job to see its command, latest output and result files.
 
-For ordinary Python-based MoleditPy, the plugin uses the application's Python runtime.
-For a frozen/portable application, select a Python executable in **Settings → Daemon
-Python runtime**, with the server dependencies installed in that environment.
+![Job details with synthetic output](docs/gui-job-details.png)
 
-Job Manager **2.6.0 or later** adds the server as a normal destination for submission,
-monitoring and downloading. Both the MoleditPy dialogs and browser UI are supported;
-use whichever suits the task. Neither requires operating the headless CLI day to day.
+## Web UI
 
-## Optional headless installation
+Open **http://127.0.0.1:8766/** on the server PC, or the address you set up for other PCs.
+Users can submit jobs, follow output, browse job folders, download files, change their
+password and revoke their own devices. Administrators also get queue controls and
+**Users & devices**.
 
-Python 3.11+; use a low-privilege OS account.
+![Web user administration](docs/web-accounts.png)
+
+![Web job folder browser](docs/web-job-folder.png)
+
+Sign-in lasts at most 15 minutes in that tab. Administrator actions need a sign-in
+within the last 5 minutes. Browser sign-in registers no device and saves no password.
+
+## Headless server
+
+Python 3.11+, on a low-privilege OS account. Qt and MoleditPy are not needed.
 
 ```sh
 python -m pip install moleditpy-job-server
@@ -119,151 +91,16 @@ moleditpy-job-server create-admin
 moleditpy-job-server serve
 ```
 
-The headless installation does not require Qt or MoleditPy. Install
-`moleditpy-job-server[gui]` for the optional administration dialogs.
-To install from source instead:
+| Command | Purpose |
+|---|---|
+| `init` | Write a configuration, with this PC's size as the budget |
+| `create-admin` | Create the first administrator |
+| `serve` | Run the server |
+| `status` | Ask a running server for its health |
+| `reset-password <username>` | Recover a forgotten password on the server PC |
 
-```sh
-git clone --recurse-submodules https://github.com/HiroYokoyama/moleditpy_job_server.git
-cd moleditpy_job_server
-python -m pip install ".[gui]"
-python -m job_server init
-python -m job_server create-admin
-python -m job_server serve
-```
-
-Open **http://127.0.0.1:8766/** on the same machine. Sign in with the administrator
-you created. Web sign-in survives reloading the same tab. Its short-lived token is
-kept in tab-scoped session storage, with no password or device private key saved.
-Reloading validates the session with the server before showing the dashboard.
-Signing out removes the saved token and invalidates the server session. Storage
-is scoped to the tab; the server token expires within 15 minutes
-(or the configured lifetime if shorter). Administrator operations require a sign-in
-within the last five minutes. Desktop device credentials remain separate.
-
-CLI commands accept `--config /path/to/settings.json` before or after the command.
-Persistent data defaults to `~/.moleditpy/job_server/`, outside installed plugin code.
-The listener starts only on explicit `serve` or GUI Start and binds **127.0.0.1** by default. Direct LAN HTTP listening is optional.
-
-### MoleditPy plugin
-
-```sh
-python scripts/build_plugin.py
-```
-
-Install the generated Job Server ZIP in `dist/` using MoleditPy's Plugin Installer. Open
-**Extensions → Job Server…**. The GUI can bootstrap the first
-administrator, start/stop/restart the daemon, pause/resume the queue, manage accounts
-and device keys, and cancel jobs. Reloading or closing the plugin does not stop the daemon.
-For a frozen/portable MoleditPy application, install the server in a Python environment
-and set `python_executable` in settings to that environment's interpreter.
-
-### Job Manager integration
-
-Install [Job Manager 2.6.0 or later](https://github.com/HiroYokoyama/moleditpy_job_manager/releases)
-through its normal Plugin Installer/registry entry. Install optional
-`cryptography>=50.0.2` in Job Manager's Python environment to enable **Job Server (HTTPS)**.
-Existing SSH and local backends do not require it. In **Job Manager → Hosts**, add a
-Job Server host, configure the HTTPS origin (HTTP is allowed only on localhost),
-and click **Sign in / register device**. The server's execution OS selects the native
-scheduler. Submit, monitor, tail, cancel, and download then use the normal Job Manager UI.
-
-For development and regression checks, build a reproducible companion from this
-server's pinned older Job Manager source:
-
-```sh
-python scripts/build_job_manager.py
-```
-
-The test-only companion is `dist/job_manager_job_server.zip`. CI builds and validates
-it, but it is excluded from release downloads, distribution artifacts and `SHA256SUMS`.
-Install the normal Job Manager 2.6.0+ release for everyday use; installing this test
-companion would replace it with the pinned older version plus the integration overlay.
-
-The companion is generated from the audited upstream commit and an explicit integration
-overlay. It does not change your sibling Job Manager repository or its upstream branch.
-`integration/job_manager.patch` records changes for upstream review;
-`integration/server_backend.py` is the additional bridge module.
-
-### Multiple connection addresses and optional LAN HTTP
-
-In **Settings**, enter Tailscale or proxy origins, one per line, in **Other web URLs**. Existing
-`public_url` and `public_urls` configurations appear in this single field.
-Browser requests use an exact origin allowlist, without wildcards.
-
-For direct access from another LAN PC, enable **local HTTPS**, tick this PC's
-private IPs or `.local` name in **Reachable from other PCs at**, save, then choose **Server > Restart**.
-The HTTPS port defaults to 8767. The server creates a persistent local CA and
-renews its server certificate when needed at startup. Use **Create / show CA
-certificate...** to copy the fingerprint or export the public CA.
-
-Job Manager's **Trust local server CA...** retrieves the CA and displays its
-fingerprint for you to compare with the server PC before saving a local CA copy on every platform. Windows also registers
-it in the current user's certificate store; Mac/Linux use the saved connection CA. Username and password share one sign-in
-dialog. Browser trust registration uses the system/browser certificate manager.
-
-The daemon retains localhost HTTP administration. LAN HTTP is also available by
-explicit opt-in and uses the HTTP port, normally 8766. HTTP credentials and job
-contents are unencrypted. All direct listeners require a specific private IP;
-wildcard, public, DNS and link-local bind addresses are rejected. No firewall rules
-are changed automatically. Restrict server ports to trusted LAN clients and never
-use public tunnels or router forwarding. See [LAN setup](docs/LAN_ACCESS.md).
-
-Python clients must opt in separately:
-
-```python
-client = JobServerClient("http://192.168.1.20:8080", "device.key", allow_lan_http=True)
-```
-
-The generated development companion adds a per-host **Allow trusted LAN HTTP**
-checkbox, used for enrollment and subsequent connections. Use a Job Manager release that includes the matching per-host LAN HTTP option;
-older Job Manager releases require HTTPS for remote connections.
-HTTPS and localhost remain compatible with existing clients. HTTP clients bypass
-environment proxies and refuse redirects to keep credentials on the selected origin.
-
-### HTTPS on a private LAN or Tailscale tailnet
-
-**Setting up HTTPS yourself on a LAN can be cumbersome.** It requires a TLS proxy,
-a certificate matching the server address, and a way for every client to trust that
-certificate. A private IP address alone does not provide a trusted HTTPS endpoint.
-For a small lab, **Tailscale Serve is the simpler setup**: it manages HTTPS
-certificates and forwards connections to the local Job Server.
-
-1. Install Tailscale on the server PC and each client PC, and connect them to the
-   same tailnet with access permitted between them.
-2. Start Job Server on the server PC. Its default local address is
-   `http://127.0.0.1:8766`.
-3. On that **server PC**, run:
-
-   ```sh
-   tailscale serve --bg http://127.0.0.1:8766
-   ```
-
-   If prompted, follow Tailscale's setup link to enable HTTPS for the tailnet.
-   If you changed Job Server's port, replace `8766` with that port.
-4. Copy the **HTTPS URL printed by Tailscale Serve** into Job Manager's
-   **Hosts → Server URL**, then use **Sign in / register device**. Use the printed
-   hostname, not the server's LAN IP, and do not append `:8766` to that HTTPS URL.
-5. To use the browser UI, paste that same HTTPS URL in Job Server's
-   **Settings → Other web URLs**, save the configuration, then
-   choose **Server → Restart**. The JSON setting is `public_urls` (one origin per list entry). This enables browser access at that address. Other website addresses remain rejected.
-
-The daemon stays on loopback and ignores forwarded headers. HTTP on
-`127.0.0.1:8766` is the local connection from Tailscale Serve to Job Server; remote
-clients connect to the HTTPS URL. Same-PC clients can use the loopback HTTP URL
-directly without setting up HTTPS.
-Limit access to trusted members using your tailnet access policy. Verify that this
-service is not exposed by an existing Funnel or public proxy configuration.
-[Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve) shares within
-your tailnet. [Tailscale Funnel](https://tailscale.com/docs/features/tailscale-funnel)
-publishes to the internet and **must never be used with Job Server**.
-
-For a LAN without Tailscale, terminate HTTPS in a proxy on the server PC, restrict
-it with your firewall to trusted local clients, and configure certificate trust on
-each client. Job Manager's host profile supports a CA certificate file for your
-own certificate authority. Add the proxy's exact HTTPS origin to `public_urls` if
-using the browser UI. Python clients validate TLS and refuse redirects. Never
-forward the service through an internet-facing proxy or router port mapping.
+Every command accepts `--config /path/to/settings.json`. Data lives in
+`~/.moleditpy/job_server/`. Install `moleditpy-job-server[gui]` for the desktop window.
 
 ## Python client
 
@@ -282,120 +119,43 @@ status = client.request("GET", f"/jobs/{job['id']}")
 client.download(job["id"], "result.out", "./results/result.out")
 ```
 
-Reuse the same idempotency key for retries of a submission. Uploads resume at a
-verified contiguous offset. Python downloads resume into `.partial`, verify SHA-256,
-and rename on success. Browser downloads verify hashes but buffer the result in memory;
-use the Python client for large results. Browser input hashing also uses memory.
-Windows client credentials use DPAPI; POSIX credential files require mode 0600.
+Reuse an idempotency key to retry a submission. Uploads and Python downloads resume and
+verify SHA-256. Browser downloads hold the file in memory, so use Python for large results.
 
-## Submitting from Windows to WSL
+## Limits
 
-You can launch a Linux program by putting `wsl.exe` in the command field of a
-Windows-native Job Server destination. For example, with ORCA installed inside Ubuntu:
+CPU and memory budgets are **advisory**: they decide when jobs start, not what a job may
+use. All jobs share the service OS account, so they are not isolated from each other.
+This is a service for trusted users. See [SECURITY.md](SECURITY.md) and
+[Execution and limits](docs/EXECUTION.md).
 
-```powershell
-wsl.exe -d Ubuntu --exec /opt/orca/orca {input}
-```
+## Documentation
 
-Replace `Ubuntu` and `/opt/orca/orca` with your distribution and Linux executable.
-`{input}` is the uploaded input filename; leave the placeholder unquoted because
-the server quotes it. The WSL distribution must be available to the **Windows account
-running Job Server**. For a remote server, this means WSL on that server, not on the
-PC submitting the job. Check its distributions with `wsl.exe --list --verbose`.
-
-WSL normally inherits the Windows command's working directory, so this example
-uses the uploaded files in the Windows job directory through its mounted drive.
-Explicit paths passed to Linux programs must use Linux syntax (`/home/...` or
-`/mnt/c/...`), not `C:\...`. `--exec` directly launches the executable; if the
-calculation needs Conda, MPI or other shell setup, put that setup in a Linux wrapper
-script and invoke the script instead. See Microsoft's
-[Windows/WSL interoperability documentation](https://learn.microsoft.com/en-us/windows/wsl/filesystems).
-
-**Calling `wsl.exe` from a Windows job does not establish WSL process-group management.**
-Cancellation and walltime enforcement in Windows mode terminate the Windows process
-tree; do not assume every Linux descendant stops. Files written elsewhere inside WSL
-are also outside that Windows job's result directory and storage checks.
-
-For the server's WSL execution adapter, set these fields in its existing settings,
-then restart the daemon:
-
-```json
-{
-  "executor": "wsl",
-  "wsl_distribution": "Ubuntu",
-  "wsl_root": "/home/jobserver/.moleditpy/job_server"
-}
-```
-
-Use a `/home/...` root writable by the distribution's execution user. This mode
-places inputs/results in the Linux filesystem and uses `setsid` plus Linux
-process-group signals for cancellation. Submit Linux commands directly, such as
-`/opt/orca/orca {input} > {stem}.out`, without another `wsl.exe` prefix. Job Manager
-selects the Bash scheduler when registering with this server. Execution mode is
-**server-wide**; each job cannot independently switch a Windows server to WSL.
-
-Verified on Windows with the Ubuntu WSL distribution: synthetic job submission,
-normal and failed completion, input/result transfer, roots containing spaces,
-and cleanup of background descendants after completion. Wrappers use LF line
-endings for Bash. ORCA calculations and live cancellation on this adapter have
-not been verified; native Windows/Linux tests cover cancellation separately.
-
-For WSL on your own PC without a shared server, Job Manager also offers
-**Hosts → This machine, inside WSL (no SSH)** with a distribution selector.
-
-## Execution and limits
-
-- Linux native and WSL-native daemon: Bash and process groups.
-- Windows native: PowerShell `-NoProfile -NonInteractive`, suspended launch into a
-  Windows Job Object before execution, process-tree cleanup on cancellation.
-- Windows-hosted WSL: configure `executor: "wsl"`, an approved `wsl_distribution`,
-  and a `/home/...` `wsl_root`. Upload/commit/work directories live in the distribution
-  through its UNC filesystem; commands run through `wsl.exe` and `setsid`.
-- CPU/RAM limits are **advisory queue budgets**, not kernel-enforced usage limits.
-  Walltime and output storage checks stop offending jobs. The initial storage setting
-  limits cumulative declared inputs per user and work-directory size per job.
-- Dependencies use server job IDs. Failed dependencies remain visibly BLOCKED unless
-  `chain_any` is set. Arbitrary existing directories, force-run, HPC module/directive
-  options, and scheduled start times are rejected.
-- An ambiguous dispatch claim or missing supervisor is held with `NEEDS_RECHECK`,
-  preserving its allocation and never automatically executing it again.
-- Repeated reconciliation of an unchanged `NEEDS_RECHECK` warning does not start
-  another update transaction. Uncertain jobs remain RUNNING with allocations reserved.
-- Job Manager backend operations reuse bounded in-memory authentication state;
-  polling no longer creates a session and authentication event each time. Reuse is
-  isolated by server/credential/TLS trust, respects expiry and administrative freshness,
-  and is invalidated by key/trust changes or HTTP 401. Bearer tokens are not persisted.
-- Privileged administrative operations require device authentication within 5 minutes.
-- Automatic deletion is off; data and the idempotency ledger are retained.
-
-This is a trusted-user service. Arbitrary commands have the OS account's permissions:
-HTTP ACLs and working directories do not isolate mutually untrusted jobs. See
-[SECURITY.md](SECURITY.md) and [the specification audit](docs/SPEC_AUDIT.md).
+| Topic | Page |
+|---|---|
+| Users, passwords, devices and recovery | [Accounts](docs/ACCOUNTS.md) |
+| Reaching the server from another PC | [Step by step](docs/LAN_SETUP.md) ([日本語](docs/LAN_SETUP_JP.md)), [LAN details](docs/LAN_ACCESS.md), [HTTPS and Tailscale](docs/REMOTE_ACCESS.md) |
+| Job Manager | [Integration](docs/JOB_MANAGER.md) |
+| Job folder API | [Job folders](docs/JOB_FOLDERS.md) |
+| Running Linux programs from Windows | [WSL](docs/WSL.md) |
+| Executors, walltime and storage | [Execution and limits](docs/EXECUTION.md) |
+| Security | [SECURITY.md](SECURITY.md), [audit](docs/SECURITY_AUDIT.md), [specification audit](docs/SPEC_AUDIT.md) |
+| Testing and releases | [Verification](docs/VERIFICATION.md), [test coverage](docs/TESTING.md), [workflows](docs/WORKFLOWS.md) |
 
 ## Development
 
 ```sh
+git clone --recurse-submodules https://github.com/HiroYokoyama/moleditpy_job_server.git
+cd moleditpy_job_server
 python -m pip install -e ".[test,gui]"
 python -m pytest -q -n 4
 python -m ruff check job_server scripts tests integration setup.py
-python scripts/run_regression.py
 python -m build
 python scripts/build_plugin.py
-python scripts/build_job_manager.py
 ```
 
-CI covers Python 3.11/3.12/3.13 on Linux and Windows, including Qt dialogs, real native
-job execution, coverage reports, packaging, and the patched Job Manager regression suite.
-Security CI audits dependencies and source on each change and weekly.
-Windows-hosted WSL needs a machine
-with an installed distribution; its end-to-end acceptance is not claimed by native CI.
-See [verification](docs/VERIFICATION.md) for actual results and outstanding platform checks.
-See [workflow coverage](docs/TESTING.md) for automated scenarios and the manual package-integration matrix.
-See [workflows](docs/WORKFLOWS.md) for release/registry setup and
-[security audit](docs/SECURITY_AUDIT.md) for findings and remaining limitations.
+## License
 
-LGPL-3.0-or-later. Upstream execution code retains its original license and attribution.
-
-## Licensing scope
-
-First-party code in this migration is LGPL-3.0-or-later. See [LICENSE](LICENSE), [COPYING](COPYING) and [dependency/provenance terms](LICENSING.md). Third-party components and historical releases retain their own terms.
+LGPL-3.0-or-later. See [LICENSE](LICENSE), [COPYING](COPYING) and
+[dependency and provenance terms](LICENSING.md). Upstream execution code and third-party
+components keep their own terms.
