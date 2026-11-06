@@ -1,0 +1,55 @@
+title: "Job Server"
+description: "Run a shared job queue for trusted MoleditPy users on one PC."
+baseurl: "/moleditpy_job_server"
+url: "https://hiroyokoyama.github.io"
+main_site_url: "https://hiroyokoyama.github.io/python_molecular_editor"
+repository: "HiroYokoyama/moleditpy_job_server"
+
+markdown: kramdown
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge
+
+plugins:
+  - jekyll-optional-front-matter
+  - jekyll-readme-index
+  - jekyll-relative-links
+
+readme_index:
+  enabled: true
+  remove_originals: false
+  with_frontmatter: true
+
+defaults:
+  - scope:
+      path: ""
+      type: pages
+    values:
+      layout: page
+
+exclude:
+  - build
+  - deploy
+  - dist
+  - integration
+  - job_server
+  - scripts
+  - test-results
+  - tests
+  - upstream
+  - __pycache__
+  - .pytest_cache
+  - .ruff_cache
+  - AGENTS.md
+  - CLAUDE.md
+  - CHANGELOG.md
+  - COPYING
+  - MANIFEST.in
+  - "*.py"
+  - "*.toml"
+  - "*.ini"
+  - "*.cfg"
+  - "*.zip"
+  - "*.whl"
+  - "*.egg-info"
+  - "*.json"
