@@ -6,6 +6,7 @@
 [![Downloads](https://img.shields.io/github/downloads/HiroYokoyama/moleditpy_job_server/total)](https://github.com/HiroYokoyama/moleditpy_job_server/releases)
 [![License: GPL v3](https://img.shields.io/badge/License-LGPLv3-blue.svg)](LICENSE)
 [![MoleditPy](https://img.shields.io/badge/MoleditPy-5.x-3577F7)](https://github.com/HiroYokoyama/python_molecular_editor)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23993235.svg)](https://doi.org/10.5281/zenodo.23993235)
 
 A shared job queue for one PC on your network. Trusted users submit calculations from
 [Job Manager](https://github.com/HiroYokoyama/moleditpy_job_manager), the browser or
