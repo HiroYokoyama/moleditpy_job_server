@@ -5,3 +5,8 @@
 @media(max-width:760px){.connection{flex-wrap:wrap;justify-content:flex-end;max-width:65%}.connection button{margin-left:0}.connection #connection-text{max-width:140px}}
 
 body.signed-out{display:block}body.signed-out .sidebar,body.signed-out main{display:none}body.signed-out #login-dialog{position:fixed;top:50%;transform:translateY(-50%);margin:0 auto;max-width:min(470px,calc(100vw - 32px));max-height:calc(100dvh - 32px);overflow:auto}
+@media(min-width:761px){.metrics{grid-template-columns:repeat(3,1fr)}}
+.row-actions{display:flex;flex-wrap:wrap;gap:6px}.row-actions button{padding:6px 10px;font-size:12px}
+.folder-link{border:0;background:transparent;color:var(--teal);padding:0;font-weight:600;white-space:normal;text-align:left}.folder-link:hover{background:transparent;text-decoration:underline}
+#job-filter{margin:0;width:170px;padding:9px 12px}.activity{margin-top:28px}.activity summary{cursor:pointer;font-weight:600}.activity p{font-size:12px;color:var(--muted)}
+#password-form h3{margin-top:0}#password-status,#reset-status{font-size:13px;color:var(--muted)}#browse-path{word-break:break-all}

@@ -40,6 +40,24 @@ class Scheduler:
                 logging.exception("Dispatcher tick failed")
             self.stop_event.wait(0.2)
 
+    @staticmethod
+    def supervisor_alive(job):
+        """Whether this job's own supervisor process still exists; a reused PID does not count."""
+        if not job["pid"]:
+            return False
+        try:
+            process = psutil.Process(job["pid"])
+            return (
+                abs(process.create_time() - job["process_started"]) < 0.01
+                and process.is_running()
+                and process.status() != psutil.STATUS_ZOMBIE
+            )
+        except psutil.NoSuchProcess:
+            return False
+        except (psutil.AccessDenied, TypeError):
+            # Unknown is not gone: never release a job that might still be computing.
+            return True
+
     def reconcile(self):
         self.children[:] = [child for child in self.children if child.poll() is None]
         for job in self.db.rows("SELECT * FROM jobs WHERE state='RUNNING'"):
@@ -216,3 +234,51 @@ class Scheduler:
             "paused": self.db.metadata("paused") == "true",
             "enforcement": "advisory",
         }
+
+
+_usage_lock = threading.Lock()
+_usage = (0.0, None)
+_cpu_times = None
+
+
+def _cpu_percent():
+    """Busy share since the previous reading, whichever request thread takes it.
+
+    psutil.cpu_percent keeps its previous sample per thread, so on a worker pool
+    it reads 0.0 whenever a request lands on a thread it has not seen.
+    """
+    global _cpu_times
+    times = psutil.cpu_times()
+    # Linux already counts guest time inside user time.
+    total = sum(times) - getattr(times, "guest", 0) - getattr(times, "guest_nice", 0)
+    idle = times.idle + getattr(times, "iowait", 0)
+    previous, _cpu_times = _cpu_times, (total, idle)
+    if previous is None or total <= previous[0]:
+        return 0.0
+    busy = 1 - (idle - previous[1]) / (total - previous[0])
+    return round(max(0.0, min(1.0, busy)) * 100, 1)
+
+
+def host_usage():
+    """Whole-PC CPU and memory use, as distinct from the advisory job reservations."""
+    global _usage
+    with _usage_lock:
+        # Readings moments apart, such as from a second window, would measure nothing.
+        taken, reading = _usage
+        if reading is not None and time.monotonic() - taken < 1:
+            return reading
+        try:
+            memory = psutil.virtual_memory()
+            reading = {
+                "cpu_percent": _cpu_percent(),
+                "memory_percent": memory.percent,
+                "memory_used_mb": (memory.total - memory.available) // (1024 * 1024),
+                "memory_total_mb": memory.total // (1024 * 1024),
+            }
+        except (OSError, psutil.Error):
+            reading = {
+                "cpu_percent": None, "memory_percent": None,
+                "memory_used_mb": None, "memory_total_mb": None,
+            }
+        _usage = (time.monotonic(), reading)
+        return reading

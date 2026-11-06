@@ -62,4 +62,4 @@ real WSL execution/cancellation and Linux-filesystem UNC rename must be checked 
 WSL-capable host before claiming the draft's full three-platform acceptance matrix.
 An elevated distribution-list check on 2026-10-14 succeeded, but found only a
 container-managed distribution and no calculation distribution. No calculation was
-run there; the new Windows-to-WSL README examples remain source/documentation-based.
+run there; the Windows-to-WSL examples in docs/WSL.md remain source/documentation-based.

@@ -2,10 +2,11 @@
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QPlainTextEdit, QDialog, QDialogButtonBox, QFormLayout, QLabel, QLineEdit, QVBoxLayout, QScrollArea, QWidget,
+    QCheckBox, QPlainTextEdit, QDialog, QDialogButtonBox, QFormLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QScrollArea, QWidget,
 )
 
-from .units import GBSpinBox, FocusSpinBox
+from ..settings import pc_resources
+from .units import GBSpinBox, FocusSpinBox, gb
 from .network import LanAddressList
 
 
@@ -83,6 +84,15 @@ class SetupDialog(QDialog):
         self.python.setPlaceholderText("Automatic; select a Python executable for portable builds")
         resources.addRow("CPU budget", self.cpus)
         resources.addRow("Memory budget", self.memory)
+        cpus, memory_mb = pc_resources()
+        self.match_pc = QPushButton(f"Use this PC's size ({cpus} CPUs, {gb(memory_mb)} GB)")
+
+        def match_pc():
+            self.cpus.setValue(cpus)
+            self.memory.set_mb(memory_mb)
+
+        self.match_pc.clicked.connect(match_pc)
+        resources.addRow("", self.match_pc)
         resources.addRow("Daemon Python", self.python)
         layout.addLayout(resources)
         self.username, self.password, self.confirm = QLineEdit(), QLineEdit(), QLineEdit()

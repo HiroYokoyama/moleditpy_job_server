@@ -1,5 +1,6 @@
 import json
 import re
+import time
 import uuid
 from contextlib import asynccontextmanager
 
@@ -19,8 +20,11 @@ from .errors import ServerError, reject
 from .files import contained, is_link, open_regular, sha256
 from .instance import InstanceLock
 from .jobs import Jobs
-from .scheduler import Scheduler
-from .schemas import Challenge, Enrollment, ForceRun, JobSpec, Login, Pause, Priority, Token, UserCreate
+from .scheduler import Scheduler, host_usage
+from .schemas import (
+    Challenge, Enrollment, ForceRun, JobSpec, Login, PasswordChange, PasswordReset, Pause, Priority,
+    RoleChange, Token, UserCreate,
+)
 from .settings import Settings
 
 
@@ -31,6 +35,7 @@ def create_app(settings=None, dispatch=True):
     jobs = Jobs(db, settings, auth)
     scheduler = Scheduler(db, jobs, settings)
     lock = InstanceLock(settings.root, port=settings.port)
+    host_usage()  # The first CPU reading only starts the measurement.
 
     @asynccontextmanager
     async def lifespan(app):
@@ -200,6 +205,7 @@ def create_app(settings=None, dispatch=True):
                 "queue_priority",
                 "force_run",
                 "job_folders",
+                "password_change",
             ],
             "max_chunk_bytes": settings.max_chunk_bytes,
             "resources": scheduler.resources(),
@@ -247,6 +253,13 @@ def create_app(settings=None, dispatch=True):
                 (p["user_id"],),
             ),
         }
+
+    @app.post(prefix + "/me/password")
+    def change_password(body: PasswordChange, request: Request, p=Depends(principal)):
+        limited(request)
+        return auth.change_password(
+            p, body.current_password, body.new_password, revoke_devices=body.revoke_devices,
+        )
 
     @app.post(prefix + "/me/devices", status_code=201)
     def add_device(body: Enrollment, p=Depends(principal)):
@@ -429,7 +442,7 @@ def create_app(settings=None, dispatch=True):
 
     @app.get(prefix + "/system/resources")
     def resources(p=Depends(principal)):
-        return scheduler.resources()
+        return {**scheduler.resources(), **host_usage()}
 
     @app.get(prefix + "/admin/jobs")
     def all_jobs(
@@ -445,7 +458,10 @@ def create_app(settings=None, dispatch=True):
 
     @app.get(prefix + "/admin/users")
     def users(p=Depends(admin)):
-        return db.rows("SELECT id,username,role,enabled,created_at FROM users ORDER BY username")
+        return db.rows(
+            "SELECT id,username,role,enabled,created_at FROM users WHERE role<>'deleted' "
+            "ORDER BY username"
+        )
 
     @app.get(prefix + "/admin/devices")
     def all_devices(p=Depends(admin)):
@@ -459,16 +475,28 @@ def create_app(settings=None, dispatch=True):
 
     @app.post(prefix + "/admin/users/{user_id}/disable")
     def disable_user(user_id: str, p=Depends(admin)):
-        if user_id == p["user_id"]:
-            reject(409, "self_disable", "Use another administrator to disable your own account")
-        with db.transaction() as c:
-            auth.admin(p)
-            if not c.execute("SELECT 1 FROM users WHERE id=?", (user_id,)).fetchone():
-                reject(404, "not_found", "User not found")
-            c.execute("UPDATE users SET enabled=0 WHERE id=?", (user_id,))
-            c.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
-            db.event(c, "user_disabled", p["user_id"], user_id=user_id)
+        auth.set_enabled(user_id, False, p)
         return {"disabled": True}
+
+    @app.post(prefix + "/admin/users/{user_id}/enable")
+    def enable_user(user_id: str, p=Depends(admin)):
+        auth.set_enabled(user_id, True, p)
+        return {"enabled": True}
+
+    @app.post(prefix + "/admin/users/{user_id}/password")
+    def reset_password(user_id: str, body: PasswordReset, p=Depends(admin)):
+        return auth.reset_password(
+            user_id, body.new_password, principal=p, revoke_devices=body.revoke_devices,
+        )
+
+    @app.delete(prefix + "/admin/users/{user_id}")
+    def delete_user(user_id: str, p=Depends(admin)):
+        return auth.delete_user(user_id, p)
+
+    @app.post(prefix + "/admin/users/{user_id}/role")
+    def change_role(user_id: str, body: RoleChange, p=Depends(admin)):
+        auth.set_role(user_id, body.role, p)
+        return {"role": body.role}
 
     @app.post(prefix + "/admin/devices/{device_id}/revoke")
     def revoke_device(device_id: str, p=Depends(admin)):
@@ -507,8 +535,30 @@ def create_app(settings=None, dispatch=True):
             db.event(c, "job_force_run_requested", p["user_id"], job_id, force_run=body.force_run)
         return jobs.public(jobs.authorize(job_id, p))
 
+    @app.post(prefix + "/admin/jobs/{job_id}/mark-lost")
+    def mark_lost(job_id: str, p=Depends(admin)):
+        """Release a job the server cannot follow any more, such as after a reboot."""
+        with db.transaction() as c:
+            auth.admin(p)
+            job = jobs.authorize(job_id, p)
+            if job["state"] != "RUNNING" or not job["reason"].startswith("NEEDS_RECHECK"):
+                reject(409, "job_not_stuck", "Only a job flagged as needing a recheck can be marked lost")
+            if scheduler.supervisor_alive(job):
+                reject(409, "job_still_supervised", "This job's supervisor is still running")
+            c.execute(
+                "UPDATE jobs SET state='LOST',ended_at=?,reason=? WHERE id=? AND state='RUNNING'",
+                (time.time(), "Marked lost by an administrator", job_id),
+            )
+            db.event(c, "job_marked_lost", p["user_id"], job_id, previous_reason=job["reason"])
+        return jobs.public(jobs.authorize(job_id, p))
+
     @app.get(prefix + "/admin/events")
-    def events(p=Depends(admin), after: int = Query(0, ge=0, le=2**63 - 1)):
+    def events(
+        p=Depends(admin), after: int = Query(0, ge=0, le=2**63 - 1),
+        newest: int = Query(0, ge=0, le=1000),
+    ):
+        if newest:
+            return db.rows("SELECT * FROM events ORDER BY seq DESC LIMIT ?", (newest,))
         return db.rows("SELECT * FROM events WHERE seq>? ORDER BY seq LIMIT 1000", (after,))
 
     @app.post(prefix + "/admin/shutdown", status_code=202)

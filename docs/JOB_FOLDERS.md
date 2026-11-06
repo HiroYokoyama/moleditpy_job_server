@@ -1,4 +1,16 @@
-# Job folders API (Server 0.7.0)
+# Job folders
+
+**On the server PC:** in the desktop window, right-click a job and choose **Open job folder
+in File Explorer**, or use the button in its details. It opens the job's real folder in the
+system file manager, and never opens or runs a file inside it.
+
+**From a browser:** a job's details page has a **Job folder** section. Open folders one at
+a time, download a file, or download a folder as a ZIP. Downloads are checked against the
+server's SHA-256, and names are only ever shown as text.
+
+**From Job Manager:** see the end of this page.
+
+## API (Server 0.7.0)
 
 Authenticated clients can browse a virtual root containing committed job UUIDs.
 Ordinary users see their own jobs; administrators can see all jobs. No endpoint
