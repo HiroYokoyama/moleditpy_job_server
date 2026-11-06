@@ -24,7 +24,7 @@ explicit opt-in and uses the HTTP port, normally 8766. HTTP credentials and job
 contents are unencrypted. All direct listeners require a specific private IP;
 wildcard, public, DNS and link-local bind addresses are rejected. No firewall rules
 are changed automatically. Restrict server ports to trusted LAN clients and never
-use public tunnels or router forwarding. See [LAN setup](docs/LAN_ACCESS.md).
+use public tunnels or router forwarding. See [LAN setup](LAN_ACCESS.md).
 
 Python clients must opt in separately:
 
