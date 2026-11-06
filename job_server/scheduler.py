@@ -216,3 +216,21 @@ class Scheduler:
             "paused": self.db.metadata("paused") == "true",
             "enforcement": "advisory",
         }
+
+
+def host_usage():
+    """Whole-PC CPU and memory use, as distinct from the advisory job reservations."""
+    try:
+        memory = psutil.virtual_memory()
+        return {
+            # Measured since the previous call, so this never blocks a request.
+            "cpu_percent": psutil.cpu_percent(interval=None),
+            "memory_percent": memory.percent,
+            "memory_used_mb": (memory.total - memory.available) // (1024 * 1024),
+            "memory_total_mb": memory.total // (1024 * 1024),
+        }
+    except (OSError, psutil.Error):
+        return {
+            "cpu_percent": None, "memory_percent": None,
+            "memory_used_mb": None, "memory_total_mb": None,
+        }

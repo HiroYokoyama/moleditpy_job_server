@@ -90,6 +90,21 @@ class UserCreate(Login):
     role: Literal["user", "admin"] = "user"
 
 
+class PasswordChange(Model):
+    current_password: StrictStr = Field(max_length=1024)
+    new_password: StrictStr = Field(min_length=1, max_length=1024)
+    revoke_devices: StrictBool = False
+
+
+class PasswordReset(Model):
+    new_password: StrictStr = Field(min_length=1, max_length=1024)
+    revoke_devices: StrictBool = False
+
+
+class RoleChange(Model):
+    role: Literal["user", "admin"]
+
+
 class Pause(Model):
     paused: StrictBool = True
 

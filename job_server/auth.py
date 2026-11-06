@@ -148,6 +148,99 @@ class Auth:
             principal = self.current(principal)
             c.execute("DELETE FROM sessions WHERE digest=?", (principal["digest"],))
 
+    @staticmethod
+    def _revoke_user_devices(c, user_id, keep=None):
+        """Revoke a user's devices, optionally keeping the one making the request."""
+        return c.execute(
+            "UPDATE devices SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL "
+            "AND id IS NOT ?",
+            (time.time(), user_id, keep),
+        ).rowcount
+
+    def change_password(self, principal, current, new, *, revoke_devices=False):
+        """Change the caller's own password; only proof of the old one authorizes it."""
+        # Per account as well as per address, so one stolen token cannot guess quickly.
+        self.rate_limit("password:" + principal["user_id"])
+        user = self.db.one("SELECT password_hash FROM users WHERE id=?", (principal["user_id"],))
+        if not verify_password(current, user["password_hash"] if user else self.dummy_hash) or not user:
+            # Not 401: a mistyped password must not end the signed-in session.
+            reject(403, "invalid_password", "The current password is incorrect")
+        if new == current:
+            reject(400, "password_unchanged", "Choose a password different from the current one")
+        encoded = password_hash(new)
+        with self.db.transaction() as c:
+            # Verified outside the write lock: a disable or another change that
+            # completed meanwhile must win.
+            principal = self.current(principal)
+            changed = c.execute(
+                "UPDATE users SET password_hash=? WHERE id=? AND enabled=1 AND password_hash=?",
+                (encoded, principal["user_id"], user["password_hash"]),
+            ).rowcount
+            if not changed:
+                reject(409, "password_changed", "The password changed meanwhile; try again")
+            c.execute(
+                "DELETE FROM sessions WHERE user_id=? AND digest<>?",
+                (principal["user_id"], principal["digest"]),
+            )
+            revoked = (
+                self._revoke_user_devices(c, principal["user_id"], principal["device_id"])
+                if revoke_devices else 0
+            )
+            self.db.event(c, "password_changed", principal["user_id"], devices_revoked=revoked)
+        return {"changed": True, "devices_revoked": revoked}
+
+    def reset_password(self, user_id, new, *, principal=None, local=False, revoke_devices=False):
+        """Replace another user's password. `local` is the on-server CLI recovery only."""
+        if principal is None and not local:
+            raise ValueError("A password reset needs an administrator or local access")
+        encoded = password_hash(new)
+        with self.db.transaction() as c:
+            actor = None
+            if principal is not None:
+                principal = self.admin(principal)
+                actor = principal["user_id"]
+                if user_id == actor:
+                    # Otherwise a stolen administrator token could skip the old password.
+                    reject(409, "self_reset", "Use Change password for your own account")
+            if not c.execute(
+                "UPDATE users SET password_hash=? WHERE id=?", (encoded, user_id)
+            ).rowcount:
+                reject(404, "not_found", "User not found")
+            c.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+            revoked = self._revoke_user_devices(c, user_id) if revoke_devices else 0
+            self.db.event(
+                c, "password_reset", actor, user_id=user_id, devices_revoked=revoked, local=local,
+            )
+        return {"reset": True, "devices_revoked": revoked}
+
+    def set_enabled(self, user_id, enabled, principal):
+        if not enabled and user_id == principal["user_id"]:
+            reject(409, "self_disable", "Use another administrator to disable your own account")
+        with self.db.transaction() as c:
+            principal = self.admin(principal)
+            if not c.execute(
+                "UPDATE users SET enabled=? WHERE id=?", (int(enabled), user_id)
+            ).rowcount:
+                reject(404, "not_found", "User not found")
+            if not enabled:
+                c.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+            self.db.event(
+                c, "user_enabled" if enabled else "user_disabled", principal["user_id"],
+                user_id=user_id,
+            )
+
+    def set_role(self, user_id, role, principal):
+        # The actor stays an administrator, so at least one always remains.
+        if user_id == principal["user_id"]:
+            reject(409, "self_role", "Use another administrator to change your own role")
+        with self.db.transaction() as c:
+            principal = self.admin(principal)
+            if not c.execute("UPDATE users SET role=? WHERE id=?", (role, user_id)).rowcount:
+                reject(404, "not_found", "User not found")
+            # Sessions read the role live; ending them makes the change visible at once.
+            c.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+            self.db.event(c, "user_role_changed", principal["user_id"], user_id=user_id, role=role)
+
     def principal(self, token, scope="access", *, allow_web=False):
         if not isinstance(token, str) or len(token) > 256:
             reject(401, "unauthenticated", "Authentication required")

@@ -13,6 +13,15 @@ from .files import contained, manifest, open_regular, sha256
 TERMINAL = {"DONE", "FAILED", "CANCELLED", "LOST"}
 
 
+def work_directory(settings, work_root, job_id, staging=False):
+    root = Path(work_root) if work_root else settings.root
+    if settings.execution_os == "wsl":
+        from .executor.wsl import native_root
+
+        root = native_root(settings)
+    return root / ("staging" if staging else "jobs") / job_id / "work"
+
+
 class Jobs:
     def __init__(self, db, settings, auth=None):
         self.db, self.settings = db, settings
@@ -32,12 +41,7 @@ class Jobs:
         # Each job keeps the root it started in, so changing the setting cannot
         # lose earlier results or move a job while it is running.
         job = self.db.one("SELECT work_root FROM jobs WHERE id=?", (job_id,))
-        root = Path(job["work_root"]) if job and job["work_root"] else self.settings.root
-        if self.settings.execution_os == "wsl":
-            from .executor.wsl import native_root
-
-            root = native_root(self.settings)
-        return root / ("staging" if staging else "jobs") / job_id / "work"
+        return work_directory(self.settings, job["work_root"] if job else "", job_id, staging)
 
     def authorize(self, job_id, principal):
         job = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))

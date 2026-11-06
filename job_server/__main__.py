@@ -11,9 +11,15 @@ def main():
     parser = argparse.ArgumentParser(description="MoleditPy Job Server — LAN computational helper")
     parser.add_argument("--config", type=Path)
     sub = parser.add_subparsers(dest="action", required=True)
-    for name in ("serve", "status", "init", "create-admin"):
+    for name in ("serve", "status", "init", "create-admin", "reset-password"):
         child = sub.add_parser(name)
         child.add_argument("--config", type=Path, default=argparse.SUPPRESS)
+        if name == "reset-password":
+            child.add_argument("username")
+            child.add_argument(
+                "--revoke-devices", action="store_true",
+                help="also revoke every device registered to this account",
+            )
     args = parser.parse_args()
     try:
         if args.action == "init":
@@ -49,6 +55,24 @@ def main():
                 if password != getpass.getpass("Repeat password: "):
                     raise ValueError("Passwords differ")
                 print(json.dumps(Auth(db, settings).create_initial_admin(username, password)))
+            finally:
+                db.close()
+        elif args.action == "reset-password":
+            from .auth import Auth
+            from .db import Database
+            # Recovery for a forgotten password. Write access to the data folder on
+            # the server PC already implies this authority; never expose it over HTTP.
+            db = Database(settings.root)
+            try:
+                user = db.one("SELECT id FROM users WHERE username=?", (args.username,))
+                if not user:
+                    raise RuntimeError("No such user")
+                password = getpass.getpass("New password: ")
+                if password != getpass.getpass("Repeat password: "):
+                    raise ValueError("Passwords differ")
+                print(json.dumps(Auth(db, settings).reset_password(
+                    user["id"], password, local=True, revoke_devices=args.revoke_devices,
+                )))
             finally:
                 db.close()
     except Exception as exc:
