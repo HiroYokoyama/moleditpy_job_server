@@ -132,7 +132,7 @@ def test_gui_construction_has_no_listener(tmp_path):
     config = tmp_path / "settings.json"
     Settings(data_dir=str(tmp_path)).save(config)
     dialog = Dashboard(config=config)
-    assert dialog.tabs.count() == 3
+    assert dialog.tabs.count() == 4
     assert "OFF" in dialog.message.text()
     dialog.close()
     app.processEvents()

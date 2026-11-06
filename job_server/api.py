@@ -457,7 +457,10 @@ def create_app(settings=None, dispatch=True):
 
     @app.get(prefix + "/admin/users")
     def users(p=Depends(admin)):
-        return db.rows("SELECT id,username,role,enabled,created_at FROM users ORDER BY username")
+        return db.rows(
+            "SELECT id,username,role,enabled,created_at FROM users WHERE role<>'deleted' "
+            "ORDER BY username"
+        )
 
     @app.get(prefix + "/admin/devices")
     def all_devices(p=Depends(admin)):
@@ -484,6 +487,10 @@ def create_app(settings=None, dispatch=True):
         return auth.reset_password(
             user_id, body.new_password, principal=p, revoke_devices=body.revoke_devices,
         )
+
+    @app.delete(prefix + "/admin/users/{user_id}")
+    def delete_user(user_id: str, p=Depends(admin)):
+        return auth.delete_user(user_id, p)
 
     @app.post(prefix + "/admin/users/{user_id}/role")
     def change_role(user_id: str, body: RoleChange, p=Depends(admin)):

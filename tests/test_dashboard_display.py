@@ -105,10 +105,9 @@ def test_account_menu_is_available_on_every_tab(dashboard, monkeypatch):
     for index in range(dashboard.tabs.count()):
         dashboard.tabs.setCurrentIndex(index)
         assert dashboard.sign_in_action.isEnabled()
-    from PySide6.QtWidgets import QPushButton
-
-    for index in [0, 1]:
-        assert not dashboard.tabs.widget(index).findChildren(QPushButton)
+    # Every button on the account tab is also in the menu and the right-click menu.
+    for entry in (dashboard.add_user_action, dashboard.delete_user_action, dashboard.reset_password_action):
+        assert entry in account.actions() and entry in dashboard._context_actions(dashboard.users)
 
 
 def test_start_is_queued_during_refresh_and_runs_once(dashboard, monkeypatch):
@@ -207,6 +206,7 @@ def test_refresh_displays_names_status_and_local_access_time(dashboard, monkeypa
     timestamp = 1700000000
     replies = {
         "/health": {"server_version": "fixture"},
+        "/me": {"user_id": "other", "username": "admin", "role": "admin"},
         "/system/resources": {"running": 1, "pending": 2, "reserved_cpus": 2, "cpus": 8,
                               "reserved_memory_mb": 1024, "memory_mb": 4096, "paused": False},
         "/admin/jobs": [
@@ -396,6 +396,7 @@ def test_status_banner_reports_each_server_state(dashboard, monkeypatch):
         "/admin/jobs": [{"id": "j", "owner_id": "u", "spec": {"name": "opt"},
                          "display_state": "RUNNING"}],
         "/admin/users": [], "/admin/devices": [],
+        "/me": {"user_id": "u", "username": "admin", "role": "admin"},
     })
     dashboard.refresh()
     assert dashboard.status_level == "online"

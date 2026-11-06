@@ -1,8 +1,11 @@
 
 from ._qt_callbacks import connect_queued
+import json
 import os
+import sqlite3
 import subprocess
 import time
+import uuid
 from collections import deque
 from urllib.parse import urlsplit
 from urllib.error import URLError
@@ -15,6 +18,9 @@ from PySide6.QtGui import QIcon, QAction, QBrush, QColor
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QComboBox,
+    QGridLayout,
+    QMenu,
     QPlainTextEdit,
     QDialog,
     QDialogButtonBox,
@@ -41,7 +47,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..client import JobServerClient
+from ..client import ClientError, JobServerClient
 from .units import GBSpinBox, FocusSpinBox, gb
 from .network import LanAddressList
 from ..settings import Settings
@@ -85,12 +91,26 @@ STATE_COLORS = {
 }
 
 
+TERMINAL_STATES = {"DONE", "FAILED", "CANCELLED", "CANCELED", "LOST"}
+JOB_PAGE = 100
+EVENT_LIMIT = 200
+#: The queue filter's choices and the job states each one shows.
+JOB_FILTERS = {
+    "All jobs": None,
+    "Running": {"RUNNING"},
+    "Waiting": {"PENDING", "QUEUED", "BLOCKED", "UPLOADING"},
+    "Finished": {"DONE"},
+    "Failed or cancelled": {"FAILED", "CANCELLED", "CANCELED", "LOST"},
+}
+FILE_MANAGER = "File Explorer" if os.name == "nt" else "the file manager"
+
+
 class Dashboard(QDialog):
     def __init__(self, parent=None, config=None):
         super().__init__(parent)
         self.setWindowTitle("Job Server")
         self.setWindowIcon(QIcon(str(Path(__file__).resolve().parents[1] / "web" / "icon.png")))
-        self.resize(900, 600)
+        self.resize(1000, 720)
         self.config = Path(config) if config else Settings().root / "settings.json"
         self.settings = Settings.load(self.config) if self.config.exists() else Settings()
         self.client = JobServerClient(
@@ -109,6 +129,11 @@ class Dashboard(QDialog):
         self.detail_dialog = None
         self.job_records = {}
         self.usernames = {}
+        self.user_records = {}
+        self.device_records = {}
+        self.me = None
+        self.own_device = None
+        self.job_page = 0
         layout = QVBoxLayout(self)
         self.menu_bar = QMenuBar(self)
         layout.setMenuBar(self.menu_bar)
@@ -127,7 +152,9 @@ class Dashboard(QDialog):
         layout.addWidget(self.tabs)
         self._dashboard()
         self._users()
+        self._activity()
         self._settings()
+        self.tabs.currentChanged.connect(lambda _: self._refresh_activity())
         self.timer = QTimer(self)
         self.timer.setInterval(3000)
         self.timer.timeout.connect(self.refresh)
@@ -158,20 +185,30 @@ class Dashboard(QDialog):
             f"tailscale serve --bg http://127.0.0.1:{self.settings.port}"))
         account = self.menu_bar.addMenu("Account")
         self.sign_in_action = action(account, "Sign in / register device...", self.sign_in)
+        self.change_password_action = action(account, "Change my password...", self.change_password)
         account.addSeparator()
         action(account, "Create initial administrator...", self.bootstrap)
-        action(account, "Add user...", self.add_user)
-        action(account, "Disable selected user...", self.disable_user)
-        action(account, "Revoke selected device...", self.revoke_device)
+        self.add_user_action = action(account, "Add user or administrator...", self.add_user)
+        self.reset_password_action = action(account, "Reset selected user's password...", self.reset_password)
+        self.toggle_user_action = action(account, "Disable selected user...", self.toggle_user)
+        self.toggle_role_action = action(account, "Make selected user an administrator...", self.toggle_role)
+        self.delete_user_action = action(account, "Delete selected user...", self.delete_user)
+        self.copy_user_action = action(account, "Copy username", self.copy_username)
+        account.addSeparator()
+        self.revoke_device_action = action(account, "Revoke selected device...", self.revoke_device)
+        self.copy_device_action = action(account, "Copy device ID", self.copy_device_id)
         queue = self.menu_bar.addMenu("Queue")
         action(queue, "Pause queue", lambda: self.pause(True))
         action(queue, "Resume queue", lambda: self.pause(False))
         queue.addSeparator()
         self.detail_action = action(queue, "Job details...", self.open_job_details)
+        self.folder_action = action(queue, f"Open job folder in {FILE_MANAGER}", self.open_job_folder)
+        self.copy_job_action = action(queue, "Copy job ID", self.copy_job_id)
+        queue.addSeparator()
         self.priority_action = action(queue, "Set priority...", self.set_priority)
         self.force_action = action(queue, "Force run selected job...", lambda: self.force_run(True))
         self.unforce_action = action(queue, "Cancel force-run request", lambda: self.force_run(False))
-        action(queue, "Cancel selected job", self.cancel)
+        self.cancel_action = action(queue, "Cancel selected job...", self.cancel)
 
     def copy_connection_addresses(self):
         urls = self.settings.connection_urls or [f"http://127.0.0.1:{self.settings.port}"]
@@ -191,12 +228,15 @@ class Dashboard(QDialog):
         layout.setContentsMargins(18, 18, 18, 18)
         layout.setSpacing(14)
         layout.addWidget(self._status_banner())
-        metrics = QHBoxLayout()
+        metrics = QGridLayout()
         metrics.setSpacing(12)
         self.metric_values = {}
         self.metric_bars = {}
-        for key, title in (("running", "Running jobs"), ("pending", "Waiting jobs"),
-                           ("cpu", "CPU reserved / budget"), ("memory", "Memory reserved / budget")):
+        for index, (key, title) in enumerate((
+            ("running", "Running jobs"), ("cpu_usage", "CPU in use now (whole PC)"),
+            ("cpu", "CPU reserved / budget"), ("pending", "Waiting jobs"),
+            ("memory_usage", "Memory in use now (whole PC)"), ("memory", "Memory reserved / budget"),
+        )):
             card = QGroupBox(title)
             card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
             content = QVBoxLayout(card)
@@ -212,7 +252,7 @@ class Dashboard(QDialog):
             bar.setFixedHeight(6)
             bar.setRange(0, 100)
             content.addWidget(bar)
-            if key in ("cpu", "memory"):
+            if key in ("cpu", "memory", "cpu_usage", "memory_usage"):
                 self.metric_bars[key] = bar
                 self._set_usage(key, None, None)
             else:
@@ -221,21 +261,42 @@ class Dashboard(QDialog):
                 policy.setRetainSizeWhenHidden(True)
                 bar.setSizePolicy(policy)
                 bar.hide()
-            metrics.addWidget(card, 1)
+            metrics.addWidget(card, index // 3, index % 3)
         layout.addLayout(metrics)
-        layout.addWidget(QLabel("Jobs — select a row, then use the Queue menu for actions."))
-        self.jobs = QTableWidget(0, 5)
-        self.jobs.setHorizontalHeaderLabels(["Name", "Owner", "State", "Priority", "Job ID"])
+        filters = QHBoxLayout()
+        self.job_caption = QLabel("Jobs — right-click a job for actions, double-click for details.")
+        filters.addWidget(self.job_caption, 1)
+        self.job_search = QLineEdit()
+        self.job_search.setPlaceholderText("Filter by name, owner or ID")
+        self.job_search.setClearButtonEnabled(True)
+        self.job_search.textChanged.connect(lambda _: self._apply_job_filter())
+        filters.addWidget(self.job_search)
+        self.job_filter = QComboBox()
+        self.job_filter.addItems(JOB_FILTERS)
+        self.job_filter.currentIndexChanged.connect(lambda _: self._apply_job_filter())
+        filters.addWidget(self.job_filter)
+        self.newer_jobs = QPushButton("Newer")
+        self.newer_jobs.clicked.connect(lambda: self._job_page(-1))
+        filters.addWidget(self.newer_jobs)
+        self.older_jobs = QPushButton("Older")
+        self.older_jobs.clicked.connect(lambda: self._job_page(1))
+        filters.addWidget(self.older_jobs)
+        self.newer_jobs.setEnabled(False)
+        self.older_jobs.setEnabled(False)
+        layout.addLayout(filters)
+        self.jobs = QTableWidget(0, 6)
+        self.jobs.setHorizontalHeaderLabels(["Name", "Owner", "State", "Priority", "Job ID", "Submitted (local)"])
         self.jobs.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.jobs.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.jobs.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.jobs.verticalHeader().setVisible(False)
         self.jobs.verticalHeader().setDefaultSectionSize(34)
-        self._table_layout(self.jobs, (220, 110, 110, 70, 270))
+        self._table_layout(self.jobs, (220, 110, 110, 70, 270, 170))
         self.jobs.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.jobs.setShowGrid(False)
         self.jobs.itemSelectionChanged.connect(self._update_job_actions)
         self.jobs.cellDoubleClicked.connect(lambda *_: self.open_job_details())
+        self._context_menu(self.jobs)
         self._update_job_actions()
         layout.addWidget(self.jobs)
         self.tabs.addTab(page, "Dashboard")
@@ -292,18 +353,121 @@ class Dashboard(QDialog):
     def _users(self):
         page = QWidget()
         layout = QVBoxLayout(page)
-        self.users = QTableWidget(0, 3)
-        self.users.setHorizontalHeaderLabels(["Username", "Role", "Status"])
-        self.users.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self._table_layout(self.users, (250, 120, 120))
-        layout.addWidget(self.users)
-        self.devices = QTableWidget(0, 4)
-        self.devices.setHorizontalHeaderLabels(["Device ID", "Username", "Status", "Last access (local)"])
-        self.devices.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self._table_layout(self.devices, (270, 130, 100, 230))
-        layout.addWidget(self.devices)
+        identity = QHBoxLayout()
+        self.account_label = QLabel("Not signed in.")
+        identity.addWidget(self.account_label, 1)
+        identity.addWidget(self._action_button(self.change_password_action, "Change my password..."))
+        layout.addLayout(identity)
+        users_box = QGroupBox("Users — right-click a user for actions")
+        users_layout = QVBoxLayout(users_box)
+        self.users = QTableWidget(0, 5)
+        self.users.setHorizontalHeaderLabels(["Username", "Role", "Status", "Active devices", "Created (local)"])
+        self._table_layout(self.users, (230, 110, 90, 100, 200))
+        users_layout.addWidget(self.users)
+        user_buttons = QHBoxLayout()
+        for item, text in (
+            (self.add_user_action, "Add user or administrator..."),
+            (self.reset_password_action, "Reset password..."),
+            (self.toggle_user_action, None),
+            (self.toggle_role_action, None),
+            (self.delete_user_action, "Delete user..."),
+        ):
+            user_buttons.addWidget(self._action_button(item, text))
+        user_buttons.addStretch()
+        users_layout.addLayout(user_buttons)
+        layout.addWidget(users_box, 1)
+        devices_box = QGroupBox("Registered devices — right-click a device for actions")
+        devices_layout = QVBoxLayout(devices_box)
+        self.devices = QTableWidget(0, 5)
+        self.devices.setHorizontalHeaderLabels(
+            ["Device ID", "Username", "Status", "Last access (local)", "Registered (local)"]
+        )
+        self._table_layout(self.devices, (270, 130, 130, 200, 200))
+        devices_layout.addWidget(self.devices)
+        device_buttons = QHBoxLayout()
+        device_buttons.addWidget(self._action_button(self.revoke_device_action, "Revoke device..."))
+        device_buttons.addStretch()
+        devices_layout.addLayout(device_buttons)
+        layout.addWidget(devices_box, 1)
+        for table in (self.users, self.devices):
+            table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+            table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+            table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+            table.verticalHeader().setVisible(False)
+            table.itemSelectionChanged.connect(self._update_account_actions)
+            self._context_menu(table)
+        self._update_account_actions()
         # "&&" shows a literal ampersand; a single "&" is taken as a mnemonic.
         self.tabs.addTab(page, "Users && Devices")
+
+    def _action_button(self, item, text=None):
+        """A button that follows a menu action's enabled state and, without `text`, its label."""
+        button = QPushButton(text or item.text())
+        button.clicked.connect(lambda: item.trigger())
+        button.setEnabled(item.isEnabled())
+
+        def follow():
+            button.setEnabled(item.isEnabled())
+            if text is None:
+                button.setText(item.text().replace(" selected user", ""))
+            button.setToolTip(item.toolTip())
+
+        item.changed.connect(follow)
+        follow()
+        return button
+
+    def _activity(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.addWidget(QLabel(
+            f"The latest {EVENT_LIMIT} recorded actions, newest first. Passwords are never recorded."
+        ))
+        self.activity = QTableWidget(0, 4)
+        self.activity.setHorizontalHeaderLabels(["Time (local)", "Action", "By", "Details"])
+        self.activity.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.activity.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.activity.verticalHeader().setVisible(False)
+        self._table_layout(self.activity, (210, 190, 130, 380))
+        layout.addWidget(self.activity)
+        self.tabs.addTab(page, "Activity")
+
+    def _context_actions(self, table):
+        """What a right-click offers for the current row; None draws a separator."""
+        if table is self.jobs:
+            return [
+                self.detail_action, self.folder_action, self.copy_job_action, None,
+                self.priority_action, self.force_action, self.unforce_action, None,
+                self.cancel_action,
+            ]
+        if table is self.users:
+            return [
+                self.add_user_action, None, self.reset_password_action, self.toggle_user_action,
+                self.toggle_role_action, None, self.copy_user_action, None,
+                self.delete_user_action,
+            ]
+        return [self.revoke_device_action, None, self.copy_device_action]
+
+    def _context_menu(self, table):
+        def show(position):
+            item = table.itemAt(position)
+            if item is not None:
+                table.setCurrentCell(item.row(), item.column())
+            else:
+                table.setCurrentCell(-1, -1)
+                table.clearSelection()
+            self._update_job_actions()
+            self._update_account_actions()
+            menu = QMenu(self)
+            for entry in self._context_actions(table):
+                if entry is None:
+                    menu.addSeparator()
+                else:
+                    menu.addAction(entry)
+            menu.exec(table.viewport().mapToGlobal(position))
+            menu.deleteLater()
+
+        table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        table.customContextMenuRequested.connect(show)
 
     @staticmethod
     def _table_layout(table, widths):
@@ -545,6 +709,8 @@ class Dashboard(QDialog):
                 self.message.setText(f"{title} ({time.monotonic() - started:.0f}s)")
             return
 
+        page = self.job_page
+
         def work():
             try:
                 health = self.client.request("GET", "/health", authenticated=False)
@@ -559,8 +725,13 @@ class Dashboard(QDialog):
             try:
                 return {
                     "health": health,
+                    "me": self.client.request("GET", "/me"),
+                    "own_device": self._own_device_id(),
                     "resources": self.client.request("GET", "/system/resources"),
-                    "jobs": self.client.request("GET", "/admin/jobs"),
+                    "jobs": self.client.request(
+                        "GET",
+                        "/admin/jobs" if not page else f"/admin/jobs?limit={JOB_PAGE}&offset={page * JOB_PAGE}",
+                    ),
                     "users": self.client.request("GET", "/admin/users"),
                     "devices": self.client.request("GET", "/admin/devices"),
                 }
@@ -591,6 +762,8 @@ class Dashboard(QDialog):
                         "Use Account > Sign in / register device to view resources and jobs.", version,
                     )
                 return
+            self.me, self.own_device = data["me"], data["own_device"]
+            self.account_label.setText(f"Signed in as {self.me['username']} ({self.me['role']}).")
             resource = data["resources"]
             if resource.get("paused"):
                 self.set_status(
@@ -613,33 +786,68 @@ class Dashboard(QDialog):
             )
             self._set_usage("cpu", resource.get("reserved_cpus"), resource.get("cpus"))
             self._set_usage("memory", resource.get("reserved_memory_mb"), resource.get("memory_mb"))
+            cpu_now, memory_now = resource.get("cpu_percent"), resource.get("memory_percent")
+            self.metric_values["cpu_usage"].setText("—" if cpu_now is None else f"{cpu_now:.0f}%")
+            self.metric_values["memory_usage"].setText(
+                "—" if memory_now is None
+                else f"{gb(resource.get('memory_used_mb'))} / {gb(resource.get('memory_total_mb'))} GB"
+            )
+            self._set_usage("cpu_usage", cpu_now, 100)
+            self._set_usage("memory_usage", memory_now, 100)
             usernames = {u["id"]: u["username"] for u in data["users"]}
             self.usernames = usernames
             self.job_records = {job["id"]: job for job in data["jobs"]}
             self.fill(
                 self.jobs,
                 [
-                    (j["spec"]["name"], usernames.get(j["owner_id"], j["owner_id"]),
+                    (j["spec"]["name"], usernames.get(j["owner_id"], "(deleted user)"),
                      j["display_state"] + (" · force requested" if j.get("force_run") else ""),
-                     j.get("priority", 0), j["id"])
+                     j.get("priority", 0), j["id"], self.timestamp(j.get("created_at")))
                     for j in data["jobs"]
                 ], identifiers=[j["id"] for j in data["jobs"]],
             )
             self._color_states()
+            self._apply_job_filter()
             self._update_job_actions()
+            first = page * JOB_PAGE + 1
+            count = len(data["jobs"])
+            self.job_caption.setText(
+                f"Jobs {first}–{first + count - 1}, newest first — right-click for actions, "
+                "double-click for details." if count else "No jobs on this page."
+            )
+            self.newer_jobs.setEnabled(page > 0)
+            self.older_jobs.setEnabled(count == JOB_PAGE)
+            self.user_records = {u["id"]: u for u in data["users"]}
+            self.device_records = {d["id"]: d for d in data["devices"]}
+            active = {}
+            for device in data["devices"]:
+                if device["revoked_at"] is None:
+                    active[device["user_id"]] = active.get(device["user_id"], 0) + 1
             self.fill(
                 self.users,
-                [(u["username"], u["role"], "Enabled" if u["enabled"] else "Disabled") for u in data["users"]],
+                [
+                    (u["username"] + (" (you)" if u["id"] == self.me["user_id"] else ""),
+                     "administrator" if u["role"] == "admin" else "user",
+                     "Enabled" if u["enabled"] else "Disabled", active.get(u["id"], 0),
+                     self.timestamp(u.get("created_at")))
+                    for u in data["users"]
+                ],
                 identifiers=[u["id"] for u in data["users"]],
             )
             self.fill(
                 self.devices,
                 [
                     (d["id"], usernames.get(d["user_id"], d["user_id"]),
-                     "Revoked" if d["revoked_at"] is not None else "Active", self.timestamp(d["last_access"]))
+                     ("Revoked" if d["revoked_at"] is not None else "Active")
+                     + (" · this window" if d["id"] == self.own_device else ""),
+                     self.timestamp(d["last_access"]), self.timestamp(d.get("created_at")))
                     for d in data["devices"]
                 ],
             )
+            self._dim_rows(self.users, lambda row: self.users.item(row, 2).text() == "Disabled")
+            self._dim_rows(self.devices, lambda row: self.devices.item(row, 2).text().startswith("Revoked"))
+            self._update_account_actions()
+            self._refresh_activity()
 
         def unavailable(_):
             if self._pending_lifecycle:
@@ -657,13 +865,21 @@ class Dashboard(QDialog):
     def _clear_dashboard(self):
         self.job_records = {}
         self.usernames = {}
+        self.user_records = {}
+        self.device_records = {}
+        self.me = None
+        self.own_device = None
+        self.account_label.setText("Not signed in.")
+        self.newer_jobs.setEnabled(False)
+        self.older_jobs.setEnabled(False)
         for value in self.metric_values.values():
             value.setText("—")
         for key in self.metric_bars:
             self._set_usage(key, None, None)
-        for table in (self.jobs, self.users, self.devices):
+        for table in (self.jobs, self.users, self.devices, self.activity):
             self.fill(table, [])
         self._update_job_actions()
+        self._update_account_actions()
         if self.detail_dialog is not None:
             self.detail_dialog.invalidate("Connection unavailable. Sign in and refresh to view this job.")
 
@@ -689,6 +905,66 @@ class Dashboard(QDialog):
                 font = item.font()
                 font.setBold(True)
                 item.setFont(font)
+
+    @staticmethod
+    def _dim_rows(table, dimmed):
+        color = QBrush(QColor("#8a8a8a"))
+        for row in range(table.rowCount()):
+            if dimmed(row):
+                for column in range(table.columnCount()):
+                    item = table.item(row, column)
+                    if item is not None:
+                        item.setForeground(color)
+
+    def _apply_job_filter(self):
+        states = JOB_FILTERS[self.job_filter.currentText()]
+        words = self.job_search.text().casefold().split()
+        for row in range(self.jobs.rowCount()):
+            cells = [self.jobs.item(row, column) for column in range(self.jobs.columnCount())]
+            text = " ".join(cell.text() for cell in cells if cell is not None).casefold()
+            state = cells[2].text().split(" ", 1)[0] if cells[2] is not None else ""
+            self.jobs.setRowHidden(
+                row,
+                (states is not None and state not in states) or not all(word in text for word in words),
+            )
+
+    def _job_page(self, step):
+        self.job_page = max(0, self.job_page + step)
+        self.refresh()
+
+    def _refresh_activity(self):
+        """Read the log only while it is on screen; it is not worth polling otherwise."""
+        if self.tabs.currentWidget() is not self.activity.parentWidget() or self.me is None:
+            return
+        names = dict(self.usernames)
+
+        def describe(event):
+            try:
+                details = json.loads(event["details"])
+            except (TypeError, ValueError):
+                details = {}
+            if event.get("job_id"):
+                details["job"] = event["job_id"]
+            if details.get("user_id") in names:
+                details["user"] = names[details.pop("user_id")]
+            return " · ".join(f"{key}: {value}" for key, value in details.items())
+
+        def display(events):
+            self.fill(
+                self.activity,
+                [
+                    (self.timestamp(e["timestamp"]), e["event"].replace("_", " "),
+                     names.get(e["actor"], "(deleted user)") if e["actor"] else "local / system",
+                     describe(e))
+                    for e in events
+                ],
+                identifiers=[e["seq"] for e in events],
+            )
+
+        self.task(
+            lambda: self.client.request("GET", f"/admin/events?newest={EVENT_LIMIT}"),
+            display, interactive=False,
+        )
 
     @staticmethod
     def timestamp(value):
@@ -1064,7 +1340,22 @@ class Dashboard(QDialog):
             self.refresh()
 
         if self.client.key_path.exists():
-            self.task(lambda: self.client.authenticate(), signed_in)
+            def authenticate():
+                try:
+                    self.client.authenticate()
+                except ClientError as exc:
+                    if exc.status == 401 and exc.body.get("code") == "invalid_device":
+                        return "revoked"
+                    raise
+                return None
+
+            def authenticated(result):
+                if result == "revoked":
+                    self._register_again(signed_in)
+                else:
+                    signed_in(result)
+
+            self.task(authenticate, authenticated)
         else:
             credentials = self.credentials("Register administrator device")
             if credentials:
@@ -1074,6 +1365,40 @@ class Dashboard(QDialog):
                     return self.client.enroll(*credentials)
 
                 self.task(work, signed_in)
+
+    def _own_device_id(self):
+        from ..credentials import load_key
+
+        try:
+            return load_key(self.client.key_path)["device_id"]
+        except Exception:
+            return None
+
+    def _register_again(self, signed_in):
+        """A revoked key cannot sign in again, so replace it only after a new one is accepted."""
+        if QMessageBox.question(
+            self, "Register this window again",
+            "This window's device was revoked or its account was disabled. Register a new device "
+            "with your username and password?",
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        credentials = self.credentials("Register administrator device")
+        if not credentials:
+            return
+        target = self.client.key_path
+        pending = target.with_name(target.name + ".new")
+
+        def work():
+            self.require_own_daemon()
+            pending.unlink(missing_ok=True)
+            try:
+                JobServerClient(self.client.url, pending, timeout=3).enroll(*credentials)
+                os.replace(pending, target)
+            finally:
+                pending.unlink(missing_ok=True)
+            self.client.token, self.client.expires = None, 0
+
+        self.task(work, signed_in)
 
     def require_admin_registration(self):
         if self.client.key_path and self.client.key_path.is_file():
@@ -1164,15 +1489,221 @@ class Dashboard(QDialog):
     def add_user(self):
         if not self.require_admin_registration():
             return
-        credentials = self.credentials("Add user")
-        if credentials:
+        from .account import ask_new_user
+
+        created = ask_new_user(self)
+        if created:
+            username, password, role = created
             self.task(
                 lambda: self.client.request(
-                    "POST", "/admin/users", {"username": credentials[0], "password": credentials[1]}
+                    "POST", "/admin/users", {"username": username, "password": password, "role": role}
                 ),
                 lambda _: self.refresh(),
-                success_message="User created.",
+                success_message="Administrator created." if role == "admin" else "User created.",
             )
+
+    def change_password(self):
+        if not self.require_admin_registration():
+            return
+        from .account import ask_password
+
+        answer = ask_password(
+            self, "Change my password",
+            "Other sign-ins for this account end. This window stays signed in.",
+            ask_current=True,
+            revoke_label="Also revoke my other registered devices",
+        )
+        if not answer:
+            return
+        current, new, revoke = answer
+
+        def changed(result):
+            self.refresh()
+            revoked = result.get("devices_revoked", 0) if isinstance(result, dict) else 0
+            self.message.setText(f"Password changed. {revoked} other device(s) revoked.")
+
+        self.task(
+            lambda: self.client.request(
+                "POST", "/me/password",
+                {"current_password": current, "new_password": new, "revoke_devices": revoke},
+            ),
+            changed, success_message="Your password was changed.",
+        )
+
+    def _user_name(self, identifier):
+        return self.user_records.get(identifier, {}).get("username", "this user")
+
+    def reset_password(self):
+        user = self.selected(self.users)
+        if not user or not self.require_admin_registration():
+            return
+        from .account import ask_password
+
+        answer = ask_password(
+            self, "Reset password",
+            f"Set a new password for {self._user_name(user)} and end their current sign-ins. "
+            "Give it to them over a private channel; they can change it afterwards.",
+            revoke_label="Also revoke their registered devices (recommended if the account may be compromised)",
+        )
+        if not answer:
+            return
+        _, new, revoke = answer
+        self.task(
+            lambda: self.client.request(
+                "POST", f"/admin/users/{user}/password",
+                {"new_password": new, "revoke_devices": revoke},
+            ),
+            lambda _: self.refresh(), success_message="Password reset.",
+        )
+
+    def toggle_user(self):
+        user = self.selected(self.users)
+        if user and self.user_records.get(user, {}).get("enabled", 1) == 0:
+            self.enable_user()
+        else:
+            self.disable_user()
+
+    def enable_user(self):
+        user = self.selected(self.users)
+        if not user or not self.require_admin_registration():
+            return
+        if QMessageBox.question(
+            self, "Enable user",
+            f"Enable {self._user_name(user)}? Their password and any devices they did not lose "
+            "access to start working again.",
+        ) == QMessageBox.StandardButton.Yes:
+            self.task(
+                lambda: self.client.request("POST", f"/admin/users/{user}/enable"),
+                lambda _: self.refresh(), success_message="User enabled.",
+            )
+
+    def toggle_role(self):
+        user = self.selected(self.users)
+        if not user or not self.require_admin_registration():
+            return
+        current = self.user_records.get(user, {}).get("role", "user")
+        role = "user" if current == "admin" else "admin"
+        text = (
+            f"Make {self._user_name(user)} an administrator? Administrators can manage every "
+            "user and job on this server, including other administrators."
+            if role == "admin" else
+            f"Make {self._user_name(user)} a regular user? They lose administration at once and "
+            "see only their own jobs."
+        )
+        if QMessageBox.question(self, "Change account type", text) == QMessageBox.StandardButton.Yes:
+            self.task(
+                lambda: self.client.request("POST", f"/admin/users/{user}/role", {"role": role}),
+                lambda _: self.refresh(),
+                success_message="Account type changed.",
+            )
+
+    def delete_user(self):
+        user = self.selected(self.users)
+        if not user or not self.require_admin_registration():
+            return
+        name = self._user_name(user)
+        typed, accepted = QInputDialog.getText(
+            self, "Delete user",
+            f"Delete {name} permanently? Their sign-in and devices are removed and this cannot be "
+            "undone. Their finished jobs and files stay on the server under a deleted owner; "
+            "administrators can still open them.\n\n"
+            "To keep the account recoverable, disable it instead.\n\n"
+            f"Type {name} to confirm:",
+        )
+        if not accepted:
+            return
+        if typed.strip() != name:
+            self.message.setText("Not deleted: the name did not match.")
+            return
+        self.task(
+            lambda: self.client.request("DELETE", f"/admin/users/{user}"),
+            lambda _: self.refresh(), success_message="User deleted.",
+        )
+
+    def copy_username(self):
+        user = self.selected(self.users)
+        if user in self.user_records:
+            QApplication.clipboard().setText(self.user_records[user]["username"])
+
+    def copy_device_id(self):
+        device = self.selected(self.devices)
+        if device:
+            QApplication.clipboard().setText(device)
+
+    def copy_job_id(self):
+        job = self.selected(self.jobs)
+        if job:
+            QApplication.clipboard().setText(job)
+
+    def _update_account_actions(self):
+        user = self.selected(self.users)
+        record = self.user_records.get(user)
+        own = bool(self.me) and user == self.me.get("user_id")
+        signed_in = self.me is not None
+        self.change_password_action.setEnabled(signed_in)
+        self.add_user_action.setEnabled(signed_in)
+        self.reset_password_action.setEnabled(bool(record) and not own)
+        self.toggle_user_action.setEnabled(bool(record) and not own)
+        self.toggle_role_action.setEnabled(bool(record) and not own)
+        self.delete_user_action.setEnabled(bool(record) and not own)
+        self.copy_user_action.setEnabled(bool(record))
+        disabled = bool(record) and not record["enabled"]
+        self.toggle_user_action.setText(
+            "Enable selected user..." if disabled else "Disable selected user..."
+        )
+        self.toggle_role_action.setText(
+            "Make selected user a regular user..."
+            if record and record["role"] == "admin"
+            else "Make selected user an administrator..."
+        )
+        tip = "Your own account: use Change my password, or ask another administrator." if own else ""
+        for item in (
+            self.reset_password_action, self.toggle_user_action, self.toggle_role_action,
+            self.delete_user_action,
+        ):
+            item.setToolTip(tip)
+        device = self.selected(self.devices)
+        known = self.device_records.get(device)
+        self.revoke_device_action.setEnabled(bool(known) and known["revoked_at"] is None)
+        self.copy_device_action.setEnabled(device is not None)
+
+    def _job_folder(self, identifier):
+        """The job's real folder on this PC. Opens a folder only; never runs a job's file."""
+        from ..files import is_link
+        from ..jobs import work_directory
+
+        if str(uuid.UUID(identifier)) != identifier:
+            raise ValueError("Not a job ID")
+        database = self.settings.root / "server.db"
+        connection = sqlite3.connect(database.as_uri() + "?mode=ro", uri=True, timeout=2)
+        try:
+            row = connection.execute(
+                "SELECT work_root FROM jobs WHERE id=?", (identifier,)
+            ).fetchone()
+        finally:
+            connection.close()
+        if row is None:
+            raise ValueError("This job is not on this server.")
+        folder = work_directory(self.settings, row[0], identifier)
+        if not folder.is_dir():
+            raise ValueError("This job has no folder yet: its files are still being uploaded.")
+        if is_link(folder) or is_link(folder.parent):
+            raise ValueError("This job's folder is a link, so it was not opened.")
+        return folder
+
+    def open_job_folder(self, identifier=None):
+        identifier = identifier or self.selected(self.jobs)
+        if not identifier or not self.require_admin_registration():
+            return
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+
+        def opened(folder):
+            if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder))):
+                QMessageBox.warning(self, "Job Server", f"Could not open {folder}")
+
+        # Off the GUI thread: a stopped WSL distribution can stall any access to its path.
+        self.task(lambda: self._job_folder(identifier), opened)
 
     @staticmethod
     def selected(table):
@@ -1188,6 +1719,12 @@ class Dashboard(QDialog):
         record = self.job_records.get(identifier, {})
         pending = record.get("state", record.get("display_state")) in {"PENDING", "QUEUED", "BLOCKED"}
         self.detail_action.setEnabled(identifier is not None)
+        self.folder_action.setEnabled(identifier is not None)
+        self.copy_job_action.setEnabled(identifier is not None)
+        self.cancel_action.setEnabled(
+            identifier is not None
+            and record.get("state", record.get("display_state")) not in TERMINAL_STATES
+        )
         self.priority_action.setEnabled(pending)
         self.force_action.setEnabled(pending and not record.get("force_run", False))
         self.unforce_action.setEnabled(pending and record.get("force_run", False))
@@ -1238,7 +1775,12 @@ class Dashboard(QDialog):
 
     def cancel(self):
         job_id = self.selected(self.jobs)
-        if job_id:
+        if (
+            job_id
+            and self.require_admin_registration()
+            and QMessageBox.question(self, "Cancel job", "Stop this job and its child processes?")
+            == QMessageBox.StandardButton.Yes
+        ):
             self.task(
                 lambda: self.client.request("POST", f"/jobs/{job_id}/cancel"),
                 lambda _: self.refresh(),
@@ -1249,7 +1791,11 @@ class Dashboard(QDialog):
         user = self.selected(self.users)
         if (
             user
-            and QMessageBox.question(self, "Disable user", "Disable this user and revoke access?")
+            and QMessageBox.question(
+                self, "Disable user",
+                f"Disable {self._user_name(user)}? Their sign-ins and devices stop working at once. "
+                "Their queued and running jobs are not cancelled. You can enable the account later.",
+            )
             == QMessageBox.StandardButton.Yes
         ):
             self.task(
@@ -1263,7 +1809,11 @@ class Dashboard(QDialog):
         if (
             device
             and QMessageBox.question(
-                self, "Revoke device", "Revoke this device key and its active tokens?"
+                self, "Revoke device",
+                "This is this window's own device. It stays signed out until you register again "
+                "with your password. Revoke it?" if device == self.own_device
+                else "Revoke this device key and its active tokens? This cannot be undone; "
+                "the device has to register again.",
             )
             == QMessageBox.StandardButton.Yes
         ):

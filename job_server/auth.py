@@ -15,6 +15,10 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from .errors import reject
 
 
+#: Marks the tombstone of a deleted account; never a role anyone can sign in with.
+DELETED_ROLE = "deleted"
+
+
 def password_hash(password):
     if not isinstance(password, str) or not 1 <= len(password) <= 1024:
         reject(400, "password_policy", "Password must contain 1–1024 characters")
@@ -203,7 +207,8 @@ class Auth:
                     # Otherwise a stolen administrator token could skip the old password.
                     reject(409, "self_reset", "Use Change password for your own account")
             if not c.execute(
-                "UPDATE users SET password_hash=? WHERE id=?", (encoded, user_id)
+                "UPDATE users SET password_hash=? WHERE id=? AND role<>?",
+                (encoded, user_id, DELETED_ROLE),
             ).rowcount:
                 reject(404, "not_found", "User not found")
             c.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
@@ -219,7 +224,8 @@ class Auth:
         with self.db.transaction() as c:
             principal = self.admin(principal)
             if not c.execute(
-                "UPDATE users SET enabled=? WHERE id=?", (int(enabled), user_id)
+                "UPDATE users SET enabled=? WHERE id=? AND role<>?",
+                (int(enabled), user_id, DELETED_ROLE),
             ).rowcount:
                 reject(404, "not_found", "User not found")
             if not enabled:
@@ -235,11 +241,56 @@ class Auth:
             reject(409, "self_role", "Use another administrator to change your own role")
         with self.db.transaction() as c:
             principal = self.admin(principal)
-            if not c.execute("UPDATE users SET role=? WHERE id=?", (role, user_id)).rowcount:
+            if not c.execute(
+                "UPDATE users SET role=? WHERE id=? AND role<>?", (role, user_id, DELETED_ROLE)
+            ).rowcount:
                 reject(404, "not_found", "User not found")
             # Sessions read the role live; ending them makes the change visible at once.
             c.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
             self.db.event(c, "user_role_changed", principal["user_id"], user_id=user_id, role=role)
+
+    def delete_user(self, user_id, principal):
+        """Remove an account for good, keeping the finished jobs that still reference it.
+
+        Jobs and activity need their owner row, so the row stays as an anonymous
+        tombstone: no name, no password, no devices, and no way back. The username
+        becomes free. A later account of that name is unrelated and owns nothing here.
+        """
+        if user_id == principal["user_id"]:
+            reject(409, "self_delete", "Use another administrator to delete your own account")
+        with self.db.transaction() as c:
+            principal = self.admin(principal)
+            user = c.execute(
+                "SELECT username FROM users WHERE id=? AND role<>?", (user_id, DELETED_ROLE)
+            ).fetchone()
+            if not user:
+                reject(404, "not_found", "User not found")
+            if c.execute(
+                "SELECT 1 FROM jobs WHERE owner_id=? AND state IN ('UPLOADING','PENDING','RUNNING')",
+                (user_id,),
+            ).fetchone():
+                reject(
+                    409, "user_has_active_jobs",
+                    "This user has jobs still waiting or running. Cancel them or let them "
+                    "finish, or disable the account instead.",
+                )
+            kept = c.execute("SELECT count(*) FROM jobs WHERE owner_id=?", (user_id,)).fetchone()[0]
+            c.execute(
+                "DELETE FROM challenges WHERE device_id IN (SELECT id FROM devices WHERE user_id=?)",
+                (user_id,),
+            )
+            c.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+            c.execute("DELETE FROM devices WHERE user_id=?", (user_id,))
+            c.execute("DELETE FROM idempotency_keys WHERE user_id=?", (user_id,))
+            c.execute(
+                "UPDATE users SET username=?, password_hash='', role=?, enabled=0 WHERE id=?",
+                ("deleted-" + user_id, DELETED_ROLE, user_id),
+            )
+            self.db.event(
+                c, "user_deleted", principal["user_id"], user_id=user_id,
+                username=user["username"], jobs_kept=kept,
+            )
+        return {"deleted": True, "jobs_kept": kept}
 
     def principal(self, token, scope="access", *, allow_web=False):
         if not isinstance(token, str) or len(token) > 256:

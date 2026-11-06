@@ -67,6 +67,10 @@ class JobDetailDialog(QDialog):
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         self.refresh_button = buttons.addButton("Refresh", QDialogButtonBox.ButtonRole.ActionRole)
         self.refresh_button.clicked.connect(self.refresh)
+        self.folder_button = buttons.addButton("Open job folder", QDialogButtonBox.ButtonRole.ActionRole)
+        self.folder_button.clicked.connect(
+            lambda: self.job_id and self.dashboard.open_job_folder(self.job_id)
+        )
         buttons.rejected.connect(self.close)
         layout.addWidget(buttons)
 
