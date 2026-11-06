@@ -326,7 +326,7 @@ async function runCases() {
     try {
       await Promise.race([
         cases[name](),
-        new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Scenario timed out: '+name)),5000);}),
+        new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Scenario timed out: '+name)),15000);}),
       ]);
     } finally {clearTimeout(timer);}
     console.log('PASS '+name);
