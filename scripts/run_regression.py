@@ -27,6 +27,38 @@ def patch_native_menu_fixture(tests_directory):
     path.write_text(text.replace(before, after), "utf-8")
 
 
+# Job Manager a2ba746, inserted after the reaper's first look at the job's pid.
+REAPER_CHECK = r"""            "            if ($jobPid -match '^\\d+$' -and "
+            "(Get-Process -Id ([int]$jobPid) -ErrorAction SilentlyContinue)) { continue }",
+"""
+REAPER_SECOND_LOOK = r"""            "            Start-Sleep -Milliseconds 500",
+            "            if (Test-Path -LiteralPath ('status\\' + $entry)) { $jobPid = $null }",
+            "            else {",
+            "                $jobPid = Get-Content -LiteralPath ('pids\\' + $entry) "
+            "-ErrorAction SilentlyContinue | Select-Object -First 1",
+            "                if ($jobPid -match '^\\d+$' -and "
+            "(Get-Process -Id ([int]$jobPid) -ErrorAction SilentlyContinue)) { continue }",
+            "            }",
+"""
+
+
+def patch_powershell_reaper(job_manager_directory):
+    """Backport an upstream race fix to the copy this suite tests.
+
+    A forced start swaps its own pid for the job's with Move-Item -Force, which can
+    delete the old file before renaming the new one. A reap pass between the two
+    moved a starting job to done/, so it never ran and the force tests timed out.
+    Job Server does not ship this helper, so only the regression copy needs it.
+    """
+    path = Path(job_manager_directory) / "remote_runner_ps.py"
+    text = path.read_text("utf-8")
+    if REAPER_SECOND_LOOK in text:
+        return  # Upstream already has the fix.
+    if text.count(REAPER_CHECK) != 1:
+        raise RuntimeError("Upstream PowerShell reaper changed; review the backport")
+    path.write_text(text.replace(REAPER_CHECK, REAPER_CHECK + REAPER_SECOND_LOOK), "utf-8")
+
+
 def main():
     root = Path(__file__).resolve().parents[1]
     temporary_root = root / "test-results"
@@ -34,6 +66,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="regression-", dir=temporary_root) as temporary:
         directory = Path(temporary)
         build(directory / "job_manager")
+        patch_powershell_reaper(directory / "job_manager")
         copytree(root / "upstream" / "job_manager" / "tests", directory / "tests")
         patch_native_menu_fixture(directory / "tests")
         for path in (root / "upstream" / "job_manager").iterdir():
