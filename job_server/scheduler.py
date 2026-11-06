@@ -218,19 +218,49 @@ class Scheduler:
         }
 
 
+_usage_lock = threading.Lock()
+_usage = (0.0, None)
+_cpu_times = None
+
+
+def _cpu_percent():
+    """Busy share since the previous reading, whichever request thread takes it.
+
+    psutil.cpu_percent keeps its previous sample per thread, so on a worker pool
+    it reads 0.0 whenever a request lands on a thread it has not seen.
+    """
+    global _cpu_times
+    times = psutil.cpu_times()
+    # Linux already counts guest time inside user time.
+    total = sum(times) - getattr(times, "guest", 0) - getattr(times, "guest_nice", 0)
+    idle = times.idle + getattr(times, "iowait", 0)
+    previous, _cpu_times = _cpu_times, (total, idle)
+    if previous is None or total <= previous[0]:
+        return 0.0
+    busy = 1 - (idle - previous[1]) / (total - previous[0])
+    return round(max(0.0, min(1.0, busy)) * 100, 1)
+
+
 def host_usage():
     """Whole-PC CPU and memory use, as distinct from the advisory job reservations."""
-    try:
-        memory = psutil.virtual_memory()
-        return {
-            # Measured since the previous call, so this never blocks a request.
-            "cpu_percent": psutil.cpu_percent(interval=None),
-            "memory_percent": memory.percent,
-            "memory_used_mb": (memory.total - memory.available) // (1024 * 1024),
-            "memory_total_mb": memory.total // (1024 * 1024),
-        }
-    except (OSError, psutil.Error):
-        return {
-            "cpu_percent": None, "memory_percent": None,
-            "memory_used_mb": None, "memory_total_mb": None,
-        }
+    global _usage
+    with _usage_lock:
+        # Readings moments apart, such as from a second window, would measure nothing.
+        taken, reading = _usage
+        if reading is not None and time.monotonic() - taken < 1:
+            return reading
+        try:
+            memory = psutil.virtual_memory()
+            reading = {
+                "cpu_percent": _cpu_percent(),
+                "memory_percent": memory.percent,
+                "memory_used_mb": (memory.total - memory.available) // (1024 * 1024),
+                "memory_total_mb": memory.total // (1024 * 1024),
+            }
+        except (OSError, psutil.Error):
+            reading = {
+                "cpu_percent": None, "memory_percent": None,
+                "memory_used_mb": None, "memory_total_mb": None,
+            }
+        _usage = (time.monotonic(), reading)
+        return reading

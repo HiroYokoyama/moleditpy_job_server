@@ -6,6 +6,13 @@ from pathlib import Path
 from .files import atomic_write
 
 
+def pc_resources():
+    """This PC's logical CPUs and installed memory in MB: a new server's budget."""
+    import psutil
+
+    return psutil.cpu_count() or 1, max(1, psutil.virtual_memory().total // (1024 * 1024))
+
+
 @dataclass
 class Settings:
     data_dir: str = "~/.moleditpy/job_server"

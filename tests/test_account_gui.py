@@ -224,6 +224,54 @@ def test_dashboard_shows_live_usage_apart_from_the_budget(dashboard, monkeypatch
     assert dashboard.metric_values["memory_usage"].text() == "—"
 
 
+def test_budget_can_be_set_to_this_pc_and_a_new_server_starts_there(dashboard, tmp_path, monkeypatch):
+    from job_server import settings as settings_module
+    from job_server.ui import dashboard as dashboard_module
+    from job_server.ui.dashboard import Dashboard
+
+    monkeypatch.setattr(dashboard_module, "pc_resources", lambda: (12, 16384))
+    fresh = Dashboard(config=tmp_path / "new" / "settings.json")
+    fresh.timer.stop()
+    try:
+        assert fresh.settings.cpus == 12 and fresh.settings.memory_mb == 16384
+        assert fresh.fields["cpus"].value() == 12
+    finally:
+        fresh.close()
+    # A saved budget is the administrator's choice until they ask to replace it.
+    assert dashboard.settings.cpus == settings_module.Settings().cpus
+    cpus, memory_mb = settings_module.pc_resources()
+    assert cpus >= 1 and memory_mb >= 1
+    dashboard.fields["cpus"].setValue(1)
+    dashboard.match_pc_button.click()
+    assert dashboard.fields["cpus"].value() == cpus
+    assert dashboard.fields["memory_mb"].mb() == pytest.approx(memory_mb, abs=64)
+
+
+def test_near_simultaneous_usage_readings_agree(monkeypatch):
+    from job_server import scheduler
+
+    monkeypatch.setattr(scheduler, "_usage", (0.0, None))
+    first = scheduler.host_usage()
+    assert scheduler.host_usage() is first
+
+
+def test_cpu_reading_does_not_depend_on_the_request_thread(monkeypatch):
+    import threading
+    from collections import namedtuple
+    from job_server import scheduler
+
+    Times = namedtuple("Times", "user system idle")
+    samples = iter([Times(10, 10, 80), Times(40, 20, 90)])
+    monkeypatch.setattr(scheduler.psutil, "cpu_times", lambda: next(samples))
+    monkeypatch.setattr(scheduler, "_cpu_times", None)
+    assert scheduler._cpu_percent() == 0.0
+    result = []
+    thread = threading.Thread(target=lambda: result.append(scheduler._cpu_percent()))
+    thread.start()
+    thread.join()
+    assert result == [80.0]  # 40 of the 50 ticks since the previous sample were busy.
+
+
 def test_job_filter_hides_rows_by_text_and_state(dashboard):
     dashboard.fill(dashboard.jobs, [
         ("opt", "alice", "RUNNING", 0, "id-1"), ("freq", "bob", "FAILED", 0, "id-2"),

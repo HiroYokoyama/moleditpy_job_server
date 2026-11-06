@@ -4,7 +4,7 @@ import json
 import sys
 from pathlib import Path
 
-from .settings import Settings
+from .settings import Settings, pc_resources
 
 
 def main():
@@ -26,7 +26,8 @@ def main():
             path = args.config or Path.home() / ".moleditpy" / "job_server" / "settings.json"
             if path.exists():
                 raise RuntimeError("Configuration already exists")
-            Settings().validate().save(path)
+            cpus, memory_mb = pc_resources()
+            Settings(cpus=cpus, memory_mb=memory_mb).validate().save(path)
             print(f"Wrote {path}; listener remains OFF. Next: create-admin, then serve.")
             return 0
         settings = Settings.load(args.config)

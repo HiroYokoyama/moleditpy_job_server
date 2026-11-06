@@ -50,7 +50,7 @@ from PySide6.QtWidgets import (
 from ..client import ClientError, JobServerClient
 from .units import GBSpinBox, FocusSpinBox, gb
 from .network import LanAddressList
-from ..settings import Settings
+from ..settings import Settings, pc_resources
 
 
 class Signals(QObject):
@@ -110,9 +110,13 @@ class Dashboard(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Job Server")
         self.setWindowIcon(QIcon(str(Path(__file__).resolve().parents[1] / "web" / "icon.png")))
-        self.resize(1000, 720)
+        self.resize(1000, 780)
         self.config = Path(config) if config else Settings().root / "settings.json"
-        self.settings = Settings.load(self.config) if self.config.exists() else Settings()
+        if self.config.exists():
+            self.settings = Settings.load(self.config)
+        else:
+            cpus, memory_mb = pc_resources()
+            self.settings = Settings(cpus=cpus, memory_mb=memory_mb)
         self.client = JobServerClient(
             f"http://127.0.0.1:{self.settings.port}",
             self.settings.root / "identity" / "admin-device.key", timeout=3,
@@ -269,6 +273,7 @@ class Dashboard(QDialog):
         self.job_search = QLineEdit()
         self.job_search.setPlaceholderText("Filter by name, owner or ID")
         self.job_search.setClearButtonEnabled(True)
+        self.job_search.setMinimumWidth(210)
         self.job_search.textChanged.connect(lambda _: self._apply_job_filter())
         filters.addWidget(self.job_search)
         self.job_filter = QComboBox()
@@ -572,6 +577,15 @@ class Dashboard(QDialog):
             ("storage_quota_mb", "Storage per user/job", 2147483647),
         ):
             limits.addRow(label, number(key, maximum))
+        cpus, memory_mb = pc_resources()
+        self.match_pc_button = QPushButton(f"Use this PC's size ({cpus} CPUs, {gb(memory_mb)} GB)")
+
+        def match_pc():
+            self.fields["cpus"].setValue(cpus)
+            self.fields["memory_mb"].set_mb(memory_mb)
+
+        self.match_pc_button.clicked.connect(match_pc)
+        limits.addRow("", self.match_pc_button)
         layout.addWidget(resources)
 
         job_setup = QGroupBox("Commands before each job")
