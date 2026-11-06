@@ -25,8 +25,7 @@ def run_browser_cases(command):
         except subprocess.TimeoutExpired as error:
             output = output_text(error.stdout) + output_text(error.stderr)
             if attempt == 2 or "RUN " in output:
-                pytest.fail(f"Browser scenarios timed out on attempt {attempt}:
-{output}")
+                pytest.fail(f"Browser scenarios timed out on attempt {attempt}:\n{output}")
 
 
 def test_browser_ignores_stale_responses():
@@ -76,9 +75,7 @@ def test_node_that_never_starts_still_fails(monkeypatch):
     assert len(calls) == 2
 
 
-@pytest.mark.parametrize("output", ["RUN refresh
-", b"RUN refresh
-"])
+@pytest.mark.parametrize("output", ["RUN refresh\n", b"RUN refresh\n"])
 def test_a_scenario_that_hangs_is_not_retried(monkeypatch, output):
     calls = stalls(monkeypatch, subprocess.TimeoutExpired("node", 45, output=output))
     with pytest.raises(pytest.fail.Exception, match="RUN refresh"):
