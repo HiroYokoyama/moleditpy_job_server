@@ -1,7 +1,6 @@
 # Security model
 
-> [!WARNING]
-> **Never expose this server to the public internet. Localhost, private LAN or private Tailscale only.**
+> **Warning:** **Never expose this server to the public internet. Localhost, private LAN or private Tailscale only.**
 > Never use Tailscale Funnel, public reverse proxies/tunnels, or router port forwarding.
 > Restrict tailnet access to trusted users. A loopback listener can still be exposed by a proxy;
 > the daemon cannot detect or prevent a misconfigured proxy or Funnel.

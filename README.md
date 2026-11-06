@@ -12,8 +12,7 @@ A shared job queue for one PC on your network. Trusted users submit calculations
 [Job Manager](https://github.com/HiroYokoyama/moleditpy_job_manager), the browser or
 Python, and an administrator runs the server from MoleditPy or the command line.
 
-> [!WARNING]
-> **Never expose Job Server to the public internet. Use localhost, a private LAN over HTTPS, or a private Tailscale tailnet only.**
+> **Warning:** **Never expose Job Server to the public internet. Use localhost, a private LAN over HTTPS, or a private Tailscale tailnet only.**
 > Do not use Tailscale Funnel, router port forwarding, a public reverse proxy, or an internet tunnel.
 > Jobs execute arbitrary commands under the service OS account. Only admit trusted users,
 > restrict tailnet access, and run under a low-privilege account. Authentication is not an OS sandbox.
