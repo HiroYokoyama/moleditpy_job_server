@@ -237,6 +237,7 @@ async function detail(id,reset=true){
   $('#detail-name').textContent=job.spec.name+' · '+job.display_state;$('#detail-id').textContent=id;
   $('#detail-spec').textContent=job.spec.command+'\n\n'+job.spec.resources.cpus_per_task+' CPU cores · '+gb(job.spec.resources.memory_mb)+' GB · exit code '+(job.exit_code??'—')+(job.reason?'\n'+job.reason:'');
   $('#cancel-job').disabled=['DONE','FAILED','CANCELLED','LOST'].includes(job.state);
+  $('#mark-lost').hidden=state.me?.role!=='admin'||job.state!=='RUNNING'||!String(job.reason||'').startsWith('NEEDS_RECHECK');
   const log=await api('GET',`/jobs/${id}/log?offset=${state.offset}&limit=65536`);if(!current())return;$('#log').textContent=($('#log').textContent+log.text).slice(-1000000);state.offset=log.next_offset;
   $('#result-files').replaceChildren();
   if(['DONE','FAILED','CANCELLED','LOST'].includes(job.state)){
@@ -246,6 +247,7 @@ async function detail(id,reset=true){
 }
 $('#refresh-detail').addEventListener('click',()=>safe(()=>detail(state.job,false)));
 $('#cancel-job').addEventListener('click',()=>safe(async()=>{if(!confirm('Stop this job and its child processes?'))return;await api('POST','/jobs/'+state.job+'/cancel');await detail(state.job,false);}));
+$('#mark-lost').addEventListener('click',()=>safe(async()=>{if(!confirm('The server can no longer follow this job, for example after a restart of the server PC. Marking it lost releases its CPU and memory reservation. If its calculation might still be running, check first. Mark it lost?'))return;await api('POST','/admin/jobs/'+state.job+'/mark-lost');await detail(state.job,false);}));
 async function queueControl(action) {
   const job=state.jobInfo,id=state.job,generation=state.generation;
   if(state.queueBusy||state.me?.role!=='admin'||!job||job.id!==id||job.state!=='PENDING')return;

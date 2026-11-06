@@ -1,5 +1,6 @@
 import json
 import re
+import time
 import uuid
 from contextlib import asynccontextmanager
 
@@ -532,6 +533,23 @@ def create_app(settings=None, dispatch=True):
             c.execute("UPDATE jobs SET force_run=?,force_actor=? WHERE id=?",
                       (int(body.force_run), p["user_id"] if body.force_run else None, job_id))
             db.event(c, "job_force_run_requested", p["user_id"], job_id, force_run=body.force_run)
+        return jobs.public(jobs.authorize(job_id, p))
+
+    @app.post(prefix + "/admin/jobs/{job_id}/mark-lost")
+    def mark_lost(job_id: str, p=Depends(admin)):
+        """Release a job the server cannot follow any more, such as after a reboot."""
+        with db.transaction() as c:
+            auth.admin(p)
+            job = jobs.authorize(job_id, p)
+            if job["state"] != "RUNNING" or not job["reason"].startswith("NEEDS_RECHECK"):
+                reject(409, "job_not_stuck", "Only a job flagged as needing a recheck can be marked lost")
+            if scheduler.supervisor_alive(job):
+                reject(409, "job_still_supervised", "This job's supervisor is still running")
+            c.execute(
+                "UPDATE jobs SET state='LOST',ended_at=?,reason=? WHERE id=? AND state='RUNNING'",
+                (time.time(), "Marked lost by an administrator", job_id),
+            )
+            db.event(c, "job_marked_lost", p["user_id"], job_id, previous_reason=job["reason"])
         return jobs.public(jobs.authorize(job_id, p))
 
     @app.get(prefix + "/admin/events")

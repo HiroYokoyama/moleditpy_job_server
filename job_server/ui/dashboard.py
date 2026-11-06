@@ -213,6 +213,7 @@ class Dashboard(QDialog):
         self.force_action = action(queue, "Force run selected job...", lambda: self.force_run(True))
         self.unforce_action = action(queue, "Cancel force-run request", lambda: self.force_run(False))
         self.cancel_action = action(queue, "Cancel selected job...", self.cancel)
+        self.lost_action = action(queue, "Mark stuck job as lost...", self.mark_lost)
 
     def copy_connection_addresses(self):
         urls = self.settings.connection_urls or [f"http://127.0.0.1:{self.settings.port}"]
@@ -371,7 +372,7 @@ class Dashboard(QDialog):
         users_layout.addWidget(self.users)
         user_buttons = QHBoxLayout()
         for item, text in (
-            (self.add_user_action, "Add user or administrator..."),
+            (self.add_user_action, "Add user..."),
             (self.reset_password_action, "Reset password..."),
             (self.toggle_user_action, None),
             (self.toggle_role_action, None),
@@ -442,7 +443,7 @@ class Dashboard(QDialog):
             return [
                 self.detail_action, self.folder_action, self.copy_job_action, None,
                 self.priority_action, self.force_action, self.unforce_action, None,
-                self.cancel_action,
+                self.cancel_action, self.lost_action,
             ]
         if table is self.users:
             return [
@@ -815,7 +816,8 @@ class Dashboard(QDialog):
                 self.jobs,
                 [
                     (j["spec"]["name"], usernames.get(j["owner_id"], "(deleted user)"),
-                     j["display_state"] + (" · force requested" if j.get("force_run") else ""),
+                     j["display_state"] + (" · force requested" if j.get("force_run") else "")
+                     + (" · needs recheck" if self._stuck(j) else ""),
                      j.get("priority", 0), j["id"], self.timestamp(j.get("created_at")))
                     for j in data["jobs"]
                 ], identifiers=[j["id"] for j in data["jobs"]],
@@ -1728,10 +1730,31 @@ class Dashboard(QDialog):
         identifier = item.data(Qt.ItemDataRole.UserRole)
         return identifier if identifier is not None else item.text()
 
+    @staticmethod
+    def _stuck(job):
+        return job.get("state") == "RUNNING" and str(job.get("reason", "")).startswith("NEEDS_RECHECK")
+
+    def mark_lost(self):
+        identifier = self.selected(self.jobs)
+        if not identifier or not self.require_admin_registration():
+            return
+        if QMessageBox.question(
+            self, "Mark job as lost",
+            "The server can no longer follow this job, for example after a restart of this PC. "
+            "Marking it lost releases its CPU and memory reservation.\n\n"
+            f"{self.job_records.get(identifier, {}).get('reason', '')}\n\n"
+            "If its calculation might still be running, check first. Mark it lost?",
+        ) == QMessageBox.StandardButton.Yes:
+            self.task(
+                lambda: self.client.request("POST", f"/admin/jobs/{identifier}/mark-lost"),
+                lambda _: self.refresh(), success_message="Job marked as lost.",
+            )
+
     def _update_job_actions(self):
         identifier = self.selected(self.jobs)
         record = self.job_records.get(identifier, {})
         pending = record.get("state", record.get("display_state")) in {"PENDING", "QUEUED", "BLOCKED"}
+        self.lost_action.setEnabled(self._stuck(record))
         self.detail_action.setEnabled(identifier is not None)
         self.folder_action.setEnabled(identifier is not None)
         self.copy_job_action.setEnabled(identifier is not None)

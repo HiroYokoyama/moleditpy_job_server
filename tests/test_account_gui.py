@@ -255,6 +255,26 @@ def test_near_simultaneous_usage_readings_agree(monkeypatch):
     assert scheduler.host_usage() is first
 
 
+def test_stuck_job_is_flagged_and_can_be_marked_lost(dashboard, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    job = {"id": "j", "owner_id": "a", "spec": {"name": "n"}, "state": "RUNNING",
+           "display_state": "RUNNING", "reason": "NEEDS_RECHECK: supervisor identity missing"}
+    show_users(dashboard, monkeypatch, jobs=[job])
+    assert dashboard.jobs.item(0, 2).text() == "RUNNING · needs recheck"
+    dashboard.jobs.setCurrentCell(0, 0)
+    dashboard._update_job_actions()
+    assert dashboard.lost_action.isEnabled() and dashboard.lost_action in dashboard._context_actions(dashboard.jobs)
+    monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(QMessageBox, "information", lambda *args: None)
+    calls = record_requests(dashboard, monkeypatch)
+    dashboard.mark_lost()
+    assert calls == [("POST", "/admin/jobs/j/mark-lost")]
+    dashboard.job_records["j"]["reason"] = ""
+    dashboard._update_job_actions()
+    assert not dashboard.lost_action.isEnabled()
+
+
 def test_cpu_reading_does_not_depend_on_the_request_thread(monkeypatch):
     import threading
     from collections import namedtuple

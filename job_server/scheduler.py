@@ -40,6 +40,24 @@ class Scheduler:
                 logging.exception("Dispatcher tick failed")
             self.stop_event.wait(0.2)
 
+    @staticmethod
+    def supervisor_alive(job):
+        """Whether this job's own supervisor process still exists; a reused PID does not count."""
+        if not job["pid"]:
+            return False
+        try:
+            process = psutil.Process(job["pid"])
+            return (
+                abs(process.create_time() - job["process_started"]) < 0.01
+                and process.is_running()
+                and process.status() != psutil.STATUS_ZOMBIE
+            )
+        except psutil.NoSuchProcess:
+            return False
+        except (psutil.AccessDenied, TypeError):
+            # Unknown is not gone: never release a job that might still be computing.
+            return True
+
     def reconcile(self):
         self.children[:] = [child for child in self.children if child.poll() is None]
         for job in self.db.rows("SELECT * FROM jobs WHERE state='RUNNING'"):

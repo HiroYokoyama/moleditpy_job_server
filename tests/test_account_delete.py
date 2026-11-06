@@ -52,6 +52,40 @@ def test_a_deleted_account_cannot_be_brought_back(client, admin, alice, action, 
     assert row["enabled"] == 0 and row["role"] == "deleted" and row["password_hash"] == ""
 
 
+def stuck_job(client, alice, reason="NEEDS_RECHECK: supervisor identity missing", pid=None):
+    job = reserve(client, alice).json()["id"]
+    with client.app.state.db.transaction() as c:
+        c.execute(
+            "UPDATE jobs SET state='RUNNING',reason=?,pid=?,process_started=? WHERE id=?",
+            (reason, pid, 0, job),
+        )
+    return f"/api/v1/admin/jobs/{job}/mark-lost"
+
+
+def test_only_an_admin_can_release_a_stuck_job_and_it_frees_the_reservation(client, admin, alice):
+    target = stuck_job(client, alice)
+    assert client.post(target, headers=alice["headers"]).status_code == 403
+    response = client.post(target, headers=admin["headers"])
+    assert response.status_code == 200 and response.json()["state"] == "LOST"
+    resources = client.get("/api/v1/system/resources", headers=admin["headers"]).json()
+    assert resources["reserved_cpus"] == 0
+    assert client.post(target, headers=admin["headers"]).status_code == 409
+
+
+def test_a_healthy_or_still_supervised_job_cannot_be_marked_lost(client, admin, alice, monkeypatch):
+    assert client.post(stuck_job(client, alice, reason=""), headers=admin["headers"]).status_code == 409
+    monkeypatch.setattr(client.app.state.scheduler, "supervisor_alive", lambda job: True)
+    assert client.post(stuck_job(client, alice), headers=admin["headers"]).status_code == 409
+
+
+def test_supervisor_check_rejects_a_reused_pid_and_never_guesses():
+    import os
+    from job_server.scheduler import Scheduler
+
+    assert not Scheduler.supervisor_alive({"pid": None, "process_started": None})
+    assert not Scheduler.supervisor_alive({"pid": os.getpid(), "process_started": 1.0})
+
+
 def test_admin_cannot_delete_themselves(client, admin):
     assert client.delete(
         f"/api/v1/admin/users/{admin['user']['id']}", headers=admin["headers"]
