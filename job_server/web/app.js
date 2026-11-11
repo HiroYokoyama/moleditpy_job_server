@@ -19,6 +19,25 @@ function message(text) { $('#notice').textContent = text; $('#notice').hidden = 
 function gb(mb) { return typeof mb==='number' ? String(Number((mb/1024).toFixed(1))) : '—'; }
 function date(value) { return value ? new Date(value*1000).toLocaleString() : '—'; }
 function cell(row,text,className='') { const td = document.createElement('td'); td.textContent=String(text); td.className=className; row.append(td); return td; }
+function ahead(count) { return count===0 ? 'next in line' : count+' ahead'; }
+function renderQueue(queue) {
+  const body=$('#queue-body');body.replaceChildren();
+  const add=(entry,place,stateText)=>{
+    const row=document.createElement('tr');if(entry.mine)row.className='mine';
+    cell(row,place);const name=cell(row,entry.name,'job-name');
+    cell(row,entry.mine?entry.owner+' (you)':entry.owner);
+    cell(row,entry.cpus+' cores · '+gb(entry.memory_mb)+' GB');
+    const status=cell(row,'');const badge=document.createElement('span');badge.className='badge '+stateText.toLowerCase();badge.textContent=stateText;status.append(badge);
+    if(entry.priority){const note=document.createElement('small');note.className='job-id';note.textContent='Priority '+entry.priority;status.append(note);}
+    const open=cell(row,'');if(entry.job_id)button(open,'Open',()=>detail(entry.job_id));
+    body.append(row);return name;
+  };
+  for(const entry of queue.running)add(entry,'—','RUNNING');
+  for(const entry of queue.waiting)add(entry,entry.position,entry.display_state);
+  if(!queue.running.length&&!queue.waiting.length){const row=document.createElement('tr');const empty=cell(row,'Nothing is running or waiting.','empty');empty.colSpan=6;body.append(row);}
+  const next=queue.waiting.find(entry=>entry.mine);
+  $('#queue-summary').textContent=queue.running.length+' running · '+queue.waiting.length+' waiting'+(next?' · your next job: '+ahead(next.position-1):'')+(queue.paused?' · paused':'');
+}
 function button(parent,text,call) { const element=document.createElement('button'); element.textContent=text; element.addEventListener('click',()=>safe(call)); parent.append(element); return element; }
 async function safe(call) { try { await call(); } catch(error) { if(error.staleSession)return; if(error.status===401&&state.me)clearSession();message(error.message); if($('#login-dialog').open)$('#login-status').textContent=error.message; } }
 function setSignedIn(value) {
@@ -48,8 +67,8 @@ function clearSession() {
   Object.assign(state,{token:null,expires:0,authenticated:0,me:null,capabilities:null,job:null,jobInfo:null,queueBusy:false,offset:0,page:0,paused:false,refreshPending:false,browsePath:'',resetUser:null,names:null});
   $('#signin').textContent='Sign in';$('#signout').hidden=true;$('#accounts-nav').hidden=true;$('#account-nav').hidden=true;$('#pause').hidden=true;
   if($('#reset-dialog').open)$('#reset-dialog').close();clearPasswordForms();
-  for(const id of ['jobs-body','users-body','devices-body','result-files','my-devices-body','browser-body','activity-body'])$('#'+id).replaceChildren();
-  for(const id of ['log','detail-name','detail-id','detail-spec'])$('#'+id).textContent='';
+  for(const id of ['jobs-body','queue-body','users-body','devices-body','result-files','my-devices-body','browser-body','activity-body'])$('#'+id).replaceChildren();
+  for(const id of ['log','detail-name','detail-id','detail-spec','queue-summary'])$('#'+id).textContent='';
   for(const id of ['running','pending','cpu','memory','cpu-now','memory-now'])$('#'+id).textContent='—';
   $('#job-controls').hidden=true;panel('overview');setSignedIn(false);return state.generation;
 }
@@ -162,6 +181,7 @@ async function refresh() {
     $('#memory').textContent=gb(resource.reserved_memory_mb)+' / '+gb(resource.memory_mb);
     $('#cpu-now').textContent=typeof resource.cpu_percent==='number'?Math.round(resource.cpu_percent)+'%':'—';
     $('#memory-now').textContent=typeof resource.memory_percent==='number'?gb(resource.memory_used_mb)+' / '+gb(resource.memory_total_mb):'—';
+    renderQueue(await api('GET','/queue'));
     state.paused=resource.paused;$('#queue-label').textContent=resource.paused?'Queue paused':'Shared queue';$('#pause').textContent=resource.paused?'Resume queue':'Pause queue';
     const page=state.page;
     const jobs=await api('GET',(state.me.role==='admin'?'/admin/jobs':'/jobs')+'?limit=50&offset='+page*50);
@@ -174,7 +194,7 @@ async function refresh() {
     for(const job of jobs){
       const row=document.createElement('tr');const name=cell(row,job.spec.name,'job-name');
       const id=document.createElement('small');id.className='job-id';id.textContent=(admin?(state.names[job.owner_id]||'(deleted user)')+' · ':'')+job.id;name.append(id);
-      const status=cell(row,'');const badge=document.createElement('span');badge.className='badge '+job.display_state.toLowerCase();badge.textContent=job.display_state;status.append(badge);const priority=document.createElement('small');priority.className='job-id';priority.textContent='Priority '+(job.priority??0)+(job.force_run?' · Force requested':'');status.append(priority);
+      const status=cell(row,'');const badge=document.createElement('span');badge.className='badge '+job.display_state.toLowerCase();badge.textContent=job.display_state;status.append(badge);const priority=document.createElement('small');priority.className='job-id';priority.textContent='Priority '+(job.priority??0)+(job.force_run?' · Force requested':'')+(typeof job.queue_ahead==='number'?' · '+ahead(job.queue_ahead):'');status.append(priority);
       cell(row,job.spec.resources.cpus_per_task+' cores · '+gb(job.spec.resources.memory_mb)+' GB');cell(row,date(job.created_at));button(cell(row,''),'Open',()=>detail(job.id));$('#jobs-body').append(row);
     }
     filterJobs();
@@ -234,7 +254,7 @@ async function detail(id,reset=true){
   if(document.activeElement!==$('#job-priority'))$('#job-priority').value=job.priority??0;
   $('#force-job').textContent=job.force_run?'Cancel force request':'Force run…';
   $('#force-job').disabled=$('#set-priority').disabled=state.queueBusy;
-  $('#detail-name').textContent=job.spec.name+' · '+job.display_state;$('#detail-id').textContent=id;
+  $('#detail-name').textContent=job.spec.name+' · '+job.display_state+(typeof job.queue_ahead==='number'?' · '+ahead(job.queue_ahead):'');$('#detail-id').textContent=id;
   $('#detail-spec').textContent=job.spec.command+'\n\n'+job.spec.resources.cpus_per_task+' CPU cores · '+gb(job.spec.resources.memory_mb)+' GB · exit code '+(job.exit_code??'—')+(job.reason?'\n'+job.reason:'');
   $('#cancel-job').disabled=['DONE','FAILED','CANCELLED','LOST'].includes(job.state);
   $('#mark-lost').hidden=state.me?.role!=='admin'||job.state!=='RUNNING'||!String(job.reason||'').startsWith('NEEDS_RECHECK');

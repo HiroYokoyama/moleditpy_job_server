@@ -440,6 +440,10 @@ def create_app(settings=None, dispatch=True):
             headers=headers,
         )
 
+    @app.get(prefix + "/queue")
+    def queue(p=Depends(principal)):
+        return jobs.queue(p)
+
     @app.get(prefix + "/system/resources")
     def resources(p=Depends(principal)):
         return {**scheduler.resources(), **host_usage()}

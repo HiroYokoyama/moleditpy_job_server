@@ -11,6 +11,10 @@ from .auth import Auth
 from .files import contained, manifest, open_regular, sha256
 
 TERMINAL = {"DONE", "FAILED", "CANCELLED", "LOST"}
+#: The order the dispatcher takes waiting jobs in. Shared so that "jobs ahead"
+#: and the queue listing can never disagree with what actually runs next.
+QUEUE_ORDER = "force_run DESC,priority DESC,created_at,id"
+QUEUE_ORDER_QUALIFIED = "j.force_run DESC,j.priority DESC,j.created_at,j.id"
 
 
 def work_directory(settings, work_root, job_id, staging=False):
@@ -49,6 +53,71 @@ class Jobs:
             reject(404, "job_missing", "Job not found")
         return job
 
+    def queue_ahead(self, job):
+        """Waiting jobs the dispatcher considers before this one.
+
+        Counted in the dispatcher's own order (QUEUE_ORDER). It is an upper
+        bound on the wait in jobs, not a promise: a job ahead that waits on a
+        dependency or on its owner's active limit is passed over.
+        """
+        return self.db.one(
+            """SELECT count(*) AS n FROM jobs WHERE state='PENDING' AND (
+                   force_run>? OR (force_run=? AND (priority>? OR (priority=? AND (
+                       created_at<? OR (created_at=? AND id<?))))))""",
+            (
+                job["force_run"], job["force_run"], job["priority"], job["priority"],
+                job["created_at"], job["created_at"], job["id"],
+            ),
+        )["n"]
+
+    def queue(self, principal):
+        """The shared queue as every signed-in user may see it.
+
+        Trusted users only share this server, so who is running or waiting
+        and under which job name is visible to all of them; commands, files
+        and output stay with each job's owner. Job IDs are given for one's
+        own jobs only (an administrator sees all), since an ID is what
+        every other request starts from.
+        """
+        admin = principal["role"] == "admin"
+
+        def entry(row):
+            spec = json.loads(row["spec"])
+            mine = row["owner_id"] == principal["user_id"]
+            return {
+                "job_id": row["id"] if mine or admin else None,
+                "name": spec["name"],
+                "owner": row["username"] or "(deleted user)",
+                "mine": mine,
+                "cpus": spec["resources"]["cpus_per_task"],
+                "memory_mb": spec["resources"]["memory_mb"],
+                "priority": row["priority"],
+            }
+
+        select = (
+            "SELECT j.*,u.username FROM jobs j LEFT JOIN users u ON u.id=j.owner_id "
+            "WHERE j.state=? ORDER BY {} LIMIT 1000"
+        )
+        running = [
+            {**entry(row), "started_at": row["started_at"]}
+            for row in self.db.rows(select.format("j.started_at,j.id"), ("RUNNING",))
+        ]
+        waiting = []
+        for position, row in enumerate(
+            self.db.rows(select.format(QUEUE_ORDER_QUALIFIED), ("PENDING",)), 1
+        ):
+            waiting.append({
+                **entry(row),
+                "position": position,
+                "display_state": self.public(row)["display_state"],
+                "force_run": bool(row["force_run"]),
+            })
+        return {
+            "paused": self.db.metadata("paused") == "true",
+            "running": running,
+            "waiting": waiting,
+        }
+
     def public(self, job):
         result = {k: v for k, v in job.items() if k not in {"work_root", "pid", "process_started", "force_actor"}}
         result["force_run"] = bool(result["force_run"])
@@ -66,6 +135,9 @@ class Jobs:
             )
         else:
             result["display_state"] = result["state"]
+        if result["state"] == "PENDING":
+            result["queue_ahead"] = self.queue_ahead(job)
+        result.pop("username", None)
         return result
 
     def missing(self, job_id):
