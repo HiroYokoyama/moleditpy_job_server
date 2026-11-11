@@ -39,6 +39,14 @@ python -m pytest -q -n 4
 python -m ruff check job_server scripts tests integration setup.py
 ```
 
+The attack sweeps in `tests/test_penetration.py` carry the `penetration` marker. A plain
+`pytest` run includes them; CI runs them in their own job, apart from the ordinary tests:
+
+```sh
+python -m pytest -q -n 4 -m "not penetration"   # ordinary tests
+python -m pytest -q -n 4 -m penetration         # attack sweeps only
+```
+
 The installed smoke scripts must be copied outside the checkout and run with the
 interpreter that has the distributions installed:
 
