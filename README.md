@@ -154,6 +154,7 @@ This is a service for trusted users. See [SECURITY.md](SECURITY.md) and
 |---|---|
 | Users, passwords, devices and recovery | [Accounts](docs/ACCOUNTS.md) |
 | Reaching the server from another PC | [Step by step](docs/LAN_SETUP.md) ([日本語](docs/LAN_SETUP_JP.md)), [LAN details](docs/LAN_ACCESS.md), [HTTPS and Tailscale](docs/REMOTE_ACCESS.md) |
+| Connecting from a Mac: certificates and Local Network permission | [Connecting from a Mac](docs/MAC_CLIENT.md) |
 | Job Manager | [Integration](docs/JOB_MANAGER.md) |
 | Job folder API | [Job folders](docs/JOB_FOLDERS.md) |
 | Running Linux programs from Windows | [WSL](docs/WSL.md) |

@@ -254,5 +254,8 @@ this only on a trusted LAN.
 | A `.local` name does not resolve | The network blocks multicast, or the PC does not announce it | Use the IP address |
 | A `.local` name resolves but times out | The name led to an address that is not ticked, or the firewall | Tick that address, or add a firewall rule for it |
 
+On a Mac client, `No route to host` while `ping` works, or a certificate error in Job
+Manager only, has Mac-specific causes: see [Connecting from a Mac](MAC_CLIENT.md).
+
 If the server PC is managed by your organization, ask its administrator before changing
 the network profile or firewall rules.
