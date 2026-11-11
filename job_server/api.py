@@ -61,7 +61,17 @@ def create_app(settings=None, dispatch=True):
     app.state.settings = settings
     if settings.web_ui:
         web_root = Path(__file__).parent / "web"
-        app.mount("/assets", StaticFiles(directory=web_root), name="web-assets")
+
+        class WebAssets(StaticFiles):
+            def lookup_path(self, path):
+                try:
+                    return super().lookup_path(path)
+                except ValueError:
+                    # Windows resolves a name of dots ("....") to a \\?\ path that
+                    # cannot be compared with the web root: not a file here.
+                    return "", None
+
+        app.mount("/assets", WebAssets(directory=web_root), name="web-assets")
 
         @app.get("/", include_in_schema=False)
         def web_ui():

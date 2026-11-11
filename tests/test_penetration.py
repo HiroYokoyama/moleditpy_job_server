@@ -65,6 +65,7 @@ PROTECTED = [
     ("GET", "/browse", None),
     ("GET", "/browse/stat", None),
     ("GET", "/system/resources", None),
+    ("GET", "/queue", None),
     ("GET", "/admin/jobs", None),
     ("GET", "/admin/users", None),
     ("GET", "/admin/devices", None),
@@ -285,6 +286,60 @@ def test_download_and_stat_stay_inside_the_job(client, alice, payload):
         assert stat.status_code in (400, 404) or (payload == "sub" and stat.json()["type"] == "directory")
         listing = client.get(f"{API}/browse", params={"path": f"{job}/{payload}"}, headers=alice["headers"])
         assert MARKER not in listing.content and b"secret.txt" not in listing.content
+
+
+def short_name(path):
+    """The 8.3 alias Windows gave this file, or None where the volume gives none."""
+    if os.name != "nt":
+        return None
+    import ctypes
+
+    buffer = ctypes.create_unicode_buffer(1024)
+    if not ctypes.windll.kernel32.GetShortPathNameW(str(path), buffer, len(buffer)):
+        return None
+    alias = os.path.basename(buffer.value)
+    return alias if alias.casefold() != path.name.casefold() else None
+
+
+@pytest.mark.parametrize("reserved", ["moleditpy_run.ps1", "moleditpy_run.sh", ".moleditpy_rc", ".server_process"])
+def test_reserved_file_is_not_served_under_its_short_name(client, alice, reserved):
+    job = committed_job(client, alice)
+    work = client.app.state.jobs.directory(job)
+    (work / reserved).write_bytes(MARKER)
+    alias = short_name(work / reserved)
+    if alias is None:
+        pytest.skip("This volume gives files no 8.3 short name")
+    assert (work / alias).read_bytes() == MARKER  # the alias really opens the reserved file
+    download = client.get(f"{API}/jobs/{job}/files/{alias}", headers=alice["headers"])
+    assert download.status_code == 400 and MARKER not in download.content
+    stat = client.get(f"{API}/browse/stat", params={"path": f"{job}/{alias}", "digest": "true"},
+                      headers=alice["headers"])
+    assert stat.status_code == 400
+    # An ordinary file stays reachable under its own alias and its own name.
+    (work / "a long result name.txt").write_bytes(b"result")
+    ordinary = short_name(work / "a long result name.txt")
+    for name in filter(None, ("a long result name.txt", ordinary)):
+        assert client.get(f"{API}/jobs/{job}/files/{name}", headers=alice["headers"]).content == b"result"
+
+
+def test_reserved_name_is_judged_by_the_resolved_path(tmp_path, monkeypatch):
+    """The same refusal on a volume without short names: the alias is simulated."""
+    from job_server import files
+    from job_server.errors import ServerError
+
+    (tmp_path / "moleditpy_run.ps1").write_bytes(MARKER)
+    real = files.Path.resolve
+
+    def resolve(self, *args, **kwargs):
+        if self.name == "MOLEDI~1.PS1":
+            self = self.with_name("moleditpy_run.ps1")
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(files.Path, "resolve", resolve)
+    with pytest.raises(ServerError) as refused:
+        files.contained(tmp_path, "MOLEDI~1.PS1")
+    assert refused.value.status == 400
+    assert files.contained(tmp_path, "out.txt") == tmp_path / "out.txt"
 
 
 @pytest.mark.parametrize("form", ["..%2f..%2fcontrol", "%2e%2e", "{job}%2f..", "{JOB}", "{{{job}}}", "{hex}"])
