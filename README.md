@@ -72,7 +72,9 @@ Double-click a job to see its command, latest output and result files.
 
 Open **http://127.0.0.1:8766/** on the server PC, or the address you set up for other PCs.
 Users can submit jobs, follow output, browse job folders, download files, change their
-password and revoke their own devices. Administrators also get queue controls and
+password and revoke their own devices. **Shared queue** shows every user's running and
+waiting jobs by name and owner, in the order they start, and each waiting job says how
+many jobs are ahead of it. Commands, files and output stay private to each job's owner. Administrators also get queue controls and
 **Users & devices**.
 
 ![Web user administration](docs/web-accounts.png)

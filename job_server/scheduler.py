@@ -9,7 +9,7 @@ from pathlib import Path
 
 import psutil
 
-from .jobs import TERMINAL
+from .jobs import PENDING_IN_ORDER, TERMINAL
 from .worker import atomic_json
 
 
@@ -142,9 +142,7 @@ class Scheduler:
             running = self.db.rows("SELECT * FROM jobs WHERE state='RUNNING'")
             used_cpu = sum(json.loads(j["spec"])["resources"]["cpus_per_task"] for j in running)
             used_memory = sum(json.loads(j["spec"])["resources"]["memory_mb"] for j in running)
-            for job in self.db.rows(
-                "SELECT * FROM jobs WHERE state='PENDING' ORDER BY force_run DESC,priority DESC,created_at,id"
-            ):
+            for job in self.db.rows(PENDING_IN_ORDER):
                 forced = bool(job["force_run"])
                 if paused and not forced:
                     continue

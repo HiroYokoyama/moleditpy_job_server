@@ -77,6 +77,7 @@ async function authentication() {
 async function refresh() {
   const entered=deferred(), reply=deferred();
   const app=await application(async url=>{
+    if(url==='/api/v1/queue')return response({running:[],waiting:[],paused:false});
     if (url==='/api/v1/system/resources') return response({reserved_cpus:1,cpus:2,reserved_memory_mb:512,memory_mb:1024});
     assert.ok(url.startsWith('/api/v1/jobs?')); entered.resolve(); return reply.promise;
   });
@@ -110,6 +111,7 @@ async function accountsPolling() {
   const app=await application(async url=>{
     if(url==='/api/v1/admin/users')return response(users);
     if(url==='/api/v1/admin/devices')return response(devices);
+    if(url==='/api/v1/queue')return response({running:[],waiting:[],paused:false});
     if(url==='/api/v1/system/resources')return response({paused:false});
     if(url.startsWith('/api/v1/admin/jobs?'))return response([]);
     throw new Error('Unexpected URL '+url);
@@ -188,6 +190,7 @@ async function keylessLogin() {
     }
     if(url==='/api/v1/me')return response({username:'alice',role:'user'});
     if(url==='/api/v1/capabilities')return response({});
+    if(url==='/api/v1/queue')return response({running:[],waiting:[],paused:false});
     if(url==='/api/v1/system/resources')return response({});
     if(url.startsWith('/api/v1/jobs?'))return response([]);
     if(url==='/api/v1/auth/logout')return response({signed_out:true});
@@ -244,6 +247,7 @@ async function sessionRestore() {
     if(url==='/api/v1/auth/web-login')passwordRequests++;
     assert.equal(options.headers.Authorization,'Bearer saved-token');
     if(url==='/api/v1/me')return response({username:'alice',role:'user'});
+    if(url==='/api/v1/queue')return response({running:[],waiting:[],paused:false});
     if(url==='/api/v1/capabilities'||url==='/api/v1/system/resources')return response({});
     if(url.startsWith('/api/v1/jobs?'))return response([]);
     if(url==='/api/v1/auth/logout')return response({});
@@ -265,6 +269,7 @@ async function submittedAndCompleted() {
     if(url==='/api/v1/jobs')return response({id:'submitted'});
     if(url.endsWith('/uploads'))return response([]);
     if(url.endsWith('/commit'))return response({});
+    if(url==='/api/v1/queue')return response({running:[],waiting:[],paused:false});
     if(url==='/api/v1/system/resources')return response({running:status==='DONE'?0:1,pending:0});
     const record={...job('submitted'),state:status,display_state:status};
     if(url.startsWith('/api/v1/jobs?'))return response([record]);
@@ -289,6 +294,7 @@ async function submittedAndCompleted() {
 async function queuedRefresh() {
   const entered=deferred(),late=deferred();let requests=0;
   const app=await application(async url=>{
+    if(url==='/api/v1/queue')return response({running:[],waiting:[],paused:false});
     if(url==='/api/v1/system/resources')return response({});
     assert.ok(url.startsWith('/api/v1/jobs?'));
     if(++requests===1){entered.resolve();return late.promise;}
@@ -317,7 +323,28 @@ async function insecureContext() {
   app.context.crypto={};
   assert.throws(()=>app.call('randomId')(),/Secure random generation is unavailable/);
 }
-const cases={insecureContext,sessionRestore,submittedAndCompleted,queuedRefresh,queueControls,expiredDownload,keylessLogin,authentication,refresh,details,accountsPolling,accountsOrdering,loginView,connectionFailure,connectionTimeout};
+async function sharedQueue() {
+  const other={job_id:null,owner:'bob',mine:false,cpus:2,memory_mb:1024,priority:0};
+  const app=await application(async url=>{
+    if(url==='/api/v1/queue')return response({paused:false,
+      running:[{...other,name:'bob running',started_at:1}],
+      waiting:[{...other,name:'bob waiting',position:1,display_state:'QUEUED',force_run:false},
+        {job_id:'mine',owner:'alice',mine:true,name:'my calculation',cpus:1,memory_mb:512,priority:3,position:2,display_state:'QUEUED',force_run:false}]});
+    if(url==='/api/v1/system/resources')return response({running:1,pending:2});
+    if(url.startsWith('/api/v1/jobs?'))return response([{...job('mine'),state:'PENDING',display_state:'QUEUED',queue_ahead:1}]);
+    throw new Error('Unexpected URL '+url);
+  });
+  signedIn(app);await app.call('refresh')();
+  assert.equal(app.get('#queue-summary').textContent,'1 running · 2 waiting · your next job: 1 ahead');
+  const rows=app.get('#queue-body').children;
+  assert.equal(rows.length,3);
+  assert.deepEqual(rows.map(row=>row.children[1].textContent),['bob running','bob waiting','my calculation']);
+  assert.equal(rows[2].className,'mine');assert.equal(rows[2].children[2].textContent,'alice (you)');
+  // Only one's own job has an Open button.
+  assert.equal(rows[1].children[5].children.length,0);assert.equal(rows[2].children[5].children.length,1);
+  assert.match(app.get('#jobs-body').children[0].children[1].children[1].textContent,/1 ahead$/);
+}
+const cases={insecureContext,sessionRestore,submittedAndCompleted,queuedRefresh,queueControls,expiredDownload,keylessLogin,authentication,refresh,details,accountsPolling,accountsOrdering,loginView,connectionFailure,connectionTimeout,sharedQueue};
 async function runCases() {
   const selected=process.argv[3]==='all'?Object.keys(cases):[process.argv[3]];
   for(const name of selected){
