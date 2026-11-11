@@ -1,6 +1,6 @@
 """Local first-run setup; opening the guide never starts a listener."""
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import (
     QCheckBox, QPlainTextEdit, QDialog, QDialogButtonBox, QFormLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QScrollArea, QWidget,
 )
@@ -110,7 +110,8 @@ class SetupDialog(QDialog):
                  "server and signs in this window. Desktop credentials stay on this PC.")
         else:
             note("3. Administrator — already configured. Use Account > Sign in to access this "
-                 "window. After saving changes, choose Server > Restart to apply them.")
+                 "window. After saving, this window offers to restart the server so the "
+                 "changes apply.")
         self.status = QLabel()
         self.status.setWordWrap(True)
         outer.addWidget(self.status)
@@ -162,6 +163,9 @@ class SetupDialog(QDialog):
             return
         if not self.initial_admin:
             self.accept()
+            # Once this dialog is closed, offer the restart that applies
+            # the settings just saved, as the Settings tab does.
+            QTimer.singleShot(0, dashboard.offer_restart_after_save)
             return
         self.processing = True
         self.buttons.setEnabled(False)

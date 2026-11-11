@@ -9,7 +9,7 @@ In **Settings**, enter Tailscale or proxy origins, one per line, in **Other web 
 Browser requests use an exact origin allowlist, without wildcards.
 
 For direct access from another LAN PC, enable **local HTTPS**, tick this PC's
-private IPs or `.local` name in **Reachable from other PCs at**, save, then choose **Server > Restart**.
+private IPs or `.local` name in **Reachable from other PCs at**, save, and accept the offered restart.
 The HTTPS port defaults to 8767. The server creates a persistent local CA and
 renews its server certificate when needed at startup. Use **Create / show CA
 certificate...** to copy the fingerprint or export the public CA.

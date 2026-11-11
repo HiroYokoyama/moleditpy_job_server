@@ -8,7 +8,7 @@ For a step-by-step setup, see [LAN_SETUP.md](LAN_SETUP.md) ([日本語](LAN_SETU
 2. Enable **Enable local HTTPS with a persistent local CA**.
 3. Select this PC's private IP under **Reachable from other PCs at**. The default HTTPS
    port is **8767**; local HTTP administration remains on **8766**.
-4. Save, then choose **Server > Restart**, or **Start** if the server is off.
+4. Save and accept the restart the window offers, or choose **Server > Start** if the server is off.
 5. Use **Server > Copy connection addresses** to copy the HTTPS URL.
 6. Allow the HTTPS TCP port through the OS firewall for trusted LAN clients.
 
