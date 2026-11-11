@@ -20,7 +20,10 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from job_server.auth import signing_message
 
 from .conftest import enroll, reserve
+from .test_queue_controls import pending
 
+# CI runs these in their own job (-m penetration), apart from the ordinary tests.
+pytestmark = pytest.mark.penetration
 API = "/api/v1"
 MARKER = b"PENTEST-SECRET-OUTSIDE-THE-JOB"
 KEY = base64.b64encode(b"\x01" * 32).decode()
@@ -65,6 +68,7 @@ PROTECTED = [
     ("GET", "/browse", None),
     ("GET", "/browse/stat", None),
     ("GET", "/system/resources", None),
+    ("GET", "/queue", None),
     ("GET", "/admin/jobs", None),
     ("GET", "/admin/users", None),
     ("GET", "/admin/devices", None),
@@ -181,6 +185,21 @@ def test_static_files_do_not_leave_the_web_root(client, path):
     assert b"scrypt" not in response.content and b"PLUGIN_VERSION" not in response.content
 
 
+@pytest.mark.parametrize("path", [
+    "/assets/....//auth.py", "/assets/..../auth.py", "/assets/.../x", "/assets/...%20/x",
+    "/assets/..%5c..%5cauth.py", "/assets/C:/Windows/win.ini", "/assets/app.js::$DATA",
+    "/assets/APP~1.JS", "/assets/con", "/assets/nul", "/assets/app.js.", "/assets/app.js%00",
+    "/assets/" + "." * 300, "/assets/" + "a/" * 400, "/assets/....//....//....//settings.json",
+])
+def test_odd_static_path_is_not_found_and_never_a_server_error(client, path):
+    """Names of dots resolve oddly on Windows; the lookup once raised instead of refusing."""
+    response = client.get(path)
+    # Windows may open the page's own public script under another spelling; nothing else.
+    public = client.get("/assets/app.js").content
+    assert response.status_code in (400, 404) or response.content == public, response.status_code
+    assert b"scrypt" not in response.content and b"data_dir" not in response.content
+
+
 @pytest.mark.parametrize("extra", [
     {"owner_id": "00000000-0000-0000-0000-000000000000"},
     {"priority": 1000},
@@ -285,6 +304,60 @@ def test_download_and_stat_stay_inside_the_job(client, alice, payload):
         assert stat.status_code in (400, 404) or (payload == "sub" and stat.json()["type"] == "directory")
         listing = client.get(f"{API}/browse", params={"path": f"{job}/{payload}"}, headers=alice["headers"])
         assert MARKER not in listing.content and b"secret.txt" not in listing.content
+
+
+def short_name(path):
+    """The 8.3 alias Windows gave this file, or None where the volume gives none."""
+    if os.name != "nt":
+        return None
+    import ctypes
+
+    buffer = ctypes.create_unicode_buffer(1024)
+    if not ctypes.windll.kernel32.GetShortPathNameW(str(path), buffer, len(buffer)):
+        return None
+    alias = os.path.basename(buffer.value)
+    return alias if alias.casefold() != path.name.casefold() else None
+
+
+@pytest.mark.parametrize("reserved", ["moleditpy_run.ps1", "moleditpy_run.sh", ".moleditpy_rc", ".server_process"])
+def test_reserved_file_is_not_served_under_its_short_name(client, alice, reserved):
+    job = committed_job(client, alice)
+    work = client.app.state.jobs.directory(job)
+    (work / reserved).write_bytes(MARKER)
+    alias = short_name(work / reserved)
+    if alias is None:
+        pytest.skip("This volume gives files no 8.3 short name")
+    assert (work / alias).read_bytes() == MARKER  # the alias really opens the reserved file
+    download = client.get(f"{API}/jobs/{job}/files/{alias}", headers=alice["headers"])
+    assert download.status_code == 400 and MARKER not in download.content
+    stat = client.get(f"{API}/browse/stat", params={"path": f"{job}/{alias}", "digest": "true"},
+                      headers=alice["headers"])
+    assert stat.status_code == 400
+    # An ordinary file stays reachable under its own alias and its own name.
+    (work / "a long result name.txt").write_bytes(b"result")
+    ordinary = short_name(work / "a long result name.txt")
+    for name in filter(None, ("a long result name.txt", ordinary)):
+        assert client.get(f"{API}/jobs/{job}/files/{name}", headers=alice["headers"]).content == b"result"
+
+
+def test_reserved_name_is_judged_by_the_resolved_path(tmp_path, monkeypatch):
+    """The same refusal on a volume without short names: the alias is simulated."""
+    from job_server import files
+    from job_server.errors import ServerError
+
+    (tmp_path / "moleditpy_run.ps1").write_bytes(MARKER)
+    real = files.Path.resolve
+
+    def resolve(self, *args, **kwargs):
+        if self.name == "MOLEDI~1.PS1":
+            self = self.with_name("moleditpy_run.ps1")
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(files.Path, "resolve", resolve)
+    with pytest.raises(ServerError) as refused:
+        files.contained(tmp_path, "MOLEDI~1.PS1")
+    assert refused.value.status == 400
+    assert files.contained(tmp_path, "out.txt") == tmp_path / "out.txt"
 
 
 @pytest.mark.parametrize("form", ["..%2f..%2fcontrol", "%2e%2e", "{job}%2f..", "{JOB}", "{{{job}}}", "{hex}"])
@@ -564,3 +637,102 @@ def test_password_guessing_is_capped_and_forwarded_headers_do_not_reset_it(clien
     assert client.post(API + "/auth/challenge", json={"device_id": alice["device_id"]}).status_code == 429
     # The limit covers sign-in only; a signed-in user keeps working.
     assert client.get(API + "/jobs", headers=alice["headers"]).status_code == 200
+
+
+QUEUE_NEIGHBOUR = [
+    ("GET", "/jobs/{job}"), ("GET", "/jobs/{job}/log"), ("GET", "/jobs/{job}/files"),
+    ("GET", "/jobs/{job}/archive"), ("GET", "/jobs/{job}/uploads"), ("POST", "/jobs/{job}/cancel"),
+    ("GET", "/browse?path={job}"), ("POST", "/admin/jobs/{job}/priority"),
+    ("POST", "/admin/jobs/{job}/force-run"),
+]
+HOSTILE_NAME = "<img src=x onerror=alert(1)>"
+
+
+def waiting_neighbours(client, alice):
+    bob = enroll(client, "bob")
+    mine = pending(client, alice, name="alice waiting", command="secret-program --alice")
+    theirs = pending(client, bob, name=HOSTILE_NAME, command="secret-program --bob")
+    return bob, mine, theirs
+
+
+def test_shared_queue_gives_a_neighbour_nothing_to_act_on(client, alice):
+    """The queue shows that a neighbour's job waits, and no handle on the job itself."""
+    _, mine, theirs = waiting_neighbours(client, alice)
+    response = client.get(API + "/queue", headers=alice["headers"])
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    assert theirs not in response.text and "secret-program" not in response.text
+    own, other = response.json()["waiting"]
+    assert own["job_id"] == mine and other["job_id"] is None
+    assert other["name"] == HOSTILE_NAME  # carried as data; the page writes it as text
+    allowed = {"job_id", "name", "owner", "mine", "cpus", "memory_mb", "priority", "position",
+               "display_state", "force_run"}
+    assert set(own) == allowed and set(other) == allowed
+    detail = client.get(f"{API}/jobs/{mine}", headers=alice["headers"]).json()
+    assert detail["queue_ahead"] == 0 and "username" not in detail
+
+
+@pytest.mark.parametrize(("method", "path"), QUEUE_NEIGHBOUR, ids=[f"{m} {p}" for m, p in QUEUE_NEIGHBOUR])
+def test_job_seen_in_the_queue_is_still_out_of_reach(client, alice, method, path):
+    _, _, theirs = waiting_neighbours(client, alice)
+    body = {"priority": 9, "force_run": True} if method == "POST" else None
+    response = call(client, method, path.format(job=theirs), alice["headers"], body)
+    assert response.status_code == (403 if "/admin/" in path else 404)
+    row = client.app.state.db.one("SELECT state,priority,force_run FROM jobs WHERE id=?", (theirs,))
+    assert (row["state"], row["priority"], row["force_run"]) == ("PENDING", 0, 0)
+
+
+@pytest.mark.parametrize("query", [
+    "?limit=-1", "?offset=99999999999999999999", "?all=true&admin=1", "?job_id={job}",
+    "?owner=bob'%20OR%201=1--", "?role=admin", "?" + "a=b&" * 2000,
+])
+def test_queue_query_parameters_reveal_nothing_more(client, alice, query):
+    _, _, theirs = waiting_neighbours(client, alice)
+    response = client.get(API + "/queue" + query.format(job=theirs), headers=alice["headers"])
+    assert response.status_code in (200, 400) and theirs not in response.text
+    if response.status_code == 200:
+        assert [entry["job_id"] for entry in response.json()["waiting"] if not entry["mine"]] == [None]
+
+
+@pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE"])
+def test_queue_is_read_only(client, alice, method):
+    headers = {**alice["headers"], "Idempotency-Key": str(uuid.uuid4())}
+    assert call(client, method, "/queue", headers, None if method == "DELETE" else {}).status_code == 405
+
+
+def test_queue_refuses_enrollment_and_ended_sessions(client, alice):
+    bob, _, theirs = waiting_neighbours(client, alice)
+    admin = enroll(client, "root", "admin")
+    assert client.get(API + "/queue", headers=bob["enrollment"]).status_code == 401
+    assert client.get(API + "/queue", headers={"Authorization": alice["headers"]["Authorization"][:-2]}).status_code == 401
+    disabled = client.post(f"{API}/admin/users/{bob['user']['id']}/disable", headers=admin["headers"])
+    assert disabled.status_code == 200, disabled.text
+    assert client.get(API + "/queue", headers=bob["headers"]).status_code == 401
+    # The disabled user's job is still in line, and still without its ID for a neighbour.
+    listed = client.get(API + "/queue", headers=alice["headers"])
+    assert theirs not in listed.text and len(listed.json()["waiting"]) == 2
+    assert client.post(f"{API}/admin/users/{bob['user']['id']}/enable", headers=admin["headers"]).status_code == 200
+    assert client.get(API + "/queue", headers=bob["headers"]).status_code == 401
+
+
+@pytest.mark.parametrize("guess", [
+    "MOLEDI~1.PS1", "MOLEDI~2.PS1", "moledi~1.ps1", "MOLEDI~1.SH", "MOLEDI~1", "SERVER~1",
+    "PAYLOA~1.PS1", "JOB~1.LOG",
+])
+def test_guessed_short_name_serves_no_reserved_file(client, alice, guess):
+    """As an attacker would try it: guessing the alias, with every reserved file present."""
+    job = committed_job(client, alice)
+    work = client.app.state.jobs.directory(job)
+    for name in ("moleditpy_run.ps1", "moleditpy_run.sh", ".moleditpy_rc", ".server_process",
+                 "payload.ps1", "job.log"):
+        (work / name).write_bytes(MARKER)
+    for who in (alice, enroll(client, "root", "admin")):
+        download = client.get(f"{API}/jobs/{job}/files/{guess}", headers=who["headers"])
+        assert download.status_code in (400, 404) and MARKER not in download.content
+        stat = client.get(f"{API}/browse/stat", params={"path": f"{job}/{guess}", "digest": "true"},
+                          headers=who["headers"])
+        assert stat.status_code in (400, 404)
+    archive = client.get(f"{API}/jobs/{job}/archive", headers=alice["headers"])
+    assert archive.status_code == 200 and MARKER not in archive.content
+    listing = client.get(f"{API}/browse", params={"path": job}, headers=alice["headers"]).json()
+    assert {entry["name"] for entry in listing["entries"]} == {"in.txt", "out.txt", "sub"}

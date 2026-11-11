@@ -74,8 +74,13 @@ def contained(root, relative, create=False):
         current = current / part
         if is_link(current):
             reject(400, "unsafe_path", "Links and junctions are forbidden")
-    if not target.resolve().is_relative_to(root.resolve()):
+    resolved, base = target.resolve(), root.resolve()
+    if not resolved.is_relative_to(base):
         reject(400, "unsafe_path", "File escapes job directory")
+    # A Windows 8.3 short name (MOLEDI~1.PS1) reaches a file under a name the
+    # check above never saw, so judge the name the file really has.
+    if any(part.casefold() in RESERVED for part in resolved.relative_to(base).parts):
+        reject(400, "invalid_path", "Unsafe or reserved file path")
     if create:
         target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     return target

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "moleditpy-job-server"
-version = "0.10.0"
+version = "0.10.1"
 description = "MoleditPy authenticated job server — LAN computational helper"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -42,6 +42,7 @@ select = ["E4", "E7", "E9", "F"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["penetration: attack sweeps against the HTTP API; CI runs them in their own job"]
 
 [tool.setuptools]
 license-files = ["LICENSE", "COPYING", "LICENSING.md"]
