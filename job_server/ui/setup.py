@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (
     QCheckBox, QPlainTextEdit, QDialog, QDialogButtonBox, QFormLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QScrollArea, QWidget,
 )
 
+from ..auth import MIN_PASSWORD_LENGTH
 from ..settings import pc_resources
 from .units import GBSpinBox, FocusSpinBox, gb
 from .network import LanAddressList
@@ -139,9 +140,14 @@ class SetupDialog(QDialog):
             return
         credentials = (self.username.text().strip(), self.password.text())
         if self.initial_admin and (
-            not credentials[0] or not credentials[1] or credentials[1] != self.confirm.text()
+            not credentials[0]
+            or len(credentials[1]) < MIN_PASSWORD_LENGTH
+            or credentials[1] != self.confirm.text()
         ):
-            self.status.setText("Enter a username and a nonempty password; both passwords must match.")
+            self.status.setText(
+                f"Enter a username and a password of at least {MIN_PASSWORD_LENGTH} characters; "
+                "both passwords must match."
+            )
             return
         dashboard.public_urls.setPlainText(self.addresses.toPlainText())
         dashboard.allow_lan_http.setChecked(self.allow_lan_http.isChecked())

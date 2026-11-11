@@ -49,7 +49,7 @@ def test_initial_admin_is_atomic_across_connections(client):
             db.close()
 
 
-@pytest.mark.parametrize("password", ["synthetic-password", "x"])
+@pytest.mark.parametrize("password", ["synthetic-password", "four"])
 def test_cli_bootstrap_works_while_daemon_is_running(client, monkeypatch, password):
     import sys
     from job_server.__main__ import main
@@ -101,7 +101,7 @@ def test_stop_and_add_user_without_key_show_registration_help(dashboard, monkeyp
 
 
 @pytest.mark.parametrize("accepted", [True, False])
-@pytest.mark.parametrize("password_value", ["synthetic-password", "x"])
+@pytest.mark.parametrize("password_value", ["synthetic-password", "four"])
 def test_username_and_password_share_one_dialog(dashboard, monkeypatch, accepted, password_value):
     from PySide6.QtWidgets import QDialog, QLineEdit
 

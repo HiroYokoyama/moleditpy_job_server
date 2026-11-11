@@ -34,7 +34,7 @@ def test_first_open_offers_setup_without_creating_admin_or_starting_server(dashb
 
 
 def test_configured_server_skips_automatic_setup_but_guide_remains_available(dashboard, monkeypatch):
-    dashboard.create_administrator(("admin", "x"))
+    dashboard.create_administrator(("admin", "xxxx"))
     monkeypatch.setattr(dashboard, "isVisible", lambda: True)
     dashboard._first_setup()
     assert dashboard.setup_dialog is None
@@ -59,7 +59,7 @@ def test_setup_validates_then_creates_and_signs_in_without_second_password_promp
     dashboard.open_setup()
     guide = dashboard.setup_dialog
     guide.username.setText("admin")
-    guide.password.setText("x")
+    guide.password.setText("xxxx")
     guide.confirm.setText("wrong")
     calls = []
     monkeypatch.setattr(dashboard, "_start_and_sign_in", lambda credentials: calls.append(credentials))
@@ -68,10 +68,15 @@ def test_setup_validates_then_creates_and_signs_in_without_second_password_promp
     guide.apply()
     assert not calls
     assert not dashboard.has_administrator()
-    guide.confirm.setText("x")
+    guide.password.setText("abc")
+    guide.confirm.setText("abc")
+    guide.apply()
+    assert not calls and "at least 4 characters" in guide.status.text()
+    guide.password.setText("xxxx")
+    guide.confirm.setText("xxxx")
     guide.addresses.setPlainText("https://compute.example.ts.net/")
     guide.apply()
-    assert calls == [("admin", "x")]
+    assert calls == [("admin", "xxxx")]
     assert dashboard.has_administrator()
     assert Settings.load(dashboard.config).connection_urls == ["https://compute.example.ts.net"]
     assert guide.password.text() == guide.confirm.text() == ""
@@ -101,8 +106,8 @@ def test_setup_failed_start_retries_sign_in_without_creating_another_admin(dashb
     monkeypatch.setattr(dashboard, "refresh", lambda: None)
     monkeypatch.setattr(dashboard, "task", task)
     for _ in range(2):
-        guide.password.setText("x")
-        guide.confirm.setText("x")
+        guide.password.setText("xxxx")
+        guide.confirm.setText("xxxx")
         guide.apply()
     assert len(starts) == 2
     db = Database(dashboard.settings.root)
@@ -114,11 +119,11 @@ def test_setup_failed_start_retries_sign_in_without_creating_another_admin(dashb
 
 
 def test_account_bootstrap_signs_in_in_same_operation(dashboard, monkeypatch):
-    monkeypatch.setattr(dashboard, "credentials", lambda title: ("admin", "x"))
+    monkeypatch.setattr(dashboard, "credentials", lambda title: ("admin", "xxxx"))
     called = []
     monkeypatch.setattr(dashboard, "_start_and_sign_in", lambda credentials: called.append(credentials))
     monkeypatch.setattr(dashboard, "refresh", lambda: None)
     monkeypatch.setattr(dashboard, "task", lambda work, done, **kwargs: done(work()))
     dashboard.bootstrap()
     assert dashboard.has_administrator()
-    assert called == [("admin", "x")]
+    assert called == [("admin", "xxxx")]

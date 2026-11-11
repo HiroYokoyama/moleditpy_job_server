@@ -122,7 +122,7 @@ def test_passwords_never_reach_the_activity_log(client, admin, alice):
 def test_admin_reset_ends_sessions_and_optionally_devices(client, admin, alice):
     target = f"/api/v1/admin/users/{alice['user']['id']}/password"
     session = web(client, "alice")
-    assert client.post(target, headers=alice["headers"], json={"new_password": "x"}).status_code == 403
+    assert client.post(target, headers=alice["headers"], json={"new_password": "xxxx"}).status_code == 403
     assert client.post(target, headers=admin["headers"], json={"new_password": "new-one"}).status_code == 200
     assert client.get("/api/v1/me", headers=session).status_code == 401
     assert device_token(client, alice).status_code == 200
@@ -136,7 +136,7 @@ def test_admin_reset_ends_sessions_and_optionally_devices(client, admin, alice):
 def test_admin_cannot_reset_own_password_past_the_current_one(client, admin):
     assert client.post(
         f"/api/v1/admin/users/{admin['user']['id']}/password", headers=admin["headers"],
-        json={"new_password": "x"},
+        json={"new_password": "xxxx"},
     ).status_code == 409
 
 
@@ -145,7 +145,7 @@ def test_reset_needs_a_recent_administrator_sign_in(client, admin, alice):
         c.execute("UPDATE sessions SET authenticated_at=?", (time.time() - 301,))
     assert client.post(
         f"/api/v1/admin/users/{alice['user']['id']}/password", headers=admin["headers"],
-        json={"new_password": "x"},
+        json={"new_password": "xxxx"},
     ).status_code == 401
 
 
@@ -185,10 +185,10 @@ def test_role_change_takes_effect_and_is_admin_only(client, admin, alice):
 def test_create_user_can_add_an_administrator(client, admin):
     created = client.post(
         "/api/v1/admin/users", headers=admin["headers"],
-        json={"username": "second", "password": "x", "role": "admin"},
+        json={"username": "second", "password": "xxxx", "role": "admin"},
     )
     assert created.status_code == 201 and created.json()["role"] == "admin"
-    assert client.get("/api/v1/admin/users", headers=web(client, "second", "x")).status_code == 200
+    assert client.get("/api/v1/admin/users", headers=web(client, "second", "xxxx")).status_code == 200
 
 
 def test_cli_reset_recovers_a_forgotten_password(client, admin, tmp_path, monkeypatch):

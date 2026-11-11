@@ -18,10 +18,16 @@ from .errors import reject
 #: Marks the tombstone of a deleted account; never a role anyone can sign in with.
 DELETED_ROLE = "deleted"
 
+#: Applies to new passwords only; an existing shorter one still signs in.
+MIN_PASSWORD_LENGTH = 4
+
 
 def password_hash(password):
-    if not isinstance(password, str) or not 1 <= len(password) <= 1024:
-        reject(400, "password_policy", "Password must contain 1–1024 characters")
+    if not isinstance(password, str) or not MIN_PASSWORD_LENGTH <= len(password) <= 1024:
+        reject(
+            400, "password_policy",
+            f"Password must contain {MIN_PASSWORD_LENGTH}–1024 characters",
+        )
     salt = secrets.token_bytes(16)
     digest = hashlib.scrypt(
         password.encode(), salt=salt, n=32768, r=8, p=1, maxmem=64 * 1024 * 1024

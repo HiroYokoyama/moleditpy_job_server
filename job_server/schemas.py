@@ -92,12 +92,12 @@ class UserCreate(Login):
 
 class PasswordChange(Model):
     current_password: StrictStr = Field(max_length=1024)
-    new_password: StrictStr = Field(min_length=1, max_length=1024)
+    new_password: StrictStr = Field(min_length=4, max_length=1024)
     revoke_devices: StrictBool = False
 
 
 class PasswordReset(Model):
-    new_password: StrictStr = Field(min_length=1, max_length=1024)
+    new_password: StrictStr = Field(min_length=4, max_length=1024)
     revoke_devices: StrictBool = False
 
 

@@ -44,8 +44,8 @@ Passwords are stored as salted scrypt hashes and are never logged. Password atte
 limited to 20 a minute, per address and per account. A wrong current password does not end
 your session.
 
-The server accepts passwords of 1 to 1024 characters and does not enforce a strength
-policy. Choose a strong one for any server reachable from another PC, and use HTTPS: over
+The server accepts new passwords of 4 to 1024 characters and does not otherwise enforce a
+strength policy. A shorter password set before 0.8.1 still signs in until it is changed. Choose a strong one for any server reachable from another PC, and use HTTPS: over
 plain LAN HTTP, passwords can be read on the network.
 
 Desktop clients sign in with a device key instead of a saved password. A window whose
