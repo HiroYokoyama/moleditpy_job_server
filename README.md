@@ -47,7 +47,9 @@ Python, and an administrator runs the server from MoleditPy or the command line.
 ![Job Server first-run setup](docs/gui-setup.png)
 
 Closing the window does not stop the daemon. **Server → Stop** stops it and preserves
-running jobs. A portable MoleditPy build needs a Python selected in **Settings → Daemon Python runtime**.
+running jobs. If the window cannot verify a running daemon (started by an older version,
+or its port changed while it ran), **Start**, **Stop** and **Restart** offer to stop its
+process instead. A portable MoleditPy build needs a Python selected in **Settings → Daemon Python runtime**.
 
 ## Desktop window
 
@@ -60,7 +62,7 @@ Right-click a job, user or device for its actions. The same actions are in the m
 | **Dashboard** | See server state, live CPU and memory, reservations and jobs. Filter jobs, open details, set priority, force run, cancel or open the job folder. |
 | **Users & Devices** | Add users or administrators, reset passwords, enable, disable or delete users, switch user and administrator, and revoke devices. Change your own password. |
 | **Activity** | Read recent logins, account changes and job events. |
-| **Settings** | Set the network, budgets, commands run before each job, the job folder and the runtime. Save, then choose **Server → Restart**. |
+| **Settings** | Set the network, budgets, commands run before each job, the job folder and the runtime. When a save changes something while the server runs, the window offers the restart that applies it. |
 
 Double-click a job to see its command, latest output and result files.
 
@@ -86,18 +88,35 @@ Python 3.11+, on a low-privilege OS account. Qt and MoleditPy are not needed.
 
 ```sh
 python -m pip install moleditpy-job-server
-moleditpy-job-server init
-moleditpy-job-server create-admin
+moleditpy-job-server init --tls --admin admin
 moleditpy-job-server serve
 ```
+
+`init` writes the whole first configuration, so the first `serve` needs no restart.
+With `--tls` it uses this PC's private address when there is only one, creates the
+local CA and prints its SHA-256 fingerprint for the client PCs. `--admin` asks for the
+password; it is never passed on the command line. Without `--tls` or `--lan-http` the
+server is reachable from this PC only.
 
 | Command | Purpose |
 |---|---|
 | `init` | Write a configuration, with this PC's size as the budget |
-| `create-admin` | Create the first administrator |
+| `create-admin` | Create the first administrator, if `init --admin` did not |
 | `serve` | Run the server |
-| `status` | Ask a running server for its health |
+| `status` | Ask a running server for its health; reports when it is OFF |
 | `reset-password <username>` | Recover a forgotten password on the server PC |
+
+| `init` option | Purpose |
+|---|---|
+| `--tls` | Serve the LAN address over local HTTPS and create the CA now |
+| `--lan-http` | Also serve the LAN address over plain HTTP (unencrypted) |
+| `--lan-address IP` | The private address other PCs use; needed when this PC has several |
+| `--extra-address IP` | Another private address to listen on (repeatable) |
+| `--hostname NAME.local` | This PC's `.local` name |
+| `--port`, `--tls-port` | HTTP port (default 8766) and HTTPS port (default 8767) |
+| `--cpus`, `--memory-mb` | Resource budget (default: this PC's size) |
+| `--data-dir PATH` | Data folder (default `~/.moleditpy/job_server/`) |
+| `--admin USERNAME` | Also create the first administrator |
 
 Every command accepts `--config /path/to/settings.json`. Data lives in
 `~/.moleditpy/job_server/`. Install `moleditpy-job-server[gui]` for the desktop window.
