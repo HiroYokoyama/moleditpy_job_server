@@ -117,3 +117,40 @@ def test_real_process_can_start_stop_and_restart_with_saved_credentials(tmp_path
             if process.poll() is None:
                 process.terminate()
                 process.wait(timeout=10)
+
+
+def test_process_stop_terminates_daemon_processes(monkeypatch, tmp_path):
+    calls = []
+    process = SimpleNamespace(
+        terminate=lambda: calls.append("terminate"),
+        kill=lambda: calls.append("kill"),
+    )
+    monkeypatch.setattr(lifecycle, "daemon_processes", lambda root: [process])
+    states = iter([False, True])
+    monkeypatch.setattr(lifecycle, "directory_is_idle", lambda root: next(states))
+    monkeypatch.setattr(lifecycle.time, "sleep", lambda _: None)
+    lifecycle.stop_processes_and_wait(tmp_path)
+    assert calls == ["terminate"]
+
+
+def test_process_stop_without_a_process_reports(monkeypatch, tmp_path):
+    monkeypatch.setattr(lifecycle, "daemon_processes", lambda root: [])
+    with pytest.raises(RuntimeError, match="No Job Server process"):
+        lifecycle.stop_processes_and_wait(tmp_path)
+
+
+def test_process_stop_escalates_to_kill_then_times_out(monkeypatch, tmp_path):
+    calls = []
+    process = SimpleNamespace(
+        terminate=lambda: calls.append("terminate"),
+        kill=lambda: calls.append("kill"),
+    )
+    monkeypatch.setattr(lifecycle, "daemon_processes", lambda root: [process])
+    waits = iter([False, True])
+    monkeypatch.setattr(lifecycle, "_wait_until_idle", lambda root, timeout: next(waits))
+    lifecycle.stop_processes_and_wait(tmp_path)
+    assert calls == ["terminate", "kill"]
+    waits = iter([False, False])
+    monkeypatch.setattr(lifecycle, "_wait_until_idle", lambda root, timeout: next(waits))
+    with pytest.raises(TimeoutError, match="was not confirmed"):
+        lifecycle.stop_processes_and_wait(tmp_path)

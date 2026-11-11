@@ -664,9 +664,11 @@ class Dashboard(QDialog):
         runtime_note.setWordWrap(True)
         runtime_layout.addWidget(runtime_note)
         layout.addWidget(runtime_box)
-        layout.addWidget(QLabel("After saving, choose Server > Restart to apply changes."))
+        layout.addWidget(QLabel(
+            "When the server is running, saving offers a restart so the changes apply at once."
+        ))
         self.save_settings_button = QPushButton("Save configuration")
-        self.save_settings_button.clicked.connect(self.save_settings)
+        self.save_settings_button.clicked.connect(self.save_settings_and_offer_restart)
         layout.addWidget(self.save_settings_button)
         layout.addStretch()
         scroll = QScrollArea()
@@ -1097,6 +1099,33 @@ class Dashboard(QDialog):
             self.message.setText(str(exc))
             return False
 
+    def save_settings_and_offer_restart(self):
+        if self.save_settings():
+            self.offer_restart_after_save()
+
+    def offer_restart_after_save(self):
+        """Saving only writes the file; offer the restart that applies it.
+
+        Called after a save from the Settings tab or the setup guide, never
+        from save_settings() itself: several flows save as a step of their
+        own (showing the CA, regenerating it) and must not be interrupted.
+        A stopped server needs no offer; it reads the file at its next start.
+        """
+        from ..lifecycle import directory_is_idle
+
+        if directory_is_idle(self.settings.root):
+            return
+        answer = QMessageBox.question(
+            self,
+            "Restart the server?",
+            "The saved settings apply only after a restart. Running jobs are "
+            "preserved; connected clients reconnect. Restart now?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self.restart_daemon()
+
     def regenerate_ca(self):
         if not self.save_settings():
             return
@@ -1288,15 +1317,63 @@ class Dashboard(QDialog):
     def start_daemon(self):
         self._server_task("start", self._start_daemon, "Starting server…", self._server_started)
 
+    def _offer_process_stop(self):
+        """Offer to stop an unverifiable daemon by process, for Stop/Restart.
+
+        Returns a stop callable when this directory's daemon is running
+        but cannot be verified and the user confirms stopping its process;
+        False when the user declines; None when the verified path applies
+        (daemon stopped, or ownership verifies). The process stop sends no
+        credentials and so does not require this window's device
+        registration — requiring it would deadlock the window, because
+        registration itself verifies ownership before enrolling.
+        """
+        from ..daemon_ownership import daemon_processes
+        from ..lifecycle import directory_is_idle, stop_processes_and_wait
+
+        if directory_is_idle(self.settings.root):
+            return None
+        try:
+            self.require_own_daemon()
+        except RuntimeError:
+            pass
+        else:
+            return None
+        processes = daemon_processes(self.settings.root)
+        if not processes:
+            return None
+        listing = ", ".join(str(process.pid) for process in processes)
+        answer = QMessageBox.question(
+            self,
+            "Stop the unverified daemon?",
+            "A daemon is using this server's data folder, but it cannot be "
+            "verified as this Job Server — for example it was started by an "
+            "older version, or its port was changed while it ran. It cannot "
+            "be stopped with credentials, and this window cannot sign in to "
+            f"it. Stop its process directly (PID {listing})? No credentials "
+            "are sent, and running jobs are preserved.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return False
+        return lambda: stop_processes_and_wait(self.settings.root)
+
     def stop_daemon(self):
-        if not self.require_admin_registration():
-            return
         from ..lifecycle import stop_and_wait
 
         def stopped(_):
             self.message.setText("Server is OFF. Active job supervisors are preserved.")
             self.set_status("offline", "Server is OFF", "Active job supervisors are preserved.")
 
+        fallback = self._offer_process_stop()
+        if fallback is False:
+            return
+        if fallback is not None:
+            self._server_task("stop", fallback, "Stopping server…", stopped)
+            return
+        if not self.require_admin_registration():
+            return
         self._server_task(
             "stop", lambda: stop_and_wait(self.client, self.settings.root), "Stopping server…", stopped,
         )
@@ -1308,9 +1385,20 @@ class Dashboard(QDialog):
         QDesktopServices.openUrl(QUrl(next(iter(self.settings.connection_urls), self.client.url)))
 
     def restart_daemon(self):
+        from ..lifecycle import stop_and_wait
+
+        fallback = self._offer_process_stop()
+        if fallback is False:
+            return
+        if fallback is not None:
+            def work():
+                fallback()
+                return self._start_daemon()
+
+            self._server_task("restart", work, "Restarting server…", self._server_started)
+            return
         if not self.require_admin_registration():
             return
-        from ..lifecycle import stop_and_wait
 
         def work():
             stop_and_wait(self.client, self.settings.root)
