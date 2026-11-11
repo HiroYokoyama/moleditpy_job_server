@@ -35,7 +35,7 @@ cannot connect.
 2. Enable **Enable local HTTPS with a persistent local CA**.
 3. Under **Reachable from other PCs at**, tick the PC's LAN IP. Tick more than one if the
    PC has several networks. **Connect using** shows the resulting URLs.
-4. Save, then choose **Server > Restart**, or **Start** if the server is off.
+4. Save and accept the restart the window offers, or choose **Server > Start** if the server is off.
 5. Open **Create / show CA certificate...** and keep the SHA-256 fingerprint in view.
 6. Confirm the server is listening on the LAN IP. Steps 6 to 9 are for Windows; for
    Linux or Mac, see [Server on Linux or Mac](#server-on-linux-or-mac).
