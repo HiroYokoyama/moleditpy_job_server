@@ -158,3 +158,18 @@ def test_linked_lock_and_descriptor_are_rejected(tmp_path, listener):
         assert outside.read_text() == "untouched"
     finally:
         lock.release()
+
+
+def test_process_lookup_resolves_a_relative_config_in_the_daemons_folder(tmp_path):
+    from job_server.daemon_ownership import _serves_root
+    from job_server.settings import Settings
+
+    data = tmp_path / "data"
+    Settings(data_dir=str(data)).save(tmp_path / "settings.json")
+    serve = ["python", "-m", "job_server", "serve", "--config", "settings.json"]
+    assert _serves_root(serve, data.resolve(), lambda: str(tmp_path))
+    assert _serves_root(["moleditpy-job-server", "serve", f"--config={tmp_path / 'settings.json'}"], data.resolve())
+    # Another folder's daemon, another command, and an unreadable configuration are not ours.
+    assert not _serves_root(serve, (tmp_path / "other").resolve(), lambda: str(tmp_path))
+    assert not _serves_root(["python", "-m", "http.server", "serve"], data.resolve())
+    assert not _serves_root(serve, data.resolve(), lambda: str(tmp_path / "missing"))

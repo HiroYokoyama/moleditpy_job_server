@@ -563,3 +563,69 @@ def test_regenerate_without_a_ca_creates_one_without_asking(dashboard, monkeypat
     dashboard.lan_addresses.select(["192.168.1.20"])
     dashboard.regenerate_ca()
     assert shown
+
+
+def _answer(monkeypatch, answer):
+    from PySide6.QtWidgets import QMessageBox
+
+    asked = []
+    monkeypatch.setattr(
+        QMessageBox, "question", lambda *args: asked.append(args[1]) or answer
+    )
+    return asked
+
+
+def test_save_offers_a_restart_only_for_a_change_under_a_running_server(dashboard, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    asked = _answer(monkeypatch, QMessageBox.StandardButton.Yes)
+    restarts = []
+    monkeypatch.setattr(dashboard, "restart_daemon", lambda: restarts.append(1))
+    running = [False]
+    monkeypatch.setattr("job_server.lifecycle.directory_is_idle", lambda root: not running[0])
+
+    # A stopped server reads the file at its next start: nothing to ask.
+    dashboard.fields["cpus"].setValue(dashboard.fields["cpus"].value() + 1)
+    dashboard.save_settings_and_offer_restart()
+    assert not asked and "when it starts" in dashboard.message.text()
+
+    # Saving unchanged settings does not interrupt a running server.
+    running[0] = True
+    dashboard.save_settings_and_offer_restart()
+    assert not asked and "No setting changed" in dashboard.message.text()
+
+    dashboard.fields["cpus"].setValue(dashboard.fields["cpus"].value() + 1)
+    dashboard.save_settings_and_offer_restart()
+    assert asked == ["Restart the server?"] and restarts == [1]
+
+
+def test_declined_restart_is_offered_again_at_the_next_save(dashboard, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    asked = _answer(monkeypatch, QMessageBox.StandardButton.No)
+    monkeypatch.setattr(dashboard, "restart_daemon", lambda: pytest.fail("Declined"))
+    monkeypatch.setattr("job_server.lifecycle.directory_is_idle", lambda root: False)
+    dashboard.fields["cpus"].setValue(dashboard.fields["cpus"].value() + 1)
+    dashboard.save_settings_and_offer_restart()
+    dashboard.save_settings_and_offer_restart()
+    assert len(asked) == 2 and "Restart to apply" in dashboard.message.text()
+
+
+def test_start_replaces_a_daemon_this_window_cannot_reach(dashboard, monkeypatch):
+    import time
+    from PySide6.QtWidgets import QApplication
+
+    calls = []
+    monkeypatch.setattr(dashboard, "refresh", lambda: None)
+    monkeypatch.setattr(dashboard, "_offer_process_stop", lambda: lambda: calls.append("stop"))
+    monkeypatch.setattr(dashboard, "_start_daemon", lambda: calls.append("start") or "Server is running.")
+    dashboard.start_daemon()
+    deadline = time.monotonic() + 5
+    while dashboard.busy and time.monotonic() < deadline:
+        QApplication.processEvents()
+        time.sleep(0.01)
+    assert calls == ["stop", "start"]
+
+    monkeypatch.setattr(dashboard, "_offer_process_stop", lambda: False)
+    dashboard.start_daemon()
+    assert calls == ["stop", "start"] and not dashboard.busy

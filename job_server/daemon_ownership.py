@@ -51,14 +51,16 @@ def daemon_processes(root):
                 continue
             if os.name == "nt":
                 owner = owner.casefold()
-            if owner == account and _serves_root(process.info["cmdline"] or [], root):
+            if owner == account and _serves_root(
+                process.info["cmdline"] or [], root, process.cwd
+            ):
                 found.append(process)
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
     return found
 
 
-def _serves_root(cmdline, root):
+def _serves_root(cmdline, root, cwd=lambda: "."):
     if "serve" not in cmdline:
         return False
     joined = " ".join(cmdline)
@@ -73,6 +75,9 @@ def _serves_root(cmdline, root):
     from .settings import Settings
 
     try:
+        if config and not Path(config).is_absolute():
+            # A relative --config was resolved in the daemon's folder, not this one.
+            config = Path(cwd(), config)
         settings = Settings.load(Path(config)) if config else Settings.load()
     except Exception:
         return False

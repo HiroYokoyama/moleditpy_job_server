@@ -127,6 +127,8 @@ class Dashboard(QDialog):
         self.busy = False
         self._pending_tasks = deque()
         self._pending_lifecycle = set()
+        # A save changed the file under a running daemon and no start followed.
+        self._unapplied = False
         self._active_lifecycle = None
         self.setup_dialog = None
         self._setup_checked = False
@@ -1089,6 +1091,8 @@ class Dashboard(QDialog):
             if not self._confirm_ca_replacement(candidate):
                 return False
             candidate.save(self.config)
+            if candidate != self.settings:
+                self._unapplied = True
             self.settings = candidate
             self.public_urls.setPlainText(
                 "\n".join(url for url in candidate.connection_urls if url not in candidate.lan_urls)
@@ -1114,6 +1118,12 @@ class Dashboard(QDialog):
         from ..lifecycle import directory_is_idle
 
         if directory_is_idle(self.settings.root):
+            self._unapplied = False
+            self.message.setText(f"Saved {self.config}. The server uses it when it starts.")
+            return
+        if not self._unapplied:
+            # Saving unchanged settings is no reason to interrupt clients.
+            self.message.setText(f"Saved {self.config}. No setting changed.")
             return
         answer = QMessageBox.question(
             self,
@@ -1272,6 +1282,7 @@ class Dashboard(QDialog):
             f"http://127.0.0.1:{settings.port}",
             settings.root / "identity" / "admin-device.key", timeout=3,
         )
+        self._unapplied = False  # the new process read the file just saved
         from ..lifecycle import wait_until_ready
 
         wait_until_ready(JobServerClient(self.client.url, timeout=1), settings.root, process)
@@ -1315,7 +1326,19 @@ class Dashboard(QDialog):
         self.refresh()
 
     def start_daemon(self):
-        self._server_task("start", self._start_daemon, "Starting server…", self._server_started)
+        # A daemon this window cannot reach (its port changed while it ran, or
+        # an older version started it) still holds the data folder, so a new
+        # one would only exit at startup. Offer to replace it instead.
+        fallback = self._offer_process_stop()
+        if fallback is False:
+            return
+
+        def work():
+            if fallback is not None:
+                fallback()
+            return self._start_daemon()
+
+        self._server_task("start", work, "Starting server…", self._server_started)
 
     def _offer_process_stop(self):
         """Offer to stop an unverifiable daemon by process, for Stop/Restart.
@@ -1331,7 +1354,7 @@ class Dashboard(QDialog):
         from ..daemon_ownership import daemon_processes
         from ..lifecycle import directory_is_idle, stop_processes_and_wait
 
-        if directory_is_idle(self.settings.root):
+        if self._pending_lifecycle or directory_is_idle(self.settings.root):
             return None
         try:
             self.require_own_daemon()
