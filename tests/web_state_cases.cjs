@@ -26,7 +26,17 @@ function element() {
 }
 async function application(fetch, storage=new Map()) {
   const elements = new Map(), events={};
+  // The browser's history, enough to follow Back and Forward through hash addresses.
+  const location={origin:'http://127.0.0.1:8766',hash:''};
+  const history={state:null,entries:[{state:null,hash:''}],index:0,
+    pushState(state,_title,hash){this.entries.splice(this.index+1);this.entries.push({state,hash});this.index++;this.state=state;location.hash=hash;},
+    replaceState(state,_title,hash){this.entries[this.index]={state,hash};this.state=state;location.hash=hash;},
+    go(step){const target=this.index+step;if(target<0||target>=this.entries.length)return;this.index=target;({state:this.state,hash:location.hash}=this.entries[target]);events.popstate?.();},
+    back(){this.go(-1);},forward(){this.go(1);}};
+  // Like the page: the running and waiting cards have no dial.
+  const absent=new Set(['#dial-running','#dial-pending','#dial-text-running','#dial-text-pending']);
   const get = name => {
+    if (absent.has(name)) return null;
     if (!elements.has(name)) elements.set(name, element());
     return elements.get(name);
   };
@@ -36,7 +46,7 @@ async function application(fetch, storage=new Map()) {
     crypto:{randomUUID, subtle:{sign:async()=>new Uint8Array(64), digest:webcrypto.subtle.digest.bind(webcrypto.subtle)}},
     document:{querySelector:get, querySelectorAll:()=>[], createElement:element,body:element(),addEventListener(name,callback){events[name]=callback;}},
     sessionStorage:{getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,String(value)),removeItem:key=>storage.delete(key)},
-    location:{origin:'http://127.0.0.1:8766'},
+    location, history,
     setInterval(){}, setTimeout(){},clearTimeout(){},addEventListener(name,callback){events[name]=callback;},
     fetch:async(url, options)=>url==='/api/v1/health' ? response({server_version:'synthetic'}) : fetch(url, options),
   });
@@ -363,7 +373,123 @@ async function sharedQueue() {
   assert.equal(rows[1].children[5].children.length,0);assert.equal(rows[2].children[5].children.length,1);
   assert.match(app.get('#jobs-body').children[0].children[1].children[1].textContent,/1 ahead$/);
 }
-const cases={userChip,insecureContext,sessionRestore,submittedAndCompleted,queuedRefresh,queueControls,expiredDownload,keylessLogin,authentication,refresh,details,accountsPolling,accountsOrdering,loginView,connectionFailure,connectionTimeout,sharedQueue};
+const JOB_A='00000000-0000-0000-0000-00000000000a', JOB_B='00000000-0000-0000-0000-00000000000b';
+function steadyServer(records,files={}) {
+  return async url=>{
+    if(url==='/api/v1/queue')return response({running:[],waiting:[],paused:false});
+    if(url==='/api/v1/system/resources')return response({running:0,pending:0});
+    if(url.startsWith('/api/v1/jobs?'))return response(records());
+    const found=records().find(record=>url==='/api/v1/jobs/'+record.id);
+    if(found)return response(found);
+    if(url.includes('/log?'))return response({text:'',next_offset:0});
+    for(const [id,list] of Object.entries(files))if(url==='/api/v1/jobs/'+id+'/files')return response(list);
+    if(url==='/api/v1/auth/logout')return response({signed_out:true});
+    throw new Error('Unexpected URL '+url);
+  };
+}
+async function browserHistory() {
+  const app=await application(steadyServer(()=>[job(JOB_A),job(JOB_B)]));
+  signedIn(app);
+  const history=app.context.history,location=app.context.location;
+  app.call('panel')('overview');
+  assert.equal(location.hash,'#overview');assert.equal(history.entries.length,1,'The first page replaces the bare address');
+  app.call('panel')('submit');assert.equal(location.hash,'#submit');
+  await app.call('detail')(JOB_A);assert.equal(location.hash,'#job/'+JOB_A);
+  history.back();await new Promise(done=>setImmediate(done));
+  assert.equal(location.hash,'#submit');assert.equal(app.state.job,null,'Back leaves the job page');
+  history.forward();await new Promise(done=>setTimeout(done,0));
+  assert.equal(app.state.job,JOB_A,'Forward opens the same job again');
+  assert.equal(history.entries.length,3,'Following history adds no entries');
+  // The page's own back button behaves like the browser's.
+  app.get('#back').listeners.click();await new Promise(done=>setImmediate(done));
+  assert.equal(location.hash,'#submit');
+  // Opening a job from an address, as after a reload or a shared link.
+  history.pushState(null,'','#job/'+JOB_B);app.call('followRoute')();await new Promise(done=>setTimeout(done,0));
+  assert.equal(app.state.job,JOB_B);
+  location.hash='#job/not-a-job';app.call('followRoute')();
+  assert.equal(app.state.job,null,'A malformed job address shows the overview');
+  app.get('#signout').listeners.click();
+  assert.equal(location.hash,'#overview','The next person to sign in does not start on this user\'s page');
+  history.back();assert.equal(app.state.me,null,'Signed out, history changes nothing');
+}
+async function steadyLists() {
+  let records=[{...job(JOB_A),state:'DONE',display_state:'DONE'}];
+  const files={[JOB_A]:[{path:'result.out',size:10,sha256:'0'.repeat(64)}]};
+  const app=await application(steadyServer(()=>records,files));
+  signedIn(app);
+  await app.call('refresh')();
+  const row=app.get('#jobs-body').children[0];
+  await app.call('refresh')();
+  assert.equal(app.get('#jobs-body').children[0],row,'An unchanged list keeps its rows');
+  await app.call('detail')(JOB_A);
+  const file=app.get('#result-files').children[0];
+  assert.equal(file.children[0].textContent,'result.out');
+  let emptied=false;const list=app.get('#result-files'),replace=list.replaceChildren.bind(list);
+  list.replaceChildren=(...values)=>{if(!values.length)emptied=true;replace(...values);};
+  await app.call('refresh')();
+  assert.equal(emptied,false,'Result files are never blanked while the job is refreshed');
+  assert.equal(app.get('#result-files').children[0],file);
+  records=[{...records[0],display_state:'DONE',priority:5}];
+  await app.call('refresh')();
+  assert.notEqual(app.get('#jobs-body').children[0],row,'A changed job is drawn again');
+  // A new log line is appended; an empty poll leaves the text alone.
+  const log=app.get('#log');log.textContent='kept';
+  await app.call('detail')(JOB_A,false);
+  assert.equal(log.textContent,'kept');
+}
+async function jobRows() {
+  const records=[{...job(JOB_A),state:'RUNNING',display_state:'RUNNING'},{...job(JOB_B),state:'FAILED',display_state:'FAILED'}];
+  const app=await application(steadyServer(()=>records));
+  signedIn(app);await app.call('refresh')();
+  const [running,failed]=app.get('#jobs-body').children;
+  app.get('#job-state-filter').value='problem';app.get('#job-state-filter').listeners.change();
+  assert.equal(running.hidden,true);assert.equal(failed.hidden,false);
+  app.get('#job-state-filter').value='active';app.get('#job-state-filter').listeners.change();
+  assert.equal(running.hidden,false);assert.equal(failed.hidden,true);
+  // A refresh keeps the filter applied.
+  records.push({...job('00000000-0000-0000-0000-00000000000c'),state:'DONE',display_state:'DONE'});
+  await app.call('refresh')();
+  assert.deepEqual(app.get('#jobs-body').children.map(row=>row.hidden),[false,true,true]);
+  running.listeners.click({target:{closest:()=>null}});await new Promise(done=>setTimeout(done,0));
+  assert.equal(app.state.job,JOB_A,'Clicking a row opens its job');
+  assert.equal(app.context.document.title,'Job details · Job Server');
+}
+async function overviewMeters() {
+  const resources={running:1,pending:2,reserved_cpus:6,cpus:8,reserved_memory_mb:512,memory_mb:1024,cpu_percent:93,memory_percent:40};
+  const now=Math.floor(Date.now()/1000),asked=[];
+  let history=[[now-100,4,0,10,20,30,40],[now-10,1,2,93,40,75,50],[now,1,2,93,40,75,50]];
+  const app=await application(async url=>{
+    if(url==='/api/v1/system/resources')return response(resources);
+    if(url.startsWith('/api/v1/system/resources/history?since=')){
+      const since=Number(url.split('=')[1]);asked.push(since);
+      if(!history)throw new Error('no history');
+      return response({interval:10,keep_seconds:21600,samples:history.filter(row=>row[0]>since)});
+    }
+    if(url==='/api/v1/queue')return response({running:[],waiting:[],paused:false});
+    if(url.startsWith('/api/v1/jobs?'))return response([]);
+    throw new Error('Unexpected URL '+url);
+  });
+  signedIn(app);await app.call('refresh')();
+  const state=app.call('trendState');
+  assert.ok(asked[0]>now-301&&asked[0]<=now,'The first request asks only for the five minutes shown');
+  assert.equal(state.rows.length,3);
+  assert.equal(app.get('#dial-text-cpu').textContent,'75%');
+  assert.equal(app.get('#dial-text-cpu-now').textContent,'93%');
+  const points=app.call('trendPoints')('running',100,30,now);
+  assert.equal(points.length,4,'A silence longer than three samples breaks the line');
+  assert.equal(points[1].x,null);assert.equal(Math.round(points[3].x),100);
+  assert.equal(points[0].y,2,'The largest count shown sits on the top line');
+  assert.equal(app.call('trendTop')('running'),4);assert.equal(app.call('trendTop')('cpu'),100);
+  await app.call('refresh')();
+  assert.equal(asked[1],now,'Later requests ask only for what is new');
+  assert.equal(state.rows.length,3,'Samples already held are not added twice');
+  history=null;await app.call('refresh')();
+  assert.equal(app.get('#dial-text-cpu').textContent,'75%','A server without history still shows its figures');
+  app.get('#signout').listeners.click();
+  assert.equal(state.rows.length,0,'Signing out forgets the readings');
+  assert.match(app.call('dialArc')(0.5),/^M9\.98 34\.02A17 17 0 0 1 22\.00 5\.00$/);
+}
+const cases={overviewMeters,jobRows,browserHistory,steadyLists,userChip,insecureContext,sessionRestore,submittedAndCompleted,queuedRefresh,queueControls,expiredDownload,keylessLogin,authentication,refresh,details,accountsPolling,accountsOrdering,loginView,connectionFailure,connectionTimeout,sharedQueue};
 async function runCases() {
   const selected=process.argv[3]==='all'?Object.keys(cases):[process.argv[3]];
   for(const name of selected){

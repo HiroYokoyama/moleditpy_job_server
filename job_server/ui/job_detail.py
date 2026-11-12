@@ -1,9 +1,9 @@
 """Read-only job details with bounded log reads and stale-response rejection."""
 
-from PySide6.QtCore import QThreadPool, Qt
+from PySide6.QtCore import QThreadPool, QTimer, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView, QDialog, QDialogButtonBox, QFormLayout, QHeaderView,
-    QLabel, QPlainTextEdit, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout,
+    QLabel, QPlainTextEdit, QTableWidget, QTabWidget, QVBoxLayout,
 )
 
 from ._qt_callbacks import connect_queued
@@ -12,6 +12,8 @@ from .units import gb
 
 LOG_LIMIT = 65536
 FILE_LIMIT = 1000
+FOLLOW_MS = 5000
+FINISHED = {"DONE", "FAILED", "CANCELLED", "LOST"}
 
 
 class JobDetailDialog(QDialog):
@@ -26,6 +28,12 @@ class JobDetailDialog(QDialog):
         self.generation = 0
         self.job_id = None
         self.owner = "—"
+        self.shown_job = None
+        self.finished_job = False
+        # An unfinished job is followed until it ends, without the user pressing Refresh.
+        self.follow = QTimer(self)
+        self.follow.setInterval(FOLLOW_MS)
+        self.follow.timeout.connect(self._follow)
         layout = QVBoxLayout(self)
         form = QFormLayout()
         self.values = {}
@@ -75,14 +83,22 @@ class JobDetailDialog(QDialog):
         layout.addWidget(buttons)
 
     def show_job(self, identifier, owner):
+        if identifier != self.job_id:
+            self.invalidate("Loading job details…")
         self.job_id, self.owner = identifier, owner
         self.show()
         self.raise_()
         self.activateWindow()
         self.refresh()
 
+    def _follow(self):
+        if self.isVisible() and not self.finished_job and self.refresh_button.isEnabled():
+            self.refresh()
+
     def invalidate(self, message):
         self.generation += 1
+        self.shown_job = None
+        self.finished_job = False
         for value in self.values.values():
             value.setText("—")
         self.command.clear()
@@ -94,7 +110,13 @@ class JobDetailDialog(QDialog):
     def refresh(self):
         if self.job_id is None:
             return
-        self.invalidate("Loading job details…")
+        # Refreshing the job on screen keeps it there until the answer arrives:
+        # blanking every field first made each refresh flash.
+        if self.shown_job == self.job_id:
+            self.generation += 1
+            self.status.setText("Refreshing…")
+        else:
+            self.invalidate("Loading job details…")
         self.refresh_button.setEnabled(False)
         generation, identifier, owner = self.generation, self.job_id, self.owner
         client = self.dashboard.client
@@ -125,18 +147,27 @@ class JobDetailDialog(QDialog):
                 "name": spec.get("name", "—"), "state": job.get("display_state", job["state"]),
                 "owner": owner, "id": job["id"], "priority": job.get("priority", 0),
                 "force": "Requested; dependencies still apply" if job.get("force_run") else "Not requested",
-                "resources": f"CPU {resources.get('cpus_per_task', '—')} · Memory {gb(resources.get('memory_mb'))} GB · Wall time {resources.get('walltime_seconds', '—')} s",
+                "resources": f"CPU {resources.get('cpus_per_task', '—')} · Memory {gb(resources.get('memory_mb'))} GiB · Wall time {resources.get('walltime_seconds', '—')} s",
                 "dependency": (str(dependency) + (" · any completion" if spec.get("chain_any") else " · must succeed")) if dependency else "None",
                 "exit": job.get("exit_code") if job.get("exit_code") is not None else "—",
             }
             for key, value in values.items():
-                self.values[key].setText(str(value))
-            self.command.setPlainText(spec.get("command", ""))
-            self.log.setPlainText(log.get("text", ""))
-            self.files.setRowCount(min(len(files), FILE_LIMIT))
-            for row, entry in enumerate(files[:FILE_LIMIT]):
-                for column, key in enumerate(("path", "size", "sha256")):
-                    self.files.setItem(row, column, QTableWidgetItem(str(entry.get(key, "—"))))
+                if self.values[key].text() != str(value):
+                    self.values[key].setText(str(value))
+            if self.command.toPlainText() != spec.get("command", ""):
+                self.command.setPlainText(spec.get("command", ""))
+            self._show_log(log.get("text", ""))
+            self.dashboard.fill(
+                self.files,
+                [tuple(str(entry.get(key, "—")) for key in ("path", "size", "sha256"))
+                 for entry in files[:FILE_LIMIT]],
+            )
+            self.shown_job = identifier
+            self.finished_job = job.get("state") in FINISHED
+            if self.finished_job:
+                self.follow.stop()
+            elif not self.follow.isActive():
+                self.follow.start()
             self.status.setText(
                 f"Latest output from byte {log.get('offset', 0)}. "
                 + (f"Showing the first {FILE_LIMIT} of {len(files)} files." if len(files) > FILE_LIMIT else f"{len(files)} result files.")
@@ -153,6 +184,18 @@ class JobDetailDialog(QDialog):
         connect_queued(task.signals.failed, failed, self, (str,), cleanup=cleanup)
         self.pool.start(task)
 
+    def _show_log(self, text):
+        """Replace the log, following its end only if the reader was already there."""
+        if self.log.toPlainText() == text:
+            return
+        bar = self.log.verticalScrollBar()
+        first = self.log.document().isEmpty()
+        following = first or bar.value() >= bar.maximum() - 2
+        position = bar.value()
+        self.log.setPlainText(text)
+        bar.setValue(bar.maximum() if following else min(position, bar.maximum()))
+
     def closeEvent(self, event):
+        self.follow.stop()
         self.invalidate("Closed")
         super().closeEvent(event)

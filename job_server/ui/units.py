@@ -1,4 +1,4 @@
-"""Memory and storage are stored in MB (API and settings) but shown in GB."""
+"""Memory and storage are stored in MB (API and settings) but shown in GiB (1024 MB), the unit Windows calls GB."""
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDoubleSpinBox, QSpinBox
@@ -7,7 +7,7 @@ MB_PER_GB = 1024
 
 
 def gb(mb):
-    """Return an MB amount in GB to one decimal place, such as "16", "0.5" or "—"."""
+    """Return an MB amount in GiB to one decimal place, such as "16", "0.5" or "—"."""
     if mb is None or isinstance(mb, bool) or not isinstance(mb, (int, float)):
         return "—"
     return f"{mb / MB_PER_GB:.1f}".removesuffix(".0")
@@ -30,13 +30,13 @@ class FocusSpinBox(FocusedWheel, QSpinBox):
 
 
 class GBSpinBox(FocusedWheel, QDoubleSpinBox):
-    """Edits an MB setting in GB, rounding back to whole MB."""
+    """Edits an MB setting in GiB, rounding back to whole MB."""
 
     def __init__(self, maximum_mb, parent=None):
         super().__init__(parent)
         self.setDecimals(1)
         self.setSingleStep(0.5)
-        self.setSuffix(" GB")
+        self.setSuffix(" GiB")
         self.setRange(0.1, maximum_mb / MB_PER_GB)
 
     def mb(self):

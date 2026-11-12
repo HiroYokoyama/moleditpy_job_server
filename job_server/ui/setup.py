@@ -86,7 +86,7 @@ class SetupDialog(QDialog):
         resources.addRow("CPU budget", self.cpus)
         resources.addRow("Memory budget", self.memory)
         cpus, memory_mb = pc_resources()
-        self.match_pc = QPushButton(f"Use this PC's size ({cpus} CPUs, {gb(memory_mb)} GB)")
+        self.match_pc = QPushButton(f"Use this PC's size ({cpus} CPUs, {gb(memory_mb)} GiB)")
 
         def match_pc():
             self.cpus.setValue(cpus)

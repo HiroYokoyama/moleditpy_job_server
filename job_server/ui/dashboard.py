@@ -1,6 +1,8 @@
 
 from ._qt_callbacks import connect_queued
+from .meters import DEFAULT_SPAN, SPANS, Gauge, Trend, percent
 import json
+import logging
 import os
 import sqlite3
 import subprocess
@@ -17,6 +19,7 @@ from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal, Qt
 from PySide6.QtGui import QIcon, QAction, QBrush, QColor
 from PySide6.QtWidgets import (
     QApplication,
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QGridLayout,
@@ -35,12 +38,12 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QMessageBox,
     QMenuBar,
-    QProgressBar,
     QPushButton,
     QScrollArea,
     QSizePolicy,
     QAbstractItemView,
     QTabWidget,
+    QToolButton,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -133,6 +136,8 @@ class Dashboard(QDialog):
         self.setup_dialog = None
         self._setup_checked = False
         self.detail_dialog = None
+        self.history_rows = deque()
+        self.span = DEFAULT_SPAN
         self.job_records = {}
         self.usernames = {}
         self.user_records = {}
@@ -239,37 +244,54 @@ class Dashboard(QDialog):
         metrics.setSpacing(12)
         self.metric_values = {}
         self.metric_bars = {}
+        self.metric_trends = {}
         for index, (key, title) in enumerate((
             ("running", "Running jobs"), ("cpu_usage", "CPU in use now (whole PC)"),
             ("cpu", "CPU reserved / budget"), ("pending", "Waiting jobs"),
-            ("memory_usage", "Memory in use now (whole PC)"), ("memory", "Memory reserved / budget"),
+            ("memory_usage", "Memory in use now (whole PC, usable)"), ("memory", "Memory reserved / budget"),
         )):
             card = QGroupBox(title)
             card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-            content = QVBoxLayout(card)
+            content = QHBoxLayout(card)
+            column = QVBoxLayout()
             value = QLabel("—")
             font = value.font()
             font.setPointSize(font.pointSize() + 6)
             font.setBold(True)
             value.setFont(font)
-            content.addWidget(value)
+            column.addWidget(value)
             self.metric_values[key] = value
-            bar = QProgressBar()
-            bar.setTextVisible(False)
-            bar.setFixedHeight(6)
-            bar.setRange(0, 100)
-            content.addWidget(bar)
-            if key in ("cpu", "memory", "cpu_usage", "memory_usage"):
-                self.metric_bars[key] = bar
+            share = key in ("cpu", "memory", "cpu_usage", "memory_usage")
+            # Recent history under each figure, so a spike between glances still shows.
+            trend = Trend("%" if share else "", 100 if share else None)
+            column.addWidget(trend)
+            self.metric_trends[key] = trend
+            if share:
+                gauge = Gauge()
+                content.addWidget(gauge)
+                self.metric_bars[key] = gauge
                 self._set_usage(key, None, None)
             else:
-                # Count cards keep the bar's space so all four cards line up.
-                policy = bar.sizePolicy()
-                policy.setRetainSizeWhenHidden(True)
-                bar.setSizePolicy(policy)
-                bar.hide()
+                content.addStrut(Gauge().height())  # Count cards line up with dial cards.
+            content.addLayout(column, 1)
             metrics.addWidget(card, index // 3, index % 3)
         layout.addLayout(metrics)
+        under = QHBoxLayout()
+        note = QLabel("Point at a line to read its value. Gaps are times the server was not running.")
+        note.setEnabled(False)
+        under.addWidget(note, 1)
+        # The span the lines cover; the server keeps the longest, so switching is instant.
+        self.span_buttons = QButtonGroup(self)
+        for seconds, label in SPANS:
+            button = QToolButton()
+            button.setText(label)
+            button.setCheckable(True)
+            button.setChecked((seconds, label) == DEFAULT_SPAN)
+            button.setAutoRaise(True)
+            button.clicked.connect(lambda _=False, span=(seconds, label): self._set_span(span))
+            self.span_buttons.addButton(button)
+            under.addWidget(button)
+        layout.addLayout(under)
         filters = QHBoxLayout()
         self.job_caption = QLabel("Jobs — right-click for actions")
         filters.addWidget(self.job_caption, 1)
@@ -581,7 +603,7 @@ class Dashboard(QDialog):
         ):
             limits.addRow(label, number(key, maximum))
         cpus, memory_mb = pc_resources()
-        self.match_pc_button = QPushButton(f"Use this PC's size ({cpus} CPUs, {gb(memory_mb)} GB)")
+        self.match_pc_button = QPushButton(f"Use this PC's size ({cpus} CPUs, {gb(memory_mb)} GiB)")
 
         def match_pc():
             self.fields["cpus"].setValue(cpus)
@@ -788,6 +810,17 @@ class Dashboard(QDialog):
             return
 
         page = self.job_page
+        since = self.history_rows[-1][0] if self.history_rows else 0
+        client = self.client
+
+        def history():
+            # The lines are extra: a daemon from before 0.12 has no history, and a failed
+            # read must not take the figures and job list down with it.
+            try:
+                return client.request("GET", f"/system/resources/history?since={since}")
+            except Exception as exc:  # noqa: BLE001 - logged; the rest of the refresh goes on
+                logging.info("Job Server: load history unavailable: %s", exc)
+                return None
 
         def work():
             try:
@@ -812,6 +845,7 @@ class Dashboard(QDialog):
                     ),
                     "users": self.client.request("GET", "/admin/users"),
                     "devices": self.client.request("GET", "/admin/devices"),
+                    "history": history(),
                 }
             except Exception as exc:
                 # /health answered, so the daemon is online; only the signed-in calls failed.
@@ -860,7 +894,7 @@ class Dashboard(QDialog):
                 f"{resource.get('reserved_cpus', '—')} / {resource.get('cpus', '—')}"
             )
             self.metric_values["memory"].setText(
-                f"{gb(resource.get('reserved_memory_mb'))} / {gb(resource.get('memory_mb'))} GB"
+                f"{gb(resource.get('reserved_memory_mb'))} / {gb(resource.get('memory_mb'))} GiB"
             )
             self._set_usage("cpu", resource.get("reserved_cpus"), resource.get("cpus"))
             self._set_usage("memory", resource.get("reserved_memory_mb"), resource.get("memory_mb"))
@@ -868,10 +902,11 @@ class Dashboard(QDialog):
             self.metric_values["cpu_usage"].setText("—" if cpu_now is None else f"{cpu_now:.0f}%")
             self.metric_values["memory_usage"].setText(
                 "—" if memory_now is None
-                else f"{gb(resource.get('memory_used_mb'))} / {gb(resource.get('memory_total_mb'))} GB"
+                else f"{gb(resource.get('memory_used_mb'))} / {gb(resource.get('memory_total_mb'))} GiB"
             )
             self._set_usage("cpu_usage", cpu_now, 100)
             self._set_usage("memory_usage", memory_now, 100)
+            self._merge_history(data.get("history"))
             usernames = {u["id"]: u["username"] for u in data["users"]}
             self.usernames = usernames
             self.job_records = {job["id"]: job for job in data["jobs"]}
@@ -955,6 +990,9 @@ class Dashboard(QDialog):
             value.setText("—")
         for key in self.metric_bars:
             self._set_usage(key, None, None)
+        self.history_rows.clear()
+        for trend in self.metric_trends.values():
+            trend.set_samples([])
         for table in (self.jobs, self.users, self.devices, self.activity):
             self.fill(table, [])
         self._update_job_actions()
@@ -962,18 +1000,36 @@ class Dashboard(QDialog):
         if self.detail_dialog is not None:
             self.detail_dialog.invalidate("Connection unavailable. Sign in and refresh to view this job.")
 
+    # Where each figure sits in a history sample from the server.
+    HISTORY_COLUMNS = {"running": 1, "pending": 2, "cpu_usage": 3, "memory_usage": 4, "cpu": 5, "memory": 6}
+
+    def _merge_history(self, history):
+        if not history:
+            return
+        last = self.history_rows[-1][0] if self.history_rows else 0
+        self.history_rows.extend(row for row in history["samples"] if row[0] > last)
+        horizon = time.time() - history.get("keep_seconds", SPANS[-1][0])
+        while self.history_rows and self.history_rows[0][0] < horizon:
+            self.history_rows.popleft()
+        gap = 3 * history.get("interval", 10)
+        for key, column in self.HISTORY_COLUMNS.items():
+            self.metric_trends[key].set_samples(
+                [(row[0], row[column]) for row in self.history_rows], gap=gap
+            )
+
+    def _set_span(self, span):
+        self.span = span
+        for trend in self.metric_trends.values():
+            trend.set_span(*span)
+
     def _set_usage(self, key, used, budget):
-        try:
-            percent = max(0, min(100, round(100 * used / budget)))
-        except (TypeError, ZeroDivisionError):
-            percent = 0
-        color = "#c62828" if percent >= 90 else "#e08600" if percent >= 70 else "#2e7d32"
-        bar = self.metric_bars[key]
-        bar.setValue(percent)
-        bar.setStyleSheet(
-            "QProgressBar { border: none; border-radius: 3px; background: rgba(127, 127, 127, 0.25); }"
-            f"QProgressBar::chunk {{ border-radius: 3px; background: {color}; }}"
-        )
+        share = percent(used, budget)
+        value = 0 if share is None else round(share)
+        color = "#c62828" if value >= 90 else "#e08600" if value >= 70 else "#2e7d32"
+        gauge = self.metric_bars[key]
+        gauge.setValue(value)
+        gauge.setKnown(share is not None)
+        gauge.setColor(color)
 
     def _color_states(self):
         for row in range(self.jobs.rowCount()):
@@ -1055,8 +1111,39 @@ class Dashboard(QDialog):
             return "—"
 
     @staticmethod
+    def _table_contents(table):
+        """Each row's identifier and texts, in the table's current order."""
+        contents = []
+        for row in range(table.rowCount()):
+            texts = tuple(
+                item.text() if (item := table.item(row, column)) is not None else None
+                for column in range(table.columnCount())
+            )
+            first = table.item(row, 0)
+            contents.append((first.data(Qt.ItemDataRole.UserRole) if first else None, texts))
+        return contents
+
+    @staticmethod
     def fill(table, rows, identifiers=None):
+        wanted = [
+            (
+                identifiers[row] if identifiers is not None else str(values[0]),
+                tuple(str(value) for value in values)
+                + (None,) * (table.columnCount() - len(values)),
+            )
+            for row, values in enumerate(rows)
+        ]
+        current = Dashboard._table_contents(table)
+        # A periodic refresh that changes nothing must not touch the table: rebuilding
+        # it moved the view back to the selected row while the user was scrolling.
+        if table.isSortingEnabled():
+            if sorted(current, key=repr) == sorted(wanted, key=repr):
+                return
+        elif current == wanted:
+            return
         selected = Dashboard.selected(table)
+        current_column = max(table.currentColumn(), 0)
+        scroll = (table.verticalScrollBar().value(), table.horizontalScrollBar().value())
         sorting = table.isSortingEnabled()
         signals = table.blockSignals(True)
         try:
@@ -1075,11 +1162,14 @@ class Dashboard(QDialog):
             table.setCurrentCell(-1, -1)
             for row in range(table.rowCount()):
                 if selected is not None and table.item(row, 0).data(Qt.ItemDataRole.UserRole) == selected:
-                    table.setCurrentCell(row, 0)
+                    table.setCurrentCell(row, min(current_column, table.columnCount() - 1))
                     break
         finally:
             table.setSortingEnabled(sorting)
             table.blockSignals(signals)
+            # Selecting scrolls to the row; the user's own scroll position wins.
+            table.verticalScrollBar().setValue(scroll[0])
+            table.horizontalScrollBar().setValue(scroll[1])
 
     def _network_preview(self):
         """The network settings as currently chosen in the form."""

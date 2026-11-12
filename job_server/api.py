@@ -458,6 +458,10 @@ def create_app(settings=None, dispatch=True):
     def resources(p=Depends(principal)):
         return {**scheduler.resources(), **host_usage()}
 
+    @app.get(prefix + "/system/resources/history")
+    def resource_history(p=Depends(principal), since: float = Query(0.0, ge=0.0, le=1e11)):
+        return scheduler.history.since(since)
+
     @app.get(prefix + "/admin/jobs")
     def all_jobs(
         p=Depends(admin), offset: int = Query(0, ge=0, le=2**63 - 1),
