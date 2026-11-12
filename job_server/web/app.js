@@ -29,9 +29,11 @@ function renderList(container,data,build) {
 function clearList(container) { container.replaceChildren(); delete container.dataset.rendered; }
 // Rewriting unchanged text still drops a selection the user is making in it.
 function setText(element,value) { if(element.textContent!==value)element.textContent=value; }
-// Dials and fifteen-minute trend lines for the overview figures. The samples are this
-// tab's own readings: the server keeps no history, and a reload starts the lines again.
-const HISTORY_SECONDS=900, TRENDS={running:[],pending:[],'cpu-now':[],'memory-now':[],cpu:[],memory:[]};
+// Dials and trend lines for the overview figures. The server records its load every
+// few seconds whether or not anyone is signed in; this tab fetches it a little at a time.
+const TRENDS={running:1,pending:2,'cpu-now':3,'memory-now':4,cpu:5,memory:6};
+// The web overview always shows the last five minutes.
+const trendState={rows:[],gap:30,span:300};
 const SVG='http://www.w3.org/2000/svg';
 function share(used,total) { return typeof used==='number'&&typeof total==='number'&&total>0?Math.max(0,Math.min(100,100*used/total)):null; }
 function svgElement(name,attributes) { const element=document.createElementNS(SVG,name); for(const [key,value] of Object.entries(attributes))element.setAttribute(key,String(value)); return element; }
@@ -48,15 +50,31 @@ function dial(key,value) {
   arc.setAttribute('d',known&&value>0?dialArc(value/100):'');
   arc.setAttribute('class','dial-value'+(!known||value<=0?' unknown':value>=90?' high':value>=70?' warn':''));
 }
-function record(key,value,now=Date.now()/1000) {
-  const list=TRENDS[key];list.push([now,typeof value==='number'?value:null]);
-  while(list.length&&list[0][0]<now-HISTORY_SECONDS)list.shift();
-  drawTrend(key);
+function mergeHistory(reply) {
+  if(!reply||!Array.isArray(reply.samples))return;
+  const last=trendState.rows.length?trendState.rows[trendState.rows.length-1][0]:0;
+  for(const row of reply.samples)if(row[0]>last)trendState.rows.push(row);
+  trendState.gap=3*(reply.interval||10);
+  const horizon=Date.now()/1000-trendState.span;
+  while(trendState.rows.length&&trendState.rows[0][0]<horizon)trendState.rows.shift();
+  for(const key of Object.keys(TRENDS))drawTrend(key);
 }
-function trendPoints(key,width,height) {
-  const list=TRENDS[key],values=list.map(sample=>sample[1]).filter(value=>value!==null);
-  const top=['running','pending'].includes(key)?Math.max(1,...values):100,now=list.length?list[list.length-1][0]:0;
-  return list.map(([when,value])=>({when,value,x:value===null?null:width*(1-(now-when)/HISTORY_SECONDS),y:value===null?null:2+(height-4)*(1-Math.min(value,top)/top)}));
+// The value the top of the plot stands for: 100% for a share, the largest count shown for jobs.
+function trendTop(key,rows=trendState.rows.filter(row=>row[0]>=Date.now()/1000-trendState.span)) {
+  if(!['running','pending'].includes(key))return 100;
+  return Math.max(1,...rows.map(row=>row[TRENDS[key]]).filter(value=>typeof value==='number'));
+}
+function trendPoints(key,width,height,now=Date.now()/1000) {
+  const column=TRENDS[key],rows=trendState.rows.filter(row=>row[0]>=now-trendState.span);
+  const top=trendTop(key,rows),points=[];
+  let previous=null;
+  for(const row of rows){
+    // A silence longer than a few samples is time the server was not running: break the line.
+    if(previous!==null&&row[0]-previous>trendState.gap)points.push({when:previous,value:null,x:null,y:null});
+    previous=row[0];const value=typeof row[column]==='number'?row[column]:null;
+    points.push({when:row[0],value,x:value===null?null:width*(1-(now-row[0])/trendState.span),y:value===null?null:2+(height-4)*(1-Math.min(value,top)/top)});
+  }
+  return points;
 }
 function drawTrend(key,hover=null) {
   const svg=$('#trend-'+key);if(typeof svg?.setAttribute!=='function'||typeof document.createElementNS!=='function')return;
@@ -67,7 +85,10 @@ function drawTrend(key,hover=null) {
     if(point.x===null){drawing=false;continue;}
     path+=(drawing?'L':'M')+point.x.toFixed(1)+' '+point.y.toFixed(1);drawing=true;
   }
-  const parts=[svgElement('line',{class:'trend-base',x1:0,x2:width,y1:height-0.5,y2:height-0.5}),svgElement('path',{class:'trend-line',d:path})];
+  // A dashed line marks the top of the scale, and the axis says what it stands for.
+  const top=trendTop(key),peak=$('#trend-top-'+key);
+  if(peak)peak.textContent='top '+(['running','pending'].includes(key)?top:top+'%');
+  const parts=[svgElement('line',{class:'trend-top',x1:0,x2:width,y1:2,y2:2}),svgElement('line',{class:'trend-base',x1:0,x2:width,y1:height-0.5,y2:height-0.5}),svgElement('path',{class:'trend-line',d:path})];
   if(hover)parts.push(svgElement('line',{class:'trend-cross',x1:hover.x,x2:hover.x,y1:0,y2:height}),svgElement('circle',{class:'trend-dot',cx:hover.x,cy:hover.y,r:4}));
   svg.replaceChildren(...parts);
 }
@@ -91,7 +112,8 @@ for(const key of Object.keys(TRENDS)){
   svg.addEventListener('pointerleave',()=>{$('#trend-tip').hidden=true;drawTrend(key);});
 }
 globalThis.addEventListener?.('resize',()=>{for(const key of Object.keys(TRENDS))drawTrend(key);});
-function clearTrends() { for(const key of Object.keys(TRENDS)){TRENDS[key].length=0;drawTrend(key);if(!['running','pending'].includes(key))dial(key,null);} }
+function clearTrends() { trendState.rows.length=0; for(const key of Object.keys(TRENDS)){drawTrend(key);if(!['running','pending'].includes(key))dial(key,null);} }
+
 function cores(count) { return count+(count===1?' core':' cores'); }
 function ahead(count) { return count===0 ? 'next in line' : count+' ahead'; }
 function renderQueue(queue) {
@@ -293,8 +315,10 @@ async function refresh() {
     $('#cpu-now').textContent=typeof resource.cpu_percent==='number'?Math.round(resource.cpu_percent)+'%':'—';
     $('#memory-now').textContent=typeof resource.memory_percent==='number'?gb(resource.memory_used_mb)+' / '+gb(resource.memory_total_mb):'—';
     const shares={'cpu-now':typeof resource.cpu_percent==='number'?resource.cpu_percent:null,'memory-now':typeof resource.memory_percent==='number'?resource.memory_percent:null,cpu:share(resource.reserved_cpus,resource.cpus),memory:share(resource.reserved_memory_mb,resource.memory_mb)};
-    for(const [key,value] of Object.entries(shares)){dial(key,value);record(key,value);}
-    record('running',resource.running);record('pending',resource.pending);
+    for(const [key,value] of Object.entries(shares))dial(key,value);
+    // Optional: a server from before 0.12 has no history, and the figures work without it.
+    const since=trendState.rows.length?trendState.rows[trendState.rows.length-1][0]:Math.max(0,Date.now()/1000-trendState.span);
+    try {mergeHistory(await api('GET','/system/resources/history?since='+since));} catch(error) {if(error.staleSession||error.status===401)throw error;}
     renderQueue(await api('GET','/queue'));
     state.paused=resource.paused;$('#queue-label').textContent=resource.paused?'Queue paused':'Shared queue';$('#pause').textContent=resource.paused?'Resume queue':'Pause queue';
     const page=state.page;
@@ -319,7 +343,7 @@ async function refresh() {
     filterJobs();
     $('#previous-page').disabled=state.page===0;$('#next-page').disabled=jobs.length<50;$('#page-number').textContent='Page '+(state.page+1);
     if(state.job)await detail(state.job,false);
-  } catch(error) {if(!error.staleSession){connection('Connection failed');if(state.me)for(const key of Object.keys(TRENDS))record(key,null);}throw error;
+  } catch(error) {if(!error.staleSession)connection('Connection failed');throw error;
   } finally {
     if(state.busyGeneration===generation){
       state.busy=false;

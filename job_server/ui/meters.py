@@ -108,6 +108,10 @@ class Trend(QWidget):
         top = self.maximum if self.maximum is not None else max(values + [1.0])
         return top or 1.0
 
+    def top_label(self):
+        """What the dashed line at the top of the plot stands for."""
+        return f"top {self._scale():g}{self.unit}"
+
     def _axis_font(self):
         font = QFont(self.font())
         font.setPointSizeF(max(6.5, font.pointSizeF() - 1.5))
@@ -139,12 +143,16 @@ class Trend(QWidget):
         painter.setPen(QPen(_ink(self, 0.12), 1))
         base = self._plot_height() - 1.5
         painter.drawLine(QPointF(0, base), QPointF(self.width(), base))
+        # The top of the scale: without it a line's height says nothing.
+        painter.setPen(QPen(_ink(self, 0.22), 1, Qt.PenStyle.DashLine))
+        painter.drawLine(QPointF(0, 2), QPointF(self.width(), 2))
         # Says what the line spans; without it the width means nothing.
         painter.setFont(self._axis_font())
         painter.setPen(_ink(self, 0.55))
         axis = QRectF(0, self._plot_height(), self.width(), self.height() - self._plot_height())
         painter.drawText(axis, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom, f"{self.span_label} ago")
         painter.drawText(axis, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom, "now")
+        painter.drawText(axis, Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom, self.top_label())
         color = QColor(TREND_DARK if _dark(self) else TREND_LIGHT)
         path, started = QPainterPath(), False
         for _when, _value, point in self._points():

@@ -25,7 +25,8 @@ Python, and an administrator runs the server from MoleditPy or the command line.
 
 - **Queue:** CPU and memory budgets, priorities, dependencies, pause and force run. The
   dashboard shows what is reserved beside what the whole PC is using right now, as dials
-  with the last 15 minutes drawn under each figure.
+  with a trend line under each figure. The server records its load every ten seconds for
+  the last six hours, whether or not anyone is signed in.
 - **Durable jobs:** jobs run in detached supervisors and a SQLite ledger tracks them, so
   closing MoleditPy or restarting the daemon does not stop a calculation.
 - **Accounts:** users and administrators, device keys, password changes and resets,
@@ -60,7 +61,7 @@ Right-click a job, user or device for its actions. The same actions are in the m
 
 | Tab | Use it to |
 |---|---|
-| **Dashboard** | See server state, live CPU and memory, reservations and jobs. Each figure has a dial and a 15-minute trend line, recorded while the window is open; point at a line to read its value. Filter jobs, open details, set priority, force run, cancel or open the job folder. The lists refresh every few seconds without moving your selection or scroll position. |
+| **Dashboard** | See server state, live CPU and memory, reservations and jobs. Each figure has a dial and a trend line; switch the lines between the last 5 minutes, 15 minutes, 1 hour and 6 hours at the bottom right, and point at a line to read its value. The dashed line is the top of the scale, named under the plot (100%, or the largest job count shown). A gap in a line is time the server was not running. Memory is shown in GiB (1024-based) of the memory the OS can use, so it reads a little lower than the size on the box. Filter jobs, open details, set priority, force run, cancel or open the job folder. The lists refresh every few seconds without moving your selection or scroll position. |
 | **Users & Devices** | Add users or administrators, reset passwords, enable, disable or delete users, switch user and administrator, and revoke devices. Change your own password. |
 | **Activity** | Read recent logins, account changes and job events. |
 | **Settings** | Set the network, budgets, commands run before each job, the job folder and the runtime. When a save changes something while the server runs, the window offers the restart that applies it. |
@@ -80,10 +81,10 @@ waiting jobs by name and owner, in the order they start, and each waiting job sa
 many jobs are ahead of it. Commands, files and output stay private to each job's owner. Administrators also get queue controls and
 **Users & devices**.
 
-The overview shows the same dials and 15-minute trend lines as the desktop window; point at
-a line to read a value. The lines are drawn from that browser tab's own readings while you
-are signed in: the server keeps no history, so they start empty after a reload and are
-cleared when you sign out.
+The overview shows the same dials as the desktop window, with the last 5 minutes drawn
+under each figure; point at a line to read a value. The lines come from the server's own
+record, so they are already there when you sign in or reload. The record is kept in
+memory only: restarting the server starts it again, and the time it was down shows as a gap.
 
 Click a job row to open it, and narrow the list by text or by state (unfinished, finished,
 failed or stopped). Each page has its own address, so the browser's Back and Forward move

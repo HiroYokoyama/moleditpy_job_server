@@ -455,25 +455,38 @@ async function jobRows() {
   assert.equal(app.context.document.title,'Job details · Job Server');
 }
 async function overviewMeters() {
-  let resources={running:1,pending:2,reserved_cpus:6,cpus:8,reserved_memory_mb:512,memory_mb:1024,cpu_percent:93,memory_percent:40};
+  const resources={running:1,pending:2,reserved_cpus:6,cpus:8,reserved_memory_mb:512,memory_mb:1024,cpu_percent:93,memory_percent:40};
+  const now=Math.floor(Date.now()/1000),asked=[];
+  let history=[[now-100,4,0,10,20,30,40],[now-10,1,2,93,40,75,50],[now,1,2,93,40,75,50]];
   const app=await application(async url=>{
-    if(url==='/api/v1/system/resources'){if(!resources)throw new Error('offline');return response(resources);}
+    if(url==='/api/v1/system/resources')return response(resources);
+    if(url.startsWith('/api/v1/system/resources/history?since=')){
+      const since=Number(url.split('=')[1]);asked.push(since);
+      if(!history)throw new Error('no history');
+      return response({interval:10,keep_seconds:21600,samples:history.filter(row=>row[0]>since)});
+    }
     if(url==='/api/v1/queue')return response({running:[],waiting:[],paused:false});
     if(url.startsWith('/api/v1/jobs?'))return response([]);
     throw new Error('Unexpected URL '+url);
   });
   signedIn(app);await app.call('refresh')();
-  const trends=app.call('TRENDS');
-  assert.deepEqual(Object.fromEntries(Object.entries(trends).map(([key,list])=>[key,list[0][1]])),
-    {running:1,pending:2,'cpu-now':93,'memory-now':40,cpu:75,memory:50});
+  const state=app.call('trendState');
+  assert.ok(asked[0]>now-301&&asked[0]<=now,'The first request asks only for the five minutes shown');
+  assert.equal(state.rows.length,3);
   assert.equal(app.get('#dial-text-cpu').textContent,'75%');
   assert.equal(app.get('#dial-text-cpu-now').textContent,'93%');
-  resources=null;await app.call('refresh')().catch(()=>{});
-  assert.ok(Object.values(trends).every(list=>list[list.length-1][1]===null),'A failed refresh leaves a gap, not a zero');
-  const points=app.call('trendPoints')('running',100,30);
-  assert.equal(Math.round(points[0].x),100);assert.equal(points[1].x,null);
+  const points=app.call('trendPoints')('running',100,30,now);
+  assert.equal(points.length,4,'A silence longer than three samples breaks the line');
+  assert.equal(points[1].x,null);assert.equal(Math.round(points[3].x),100);
+  assert.equal(points[0].y,2,'The largest count shown sits on the top line');
+  assert.equal(app.call('trendTop')('running'),4);assert.equal(app.call('trendTop')('cpu'),100);
+  await app.call('refresh')();
+  assert.equal(asked[1],now,'Later requests ask only for what is new');
+  assert.equal(state.rows.length,3,'Samples already held are not added twice');
+  history=null;await app.call('refresh')();
+  assert.equal(app.get('#dial-text-cpu').textContent,'75%','A server without history still shows its figures');
   app.get('#signout').listeners.click();
-  assert.ok(Object.values(trends).every(list=>list.length===0),'Signing out forgets the readings');
+  assert.equal(state.rows.length,0,'Signing out forgets the readings');
   assert.match(app.call('dialArc')(0.5),/^M9\.98 34\.02A17 17 0 0 1 22\.00 5\.00$/);
 }
 const cases={overviewMeters,jobRows,browserHistory,steadyLists,userChip,insecureContext,sessionRestore,submittedAndCompleted,queuedRefresh,queueControls,expiredDownload,keylessLogin,authentication,refresh,details,accountsPolling,accountsOrdering,loginView,connectionFailure,connectionTimeout,sharedQueue};
