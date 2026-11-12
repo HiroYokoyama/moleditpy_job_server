@@ -169,8 +169,8 @@ This is a service for trusted users. See [SECURITY.md](SECURITY.md) and
 [Execution and limits](docs/EXECUTION.md).
 
 **CPU in use now** is a share of every thread, so 100% means all threads are busy. When
-the PC has more threads than cores, a dotted line on its trend marks where every core is
-busy. The dial's colour follows the cores: green, amber from 70% of them, red from 90%
+the PC has more threads than cores, a dotted line on its trend ("Phys. cores") and a
+dotted tick on its dial mark where every core is busy. The dial's colour follows the cores: green, amber from 70% of them, red from 90%
 up to every core busy, and purple past that, when jobs share cores with hyper-threads.
 
 ## Documentation

@@ -1,5 +1,6 @@
 """A dial for a share of capacity, and a trend line of the last few minutes."""
 
+import math
 import time
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
@@ -30,7 +31,15 @@ class Gauge(QWidget):
         self._value = 0
         self._known = False
         self._color = QColor("#2e7d32")
+        self.mark = None
         self.setFixedSize(QSize(68, 68))
+
+    def setMark(self, value):
+        """A light dotted tick across the dial at ``value`` percent, or none."""
+        mark = None if value is None else max(0.0, min(100.0, float(value)))
+        if mark != self.mark:
+            self.mark = mark
+            self.update()
 
     def setValue(self, value):
         self._value = max(0, min(100, int(value)))
@@ -61,6 +70,18 @@ class Gauge(QWidget):
         if self._known and self._value > 0:
             painter.setPen(QPen(self._color, 7, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
             painter.drawArc(rect, start, int(span * self._value / 100))
+        if self.mark is not None:
+            # Where the limit falls, such as every core busy, as a light dotted tick.
+            angle = math.radians(225 - 270 * self.mark / 100)
+            centre, radius = rect.center(), side / 2
+            inner, outer = radius - 8, radius + 6
+            dots = QPen(_ink(self, 0.7), 1.6, Qt.PenStyle.CustomDashLine, Qt.PenCapStyle.FlatCap)
+            dots.setDashPattern([1.0, 1.0])
+            painter.setPen(dots)
+            painter.drawLine(
+                QPointF(centre.x() + inner * math.cos(angle), centre.y() - inner * math.sin(angle)),
+                QPointF(centre.x() + outer * math.cos(angle), centre.y() - outer * math.sin(angle)),
+            )
         font = QFont(self.font())
         font.setBold(True)
         font.setPointSizeF(max(7.0, font.pointSizeF()))

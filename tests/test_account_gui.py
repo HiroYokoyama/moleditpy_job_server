@@ -387,7 +387,8 @@ def test_cpu_dial_is_red_at_every_core_and_purple_past_it(dashboard, monkeypatch
 
     # 8 of 12 threads (66.7%) is every core busy: the colours follow the cores.
     assert color(40.0) == "#2e7d32"
-    assert dashboard.metric_trends["cpu_usage"].marker == (pytest.approx(100 * 8 / 12), "8 cores")
+    assert dashboard.metric_trends["cpu_usage"].marker == (pytest.approx(100 * 8 / 12), "Phys. cores")
+    assert dashboard.metric_bars["cpu_usage"].mark == pytest.approx(100 * 8 / 12)
     assert color(50.0) == "#e08600"
     assert color(62.0) == "#c62828"
     assert color(66.7) == "#c62828"
@@ -395,4 +396,5 @@ def test_cpu_dial_is_red_at_every_core_and_purple_past_it(dashboard, monkeypatch
     # Without hyper-threading there is no core line and nothing past red.
     assert color(68.0, cpu_threads=8) == "#2e7d32"
     assert dashboard.metric_trends["cpu_usage"].marker is None
+    assert dashboard.metric_bars["cpu_usage"].mark is None
     assert color(100.0, cpu_threads=8) == "#c62828"

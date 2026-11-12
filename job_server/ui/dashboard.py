@@ -919,9 +919,8 @@ class Dashboard(QDialog):
             cores, threads = resource.get("cpu_cores"), resource.get("cpu_threads")
             hyper = isinstance(cores, int) and isinstance(threads, int) and 0 < cores < threads
             cores_share = 100 * cores / threads if hyper else None
-            self.metric_trends["cpu_usage"].set_marker(
-                cores_share, f"{cores} cores" if hyper else ""
-            )
+            self.metric_trends["cpu_usage"].set_marker(cores_share, "Phys. cores" if hyper else "")
+            self.metric_bars["cpu_usage"].setMark(cores_share)
             self._set_usage("cpu_usage", cpu_now, 100, limit=cores_share)
             self._set_usage("memory_usage", memory_now, 100)
             self._merge_history(data.get("history"))

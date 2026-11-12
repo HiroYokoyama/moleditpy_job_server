@@ -94,8 +94,8 @@ def test_cpu_trend_marks_where_every_core_is_busy(qtbot=None):
 
     trend = Trend("%", 100, clock=lambda: 3.0)
     trend.resize(200, 80)
-    trend.set_marker(100 * 8 / 12, "8 cores")
-    assert trend.marker == (100 * 8 / 12, "8 cores")
+    trend.set_marker(100 * 8 / 12, "Phys. cores")
+    assert trend.marker == (100 * 8 / 12, "Phys. cores")
     trend.grab()  # paints the dotted line and its label without error
     trend.set_marker(None)
     assert trend.marker is None

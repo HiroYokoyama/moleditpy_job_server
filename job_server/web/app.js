@@ -54,6 +54,15 @@ function dial(key,value) {
   const limit=key==='cpu-now'&&coreLine.share!==null?coreLine.share:100,ofLimit=known?100*value/limit:0;
   arc.setAttribute('class','dial-value'+(!known||value<=0?' unknown':ofLimit>100.5?' over':ofLimit>=90?' high':ofLimit>=70?' warn':''));
 }
+// A light dotted tick across a dial where its limit falls, such as every core busy.
+function dialMark(key,value) {
+  const mark=$('#dial-mark-'+key);if(typeof mark?.setAttribute!=='function')return;
+  const known=typeof value==='number',angle=Math.PI*3/4+Math.PI*3/2*(known?value/100:0);
+  const at=radius=>[(22+radius*Math.cos(angle)).toFixed(2),(22+radius*Math.sin(angle)).toFixed(2)];
+  const [x1,y1]=at(12),[x2,y2]=at(22);
+  for(const [name,value2] of Object.entries({x1,y1,x2,y2}))mark.setAttribute(name,value2);
+  mark.setAttribute('class','dial-mark'+(known?'':' unknown'));
+}
 function mergeHistory(reply) {
   if(!reply||!Array.isArray(reply.samples))return;
   const last=trendState.rows.length?trendState.rows[trendState.rows.length-1][0]:0;
@@ -102,7 +111,7 @@ function drawTrend(key,hover=null) {
   if(key==='cpu-now'&&coreLine.share!==null){
     // 100% is every thread; past the dotted line the hyper-threads are in use.
     const y=(2+(height-4)*(1-coreLine.share/100)).toFixed(1),note=svgElement('text',{class:'trend-top-label',x:width-2,y:Number(y)-4});
-    note.textContent=coreLine.cores+' cores';
+    note.textContent='Phys. cores';
     parts.splice(1,0,svgElement('line',{class:'trend-cores',x1:0,x2:width,y1:y,y2:y}));parts.push(note);
   }
   svg.replaceChildren(...parts);
@@ -127,7 +136,7 @@ for(const key of Object.keys(TRENDS)){
   svg.addEventListener('pointerleave',()=>{$('#trend-tip').hidden=true;drawTrend(key);});
 }
 globalThis.addEventListener?.('resize',()=>{for(const key of Object.keys(TRENDS))drawTrend(key);});
-function clearTrends() { trendState.rows.length=0; coreLine.share=coreLine.cores=null; for(const key of Object.keys(TRENDS)){drawTrend(key);if(!['running','pending'].includes(key))dial(key,null);} }
+function clearTrends() { trendState.rows.length=0; coreLine.share=coreLine.cores=null; dialMark('cpu-now',null); for(const key of Object.keys(TRENDS)){drawTrend(key);if(!['running','pending'].includes(key))dial(key,null);} }
 
 function cores(count) { return count+(count===1?' core':' cores'); }
 function ahead(count) { return count===0 ? 'next in line' : count+' ahead'; }
@@ -333,7 +342,7 @@ async function refresh() {
     const hyper=Number.isInteger(resource.cpu_cores)&&Number.isInteger(resource.cpu_threads)&&resource.cpu_cores>0&&resource.cpu_cores<resource.cpu_threads;
     coreLine.share=hyper?100*resource.cpu_cores/resource.cpu_threads:null;coreLine.cores=hyper?resource.cpu_cores:null;
     for(const [key,value] of Object.entries(shares))dial(key,value);
-    drawTrend('cpu-now');
+    dialMark('cpu-now',coreLine.share);drawTrend('cpu-now');
     // Optional: a server from before 0.12 has no history, and the figures work without it.
     const since=trendState.rows.length?trendState.rows[trendState.rows.length-1][0]:Math.max(0,Date.now()/1000-trendState.span);
     try {mergeHistory(await api('GET','/system/resources/history?since='+since));} catch(error) {if(error.staleSession||error.status===401)throw error;}
