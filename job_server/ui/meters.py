@@ -122,7 +122,7 @@ class Trend(QWidget):
 
     def top_label(self):
         """What the line at the top of the plot stands for."""
-        return f"top {self._scale():g}{self.unit}"
+        return f"{self._scale():g}{self.unit}"
 
     def _axis_font(self):
         font = QFont(self.font())
