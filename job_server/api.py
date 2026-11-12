@@ -560,11 +560,27 @@ def create_app(settings=None, dispatch=True):
             if scheduler.supervisor_alive(job):
                 reject(409, "job_still_supervised", "This job's supervisor is still running")
             c.execute(
-                "UPDATE jobs SET state='LOST',ended_at=?,reason=? WHERE id=? AND state='RUNNING'",
-                (time.time(), "Marked lost by an administrator", job_id),
+                "UPDATE jobs SET state='LOST',ended_at=?,reason=?,relocate=? "
+                "WHERE id=? AND state='RUNNING'",
+                (time.time(), "Marked lost by an administrator", settings.relocates, job_id),
             )
             db.event(c, "job_marked_lost", p["user_id"], job_id, previous_reason=job["reason"])
         return jobs.public(jobs.authorize(job_id, p))
+
+    @app.post(prefix + "/admin/jobs/move-finished")
+    def move_finished(p=Depends(admin)):
+        """Queue jobs that ended earlier, and were never moved, for the finished-jobs folder."""
+        if not settings.finished_dir:
+            reject(409, "finished_dir_unset",
+                   "Set a finished jobs folder and restart the server first")
+        with db.transaction() as c:
+            auth.admin(p)
+            queued = c.execute(
+                "UPDATE jobs SET relocate=1 WHERE state IN ('DONE','FAILED','CANCELLED','LOST') "
+                "AND archive_path='' AND relocate=0"
+            ).rowcount
+            db.event(c, "move_finished_requested", p["user_id"], queued=queued)
+        return {"queued": queued, "destination": str(settings.finished_root)}
 
     @app.get(prefix + "/admin/events")
     def events(

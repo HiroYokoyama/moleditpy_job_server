@@ -65,7 +65,7 @@ function clearSession() {
   try {sessionStorage.removeItem(SESSION_KEY);} catch {}
   state.generation++;state.detailRequest++;state.accountsRequest++;state.accountRequest++;state.activityRequest++;state.browseRequest++;
   Object.assign(state,{token:null,expires:0,authenticated:0,me:null,capabilities:null,job:null,jobInfo:null,queueBusy:false,offset:0,page:0,paused:false,refreshPending:false,browsePath:'',resetUser:null,names:null});
-  $('#signin').textContent='Sign in';$('#signout').hidden=true;$('#accounts-nav').hidden=true;$('#account-nav').hidden=true;$('#pause').hidden=true;
+  $('#signin').hidden=false;$('#user-chip').hidden=true;$('#signout').hidden=true;$('#accounts-nav').hidden=true;$('#account-nav').hidden=true;$('#pause').hidden=true;
   if($('#reset-dialog').open)$('#reset-dialog').close();clearPasswordForms();
   for(const id of ['jobs-body','queue-body','users-body','devices-body','result-files','my-devices-body','browser-body','activity-body'])$('#'+id).replaceChildren();
   for(const id of ['log','detail-name','detail-id','detail-spec','queue-summary'])$('#'+id).textContent='';
@@ -116,8 +116,11 @@ async function login(username,password) {
 }
 async function openSession() {
   state.me=await api('GET','/me');state.capabilities=await api('GET','/capabilities');
-  $('#signin').textContent=state.me.username;$('#signout').hidden=false;
-  const admin=state.me.role==='admin';$('#accounts-nav').hidden=!admin;$('#account-nav').hidden=false;$('#pause').hidden=!admin;
+  const admin=state.me.role==='admin';
+  // Who is signed in is shown as a chip leading to My account, unlike the Sign out action.
+  $('#signin').hidden=true;$('#signout').hidden=false;$('#user-chip').hidden=false;
+  $('#user-name').textContent=state.me.username;$('#user-role').textContent=admin?'Administrator':'User';
+  $('#user-initial').textContent=state.me.username.slice(0,1).toUpperCase();$('#accounts-nav').hidden=!admin;$('#account-nav').hidden=false;$('#pause').hidden=!admin;
   $('#login-status').textContent='';setSignedIn(true);
   $('#jobs-caption').textContent=admin?'All jobs on this server.':'Your jobs on this server.';
   saveSession();message('');await refresh();
@@ -150,6 +153,7 @@ function signOut() {
   if(token)fetch('/api/v1/auth/logout',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:'{}',credentials:'omit',redirect:'error',cache:'no-store',keepalive:true}).catch(()=>{});
 }
 $('#signout').addEventListener('click',signOut);
+$('#user-chip').addEventListener('click',()=>panel('account'));
 
 // Remove credentials stored by older browser clients; never read or reuse them.
 try {globalThis.indexedDB?.deleteDatabase('moleditpy-job-server');} catch {}

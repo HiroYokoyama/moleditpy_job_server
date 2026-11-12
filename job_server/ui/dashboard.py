@@ -636,6 +636,65 @@ class Dashboard(QDialog):
         storage_layout.addWidget(job_help)
         layout.addWidget(storage)
 
+        def folder_row(value, placeholder, title):
+            row = QHBoxLayout()
+            edit = QLineEdit(value)
+            edit.setPlaceholderText(placeholder)
+            row.addWidget(edit)
+            button = QPushButton("Browse...")
+
+            def choose():
+                path = QFileDialog.getExistingDirectory(self, title, edit.text())
+                if path:
+                    edit.setText(path)
+
+            button.clicked.connect(choose)
+            row.addWidget(button)
+            return row, edit
+
+        finished = QGroupBox("Finished jobs folder")
+        finished_layout = QVBoxLayout(finished)
+        row, self.finished_dir = folder_row(
+            self.settings.finished_dir, "Off: finished jobs stay in the working directory",
+            "Select the finished jobs folder",
+        )
+        finished_layout.addLayout(row)
+        finished_help = QLabel(
+            "When set, each job that ends is moved here as <user>/<job name> (a number is "
+            "added if the name is taken). Clients can still browse and download it. Applies to "
+            "jobs that end after a restart. Choose a private folder."
+        )
+        finished_help.setWordWrap(True)
+        finished_layout.addWidget(finished_help)
+        move_existing = QPushButton("Move existing finished jobs now")
+        move_existing.setToolTip(
+            "Also move jobs that ended before the folder was set. Uses the folder the running "
+            "server was started with."
+        )
+        move_existing.clicked.connect(self.move_finished_jobs)
+        finished_layout.addWidget(move_existing, alignment=Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(finished)
+
+        backup = QGroupBox("Database backups")
+        backup_form = QFormLayout(backup)
+        self.db_backup = QCheckBox("Back up server.db automatically")
+        self.db_backup.setChecked(self.settings.db_backup)
+        backup_form.addRow(self.db_backup)
+        backup_form.addRow("Every (hours)", number("db_backup_hours", 8760))
+        backup_form.addRow("Copies to keep", number("db_backup_keep", 1000))
+        row, self.db_backup_dir = folder_row(
+            self.settings.db_backup_dir, f"Default: {self.settings.root / 'backups'}",
+            "Select the database backup folder",
+        )
+        backup_form.addRow("Folder", row)
+        backup_help = QLabel(
+            "Backups hold accounts and password hashes: keep the folder private. "
+            "Another disk protects against a disk failure."
+        )
+        backup_help.setWordWrap(True)
+        backup_form.addRow(backup_help)
+        layout.addWidget(backup)
+
         runtime_box = QGroupBox("Daemon Python runtime")
         runtime_layout = QVBoxLayout(runtime_box)
         runtime = QHBoxLayout()
@@ -1072,6 +1131,9 @@ class Dashboard(QDialog):
                 self.settings,
                 python_executable=self.python_path.text().strip(),
                 job_dir=self.job_dir.text().strip(),
+                finished_dir=self.finished_dir.text().strip(),
+                db_backup=self.db_backup.isChecked(),
+                db_backup_dir=self.db_backup_dir.text().strip(),
                 job_setup_commands=[
                     line.strip()
                     for line in self.job_setup.toPlainText().splitlines()
@@ -1804,14 +1866,14 @@ class Dashboard(QDialog):
         database = self.settings.root / "server.db"
         connection = sqlite3.connect(database.as_uri() + "?mode=ro", uri=True, timeout=2)
         try:
-            row = connection.execute(
-                "SELECT work_root FROM jobs WHERE id=?", (identifier,)
-            ).fetchone()
+            connection.row_factory = sqlite3.Row
+            row = connection.execute("SELECT * FROM jobs WHERE id=?", (identifier,)).fetchone()
         finally:
             connection.close()
         if row is None:
             raise ValueError("This job is not on this server.")
-        folder = work_directory(self.settings, row[0], identifier)
+        archive = row["archive_path"] if "archive_path" in row.keys() else ""
+        folder = work_directory(self.settings, row["work_root"], identifier, archive_path=archive)
         if not folder.is_dir():
             raise ValueError("This job has no folder yet: its files are still being uploaded.")
         if is_link(folder) or is_link(folder.parent):
@@ -1844,6 +1906,26 @@ class Dashboard(QDialog):
     @staticmethod
     def _stuck(job):
         return job.get("state") == "RUNNING" and str(job.get("reason", "")).startswith("NEEDS_RECHECK")
+
+    def move_finished_jobs(self):
+        if not self.require_admin_registration():
+            return
+        if QMessageBox.question(
+            self, "Move finished jobs",
+            "Move every job that has already ended into the finished jobs folder, as "
+            "<user>/<job name>? Running and waiting jobs are not touched, and clients can "
+            "still download the moved results.\n\nThe running server's folder is used: save "
+            "and restart first if you have just changed it.",
+        ) != QMessageBox.StandardButton.Yes:
+            return
+
+        def done(result):
+            self.message.setText(
+                f"{result['queued']} finished job(s) are being moved to {result['destination']}."
+            )
+            self.refresh()
+
+        self.task(lambda: self.client.request("POST", "/admin/jobs/move-finished"), done)
 
     def mark_lost(self):
         identifier = self.selected(self.jobs)

@@ -58,6 +58,8 @@ class Database:
                 ("force_run", "ALTER TABLE jobs ADD COLUMN force_run INTEGER NOT NULL DEFAULT 0"),
                 ("force_actor", "ALTER TABLE jobs ADD COLUMN force_actor TEXT"),
                 ("work_root", "ALTER TABLE jobs ADD COLUMN work_root TEXT NOT NULL DEFAULT ''"),
+                ("archive_path", "ALTER TABLE jobs ADD COLUMN archive_path TEXT NOT NULL DEFAULT ''"),
+                ("relocate", "ALTER TABLE jobs ADD COLUMN relocate INTEGER NOT NULL DEFAULT 0"),
             ):
                 if name not in columns:
                     self.connection.execute(statement)

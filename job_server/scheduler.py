@@ -10,6 +10,7 @@ from pathlib import Path
 import psutil
 
 from .jobs import PENDING_IN_ORDER, TERMINAL
+from .maintenance import Maintenance
 from .worker import atomic_json
 
 
@@ -19,6 +20,7 @@ class Scheduler:
         self.stop_event = threading.Event()
         self.thread = None
         self.children = []
+        self.maintenance = Maintenance(db, jobs, settings, self.supervisor_alive)
 
     def start(self):
         if self.thread and self.thread.is_alive():
@@ -26,9 +28,12 @@ class Scheduler:
         self.stop_event.clear()
         self.thread = threading.Thread(target=self._loop, name="job-dispatcher", daemon=True)
         self.thread.start()
+        # Moves and backups can take minutes; they never hold up dispatching.
+        self.maintenance.start()
 
     def stop(self):
         self.stop_event.set()
+        self.maintenance.stop()
         if self.thread:
             self.thread.join(timeout=5)
 
@@ -71,12 +76,14 @@ class Scheduler:
                     continue
                 with self.db.transaction() as c:
                     c.execute(
-                        "UPDATE jobs SET state=?,exit_code=?,ended_at=?,reason=? WHERE id=? AND state='RUNNING'",
+                        "UPDATE jobs SET state=?,exit_code=?,ended_at=?,reason=?,relocate=? "
+                        "WHERE id=? AND state='RUNNING'",
                         (
                             result["state"],
                             result["exit_code"],
                             result["ended_at"],
                             result["reason"],
+                            self.settings.relocates,
                             job["id"],
                         ),
                     )
