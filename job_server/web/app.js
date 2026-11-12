@@ -43,12 +43,15 @@ function dialArc(fraction) {
   const start=Math.PI*3/4,sweep=Math.PI*3/2*Math.min(fraction,0.9999);
   return 'M'+point(start)+'A17 17 0 '+(sweep>Math.PI?1:0)+' 1 '+point(start+sweep);
 }
+// Where every core is busy, as a share of all threads; null without hyper-threading.
+const coreLine={share:null,cores:null};
 function dial(key,value) {
   const known=typeof value==='number';
   const label=$('#dial-text-'+key);if(label)setText(label,known?Math.round(value)+'%':'—');
   const arc=$('#dial-'+key);if(typeof arc?.setAttribute!=='function')return;
   arc.setAttribute('d',known&&value>0?dialArc(value/100):'');
-  arc.setAttribute('class','dial-value'+(!known||value<=0?' unknown':value>=90?' high':value>=70?' warn':''));
+  const warn=key==='cpu-now'&&coreLine.share!==null?Math.min(coreLine.share,90):70;
+  arc.setAttribute('class','dial-value'+(!known||value<=0?' unknown':value>=90?' high':value>=warn?' warn':''));
 }
 function mergeHistory(reply) {
   if(!reply||!Array.isArray(reply.samples))return;
@@ -95,6 +98,12 @@ function drawTrend(key,hover=null) {
   label.textContent=(['running','pending'].includes(key)?top:top+'%');
   const parts=[svgElement('line',{class:'trend-top',x1:0,x2:width,y1:2,y2:2}),svgElement('line',{class:'trend-base',x1:0,x2:width,y1:height-0.5,y2:height-0.5}),svgElement('path',{class:'trend-area',d:area}),svgElement('path',{class:'trend-line',d:path}),label];
   if(hover)parts.push(svgElement('line',{class:'trend-cross',x1:hover.x,x2:hover.x,y1:0,y2:height}),svgElement('circle',{class:'trend-dot',cx:hover.x,cy:hover.y,r:4}));
+  if(key==='cpu-now'&&coreLine.share!==null){
+    // 100% is every thread; past the dotted line the hyper-threads are in use.
+    const y=(2+(height-4)*(1-coreLine.share/100)).toFixed(1),note=svgElement('text',{class:'trend-top-label',x:width-2,y:Number(y)-4});
+    note.textContent=coreLine.cores+' cores';
+    parts.splice(1,0,svgElement('line',{class:'trend-cores',x1:0,x2:width,y1:y,y2:y}));parts.push(note);
+  }
   svg.replaceChildren(...parts);
 }
 function describeSample(key,point) {
@@ -117,7 +126,7 @@ for(const key of Object.keys(TRENDS)){
   svg.addEventListener('pointerleave',()=>{$('#trend-tip').hidden=true;drawTrend(key);});
 }
 globalThis.addEventListener?.('resize',()=>{for(const key of Object.keys(TRENDS))drawTrend(key);});
-function clearTrends() { trendState.rows.length=0; for(const key of Object.keys(TRENDS)){drawTrend(key);if(!['running','pending'].includes(key))dial(key,null);} }
+function clearTrends() { trendState.rows.length=0; coreLine.share=coreLine.cores=null; for(const key of Object.keys(TRENDS)){drawTrend(key);if(!['running','pending'].includes(key))dial(key,null);} }
 
 function cores(count) { return count+(count===1?' core':' cores'); }
 function ahead(count) { return count===0 ? 'next in line' : count+' ahead'; }
@@ -320,7 +329,10 @@ async function refresh() {
     $('#cpu-now').textContent=typeof resource.cpu_percent==='number'?Math.round(resource.cpu_percent)+'%':'—';
     $('#memory-now').textContent=typeof resource.memory_percent==='number'?gb(resource.memory_used_mb)+' / '+gb(resource.memory_total_mb):'—';
     const shares={'cpu-now':typeof resource.cpu_percent==='number'?resource.cpu_percent:null,'memory-now':typeof resource.memory_percent==='number'?resource.memory_percent:null,cpu:share(resource.reserved_cpus,resource.cpus),memory:share(resource.reserved_memory_mb,resource.memory_mb)};
+    const hyper=Number.isInteger(resource.cpu_cores)&&Number.isInteger(resource.cpu_threads)&&resource.cpu_cores>0&&resource.cpu_cores<resource.cpu_threads;
+    coreLine.share=hyper?100*resource.cpu_cores/resource.cpu_threads:null;coreLine.cores=hyper?resource.cpu_cores:null;
     for(const [key,value] of Object.entries(shares))dial(key,value);
+    drawTrend('cpu-now');
     // Optional: a server from before 0.12 has no history, and the figures work without it.
     const since=trendState.rows.length?trendState.rows[trendState.rows.length-1][0]:Math.max(0,Date.now()/1000-trendState.span);
     try {mergeHistory(await api('GET','/system/resources/history?since='+since));} catch(error) {if(error.staleSession||error.status===401)throw error;}

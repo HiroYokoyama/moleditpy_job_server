@@ -18,6 +18,7 @@ function element() {
     textContent:'', hidden:false, disabled:false, open:false, dataset:{}, children:[], listeners:{},
     classList:{add(name){classes.add(name);},remove(name){classes.delete(name);},contains(name){return classes.has(name);},toggle(name,value){if(value===undefined)value=!classes.has(name);if(value)classes.add(name);else classes.delete(name);}},
     addEventListener(name, callback) { this.listeners[name] = callback; },
+    attributes:{}, setAttribute(name,value){this.attributes[name]=String(value);}, getAttribute(name){return this.attributes[name]??null;},
     append(value) { this.children.push(value); },
     replaceChildren(...values) { this.children = values; this.textContent = ''; },
     querySelector() { return element(); },
@@ -475,6 +476,11 @@ async function overviewMeters() {
   assert.equal(state.rows.length,3);
   assert.equal(app.get('#dial-text-cpu').textContent,'75%');
   assert.equal(app.get('#dial-text-cpu-now').textContent,'93%');
+  assert.equal(app.call('coreLine').share,null,'No core line without hyper-threading');
+  Object.assign(resources,{cpu_cores:8,cpu_threads:12,cpu_percent:70});await app.call('refresh')();
+  assert.equal(app.call('coreLine').cores,8);assert.ok(Math.abs(app.call('coreLine').share-100*8/12)<1e-9);
+  assert.equal(app.get('#dial-cpu-now').getAttribute('class'),'dial-value warn','Amber once every core is busy');
+  Object.assign(resources,{cpu_percent:93});
   const points=app.call('trendPoints')('running',100,30,now);
   assert.equal(points.length,4,'A silence longer than three samples breaks the line');
   assert.equal(points[1].x,null);assert.equal(Math.round(points[3].x),100);

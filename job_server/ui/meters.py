@@ -91,6 +91,7 @@ class Trend(QWidget):
         self.samples = []
         self.span, self.span_label = DEFAULT_SPAN
         self.gap = 30.0
+        self.marker = None
         self._hover = None
         self.setMouseTracking(True)
         self.setMinimumHeight(76)
@@ -104,6 +105,13 @@ class Trend(QWidget):
             self.gap = gap
         self._hover = None
         self.update()
+
+    def set_marker(self, value, label=""):
+        """A dotted line at ``value`` with a small label, or none when ``value`` is None."""
+        marker = None if value is None else (float(value), label)
+        if marker != self.marker:
+            self.marker = marker
+            self.update()
 
     def set_span(self, seconds, label):
         self.span, self.span_label = seconds, label
@@ -197,6 +205,19 @@ class Trend(QWidget):
         painter.setPen(QPen(color, 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap,
                             Qt.PenJoinStyle.RoundJoin))
         painter.drawPath(path)
+        if self.marker is not None:
+            # A dotted line at a level worth knowing, such as where every core is busy.
+            level, text = self.marker
+            top = self._scale()
+            span = self._plot_height() - self._ceiling() - 2
+            y = self._ceiling() + span * (1 - min(level, top) / top)
+            painter.setPen(QPen(_ink(self, 0.45), 1, Qt.PenStyle.DotLine))
+            painter.drawLine(QPointF(0, y), QPointF(self.width(), y))
+            if text:
+                height = QFontMetricsF(painter.font()).height()
+                painter.setPen(_ink(self, 0.55))
+                painter.drawText(QRectF(0, y - height - 1, self.width(), height),
+                                 Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom, text)
         # What the top line stands for, just above its right end.
         height = QFontMetricsF(painter.font()).height()
         corner = QRectF(0, self._ceiling() - height - 1, self.width(), height)

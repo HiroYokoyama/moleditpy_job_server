@@ -6,11 +6,41 @@ from pathlib import Path
 from .files import atomic_write
 
 
-def pc_resources():
-    """This PC's logical CPUs and installed memory in MB: a new server's budget."""
+def pc_cpus():
+    """(physical cores, threads) this server may use.
+
+    Threads are the logical CPUs the OS schedules on; with hyper-threading there are
+    more of them than cores. On Linux the process may be confined to fewer CPUs than
+    the machine has (taskset, a container, a systemd unit), and those are what count.
+    """
     import psutil
 
-    return psutil.cpu_count() or 1, max(1, psutil.virtual_memory().total // (1024 * 1024))
+    threads = psutil.cpu_count() or 1
+    try:
+        threads = min(threads, len(os.sched_getaffinity(0))) or threads
+    except (AttributeError, OSError):
+        pass
+    cores = psutil.cpu_count(logical=False) or threads
+    return max(1, min(cores, threads)), threads
+
+
+def pc_resources():
+    """This PC's physical cores and installed memory in MB: a new server's budget.
+
+    Cores rather than threads: calculations such as DFT rarely gain from the second
+    thread of a hyper-threaded core, so a budget of threads would oversubscribe it.
+    """
+    import psutil
+
+    return pc_cpus()[0], max(1, psutil.virtual_memory().total // (1024 * 1024))
+
+
+def pc_size_label(memory_text):
+    """The "Use this PC's size" button text, naming threads when they differ from cores."""
+    cores, threads = pc_cpus()
+    noun = "core" if cores == 1 else "cores"
+    extra = f" of {threads} threads" if threads != cores else ""
+    return f"Use this PC's size ({cores} {noun}{extra}, {memory_text} GiB)"
 
 
 @dataclass

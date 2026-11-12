@@ -87,3 +87,15 @@ def test_the_dashboard_draws_the_server_history_and_switches_span(tmp_path, qt, 
         assert all(trend.samples == [] for trend in board.metric_trends.values())
     finally:
         board.close()
+
+
+def test_cpu_trend_marks_where_every_core_is_busy(qtbot=None):
+    from job_server.ui.meters import Trend
+
+    trend = Trend("%", 100, clock=lambda: 3.0)
+    trend.resize(200, 80)
+    trend.set_marker(100 * 8 / 12, "8 cores")
+    assert trend.marker == (100 * 8 / 12, "8 cores")
+    trend.grab()  # paints the dotted line and its label without error
+    trend.set_marker(None)
+    assert trend.marker is None
