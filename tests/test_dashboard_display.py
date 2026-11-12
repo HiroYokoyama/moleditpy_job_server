@@ -629,3 +629,49 @@ def test_start_replaces_a_daemon_this_window_cannot_reach(dashboard, monkeypatch
     monkeypatch.setattr(dashboard, "_offer_process_stop", lambda: False)
     dashboard.start_daemon()
     assert calls == ["stop", "start"] and not dashboard.busy
+
+
+def _many_jobs(count, state="PENDING"):
+    rows = [(f"job {n}", "alice", state, 0, f"id-{n}", "—") for n in range(count)]
+    return rows, [f"id-{n}" for n in range(count)]
+
+
+def test_an_unchanged_refresh_leaves_the_table_and_its_scroll_alone(dashboard):
+    table = dashboard.jobs
+    dashboard.show()
+    table.resize(500, 200)
+    rows, ids = _many_jobs(200)
+    dashboard.fill(table, rows, ids)
+    table.setCurrentCell(3, 1)
+    item = table.item(3, 1)
+    table.verticalScrollBar().setValue(table.verticalScrollBar().maximum())
+    scrolled = table.verticalScrollBar().value()
+    assert scrolled > 0
+    dashboard.fill(table, rows, ids)
+    assert table.item(3, 1) is item
+    assert table.verticalScrollBar().value() == scrolled
+
+
+def test_a_changed_refresh_keeps_the_selection_column_and_scroll(dashboard):
+    table = dashboard.jobs
+    dashboard.show()
+    table.resize(500, 200)
+    rows, ids = _many_jobs(200)
+    dashboard.fill(table, rows, ids)
+    table.setCurrentCell(3, 2)
+    table.verticalScrollBar().setValue(table.verticalScrollBar().maximum())
+    scrolled = table.verticalScrollBar().value()
+    rows, ids = _many_jobs(200, state="RUNNING")
+    dashboard.fill(table, rows, ids)
+    assert dashboard.selected(table) == "id-3"
+    assert table.currentColumn() == 2
+    assert table.verticalScrollBar().value() == scrolled, "Refresh scrolled back to the selected row"
+
+
+def test_a_sorted_table_is_left_alone_when_only_the_order_differs(dashboard):
+    table = dashboard.users
+    table.setSortingEnabled(True)
+    dashboard.fill(table, [("alice", "user", "Enabled"), ("bob", "user", "Enabled")], ["a", "b"])
+    first = table.item(0, 0)
+    dashboard.fill(table, [("bob", "user", "Enabled"), ("alice", "user", "Enabled")], ["b", "a"])
+    assert table.item(0, 0) is first

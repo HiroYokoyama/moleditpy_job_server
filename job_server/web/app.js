@@ -19,9 +19,19 @@ function message(text) { $('#notice').textContent = text; $('#notice').hidden = 
 function gb(mb) { return typeof mb==='number' ? String(Number((mb/1024).toFixed(1))) : '—'; }
 function date(value) { return value ? new Date(value*1000).toLocaleString() : '—'; }
 function cell(row,text,className='') { const td = document.createElement('td'); td.textContent=String(text); td.className=className; row.append(td); return td; }
+// Lists are rebuilt only when what they show has changed: rebuilding identical rows on
+// every refresh made them flicker and dropped the pointer's hover and keyboard focus.
+function renderList(container,data,build) {
+  const key=JSON.stringify(data);
+  if(container.dataset.rendered===key)return false;
+  container.replaceChildren(...build());container.dataset.rendered=key;return true;
+}
+function clearList(container) { container.replaceChildren(); delete container.dataset.rendered; }
+// Rewriting unchanged text still drops a selection the user is making in it.
+function setText(element,value) { if(element.textContent!==value)element.textContent=value; }
 function ahead(count) { return count===0 ? 'next in line' : count+' ahead'; }
 function renderQueue(queue) {
-  const body=$('#queue-body');body.replaceChildren();
+  const rows=[];
   const add=(entry,place,stateText)=>{
     const row=document.createElement('tr');if(entry.mine)row.className='mine';
     cell(row,place);const name=cell(row,entry.name,'job-name');
@@ -30,11 +40,14 @@ function renderQueue(queue) {
     const status=cell(row,'');const badge=document.createElement('span');badge.className='badge '+stateText.toLowerCase();badge.textContent=stateText;status.append(badge);
     if(entry.priority){const note=document.createElement('small');note.className='job-id';note.textContent='Priority '+entry.priority;status.append(note);}
     const open=cell(row,'');if(entry.job_id)button(open,'Open',()=>detail(entry.job_id));
-    body.append(row);return name;
+    rows.push(row);return name;
   };
-  for(const entry of queue.running)add(entry,'—','RUNNING');
-  for(const entry of queue.waiting)add(entry,entry.position,entry.display_state);
-  if(!queue.running.length&&!queue.waiting.length){const row=document.createElement('tr');const empty=cell(row,'Nothing is running or waiting.','empty');empty.colSpan=6;body.append(row);}
+  renderList($('#queue-body'),[queue.running,queue.waiting],()=>{
+    for(const entry of queue.running)add(entry,'—','RUNNING');
+    for(const entry of queue.waiting)add(entry,entry.position,entry.display_state);
+    if(!queue.running.length&&!queue.waiting.length){const row=document.createElement('tr');const empty=cell(row,'Nothing is running or waiting.','empty');empty.colSpan=6;rows.push(row);}
+    return rows;
+  });
   const next=queue.waiting.find(entry=>entry.mine);
   $('#queue-summary').textContent=queue.running.length+' running · '+queue.waiting.length+' waiting'+(next?' · your next job: '+ahead(next.position-1):'')+(queue.paused?' · paused':'');
 }
@@ -67,10 +80,10 @@ function clearSession() {
   Object.assign(state,{token:null,expires:0,authenticated:0,me:null,capabilities:null,job:null,jobInfo:null,queueBusy:false,offset:0,page:0,paused:false,refreshPending:false,browsePath:'',resetUser:null,names:null});
   $('#signin').hidden=false;$('#user-chip').hidden=true;$('#signout').hidden=true;$('#accounts-nav').hidden=true;$('#account-nav').hidden=true;$('#pause').hidden=true;
   if($('#reset-dialog').open)$('#reset-dialog').close();clearPasswordForms();
-  for(const id of ['jobs-body','queue-body','users-body','devices-body','result-files','my-devices-body','browser-body','activity-body'])$('#'+id).replaceChildren();
+  for(const id of ['jobs-body','queue-body','users-body','devices-body','result-files','my-devices-body','browser-body','activity-body'])clearList($('#'+id));
   for(const id of ['log','detail-name','detail-id','detail-spec','queue-summary'])$('#'+id).textContent='';
   for(const id of ['running','pending','cpu','memory','cpu-now','memory-now'])$('#'+id).textContent='—';
-  $('#job-controls').hidden=true;panel('overview');setSignedIn(false);return state.generation;
+  $('#job-controls').hidden=true;panel('overview',{record:false});setSignedIn(false);return state.generation;
 }
 
 async function api(method,path,body,options={}) {
@@ -123,7 +136,7 @@ async function openSession() {
   $('#user-initial').textContent=state.me.username.slice(0,1).toUpperCase();$('#accounts-nav').hidden=!admin;$('#account-nav').hidden=false;$('#pause').hidden=!admin;
   $('#login-status').textContent='';setSignedIn(true);
   $('#jobs-caption').textContent=admin?'All jobs on this server.':'Your jobs on this server.';
-  saveSession();message('');await refresh();
+  saveSession();message('');await refresh();followRoute();
 }
 async function restoreSession() {
   let saved;
@@ -150,6 +163,8 @@ $('#close-login').addEventListener('click',cancelLogin);
 $('#login-dialog').addEventListener('cancel',cancelLogin);
 function signOut() {
   const token=state.token;clearSession();
+  // The next person to sign in here starts from the overview, not from this user's page.
+  try {globalThis.history?.replaceState?.({depth:0},'','#overview');} catch {}
   if(token)fetch('/api/v1/auth/logout',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:'{}',credentials:'omit',redirect:'error',cache:'no-store',keepalive:true}).catch(()=>{});
 }
 $('#signout').addEventListener('click',signOut);
@@ -158,8 +173,31 @@ $('#user-chip').addEventListener('click',()=>panel('account'));
 // Remove credentials stored by older browser clients; never read or reuse them.
 try {globalThis.indexedDB?.deleteDatabase('moleditpy-job-server');} catch {}
 
-function panel(name) {
+// Each page has its own address, so the browser's Back and Forward move between pages
+// of this app instead of leaving it, and a reload stays on the same page.
+const PAGES=['overview','submit','accounts','account'];
+const JOB_ID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function route() {
+  const hash=String(globalThis.location?.hash||'').replace(/^#/,'');
+  if(hash.startsWith('job/')&&JOB_ID.test(hash.slice(4)))return {name:'detail',job:hash.slice(4).toLowerCase()};
+  return {name:PAGES.includes(hash)?hash:'overview'};
+}
+function remember(name,job) {
+  const hash='#'+(name==='detail'?'job/'+job:name);
+  if(!globalThis.history?.pushState||globalThis.location?.hash===hash)return;
+  if(!globalThis.location?.hash&&name==='overview')history.replaceState({depth:0},'',hash);
+  else history.pushState({depth:(history.state?.depth||0)+1},'',hash);
+}
+function followRoute() {
+  const target=route();
+  if(target.name==='detail'){if(state.job!==target.job)safe(()=>detail(target.job,true,{record:false}));}
+  else if(target.name==='accounts'&&state.me?.role!=='admin')panel('overview',{record:false});
+  else panel(target.name,{record:false});
+}
+globalThis.addEventListener?.('popstate',()=>{if(state.me)followRoute();});
+function panel(name,{record=true,job=null}={}) {
   if (name==='accounts'&&state.me?.role!=='admin') return;
+  if (record) remember(name,job);
   document.querySelectorAll('.panel').forEach(element=>element.hidden=element.id!==name);
   document.querySelectorAll('.nav').forEach(element=>element.classList.toggle('active',element.dataset.panel===name));
   $('#page-title').textContent={overview:'Overview',submit:'Submit a job',accounts:'Users & devices',account:'My account',detail:'Job details'}[name];
@@ -169,7 +207,8 @@ function panel(name) {
   if (name==='overview'&&state.me) safe(refresh);
 }
 document.querySelectorAll('[data-panel]').forEach(element=>element.addEventListener('click',()=>panel(element.dataset.panel)));
-$('#back').addEventListener('click',()=>panel('overview'));
+// Back to where the job was opened from, as the browser's Back button would.
+$('#back').addEventListener('click',()=>{if(globalThis.history?.state?.depth>0)history.back();else panel('overview');});
 async function refresh() {
   const generation=state.generation;
   if(state.busy&&state.busyGeneration===generation){state.refreshPending=true;return;}
@@ -194,15 +233,16 @@ async function refresh() {
     if(admin&&(!state.names||jobs.some(job=>!state.names[job.owner_id]))){
       state.names=Object.fromEntries((await api('GET','/admin/users')).map(user=>[user.id,user.username]));
     }
-    $('#jobs-body').replaceChildren();
+    renderList($('#jobs-body'),jobs.map(job=>[job.id,job.spec.name,admin?state.names[job.owner_id]||null:null,job.display_state,job.priority,job.force_run,job.queue_ahead,job.spec.resources.cpus_per_task,job.spec.resources.memory_mb,job.created_at]),()=>{const rows=[];
     for(const job of jobs){
       const row=document.createElement('tr');const name=cell(row,job.spec.name,'job-name');
       const id=document.createElement('small');id.className='job-id';id.textContent=(admin?(state.names[job.owner_id]||'(deleted user)')+' · ':'')+job.id;name.append(id);
       const status=cell(row,'');const badge=document.createElement('span');badge.className='badge '+job.display_state.toLowerCase();badge.textContent=job.display_state;status.append(badge);const priority=document.createElement('small');priority.className='job-id';priority.textContent='Priority '+(job.priority??0)+(job.force_run?' · Force requested':'')+(typeof job.queue_ahead==='number'?' · '+ahead(job.queue_ahead):'');status.append(priority);
-      cell(row,job.spec.resources.cpus_per_task+' cores · '+gb(job.spec.resources.memory_mb)+' GB');cell(row,date(job.created_at));button(cell(row,''),'Open',()=>detail(job.id));$('#jobs-body').append(row);
+      cell(row,job.spec.resources.cpus_per_task+' cores · '+gb(job.spec.resources.memory_mb)+' GB');cell(row,date(job.created_at));button(cell(row,''),'Open',()=>detail(job.id));rows.push(row);
     }
+    if(!jobs.length){const row=document.createElement('tr');const empty=cell(row,'No jobs on this page.','empty');empty.colSpan=5;rows.push(row);}
+    return rows;});
     filterJobs();
-    if(!jobs.length){const row=document.createElement('tr');const empty=cell(row,'No jobs on this page.','empty');empty.colSpan=5;$('#jobs-body').append(row);}
     $('#previous-page').disabled=state.page===0;$('#next-page').disabled=jobs.length<50;$('#page-number').textContent='Page '+(state.page+1);
     if(state.job)await detail(state.job,false);
   } catch(error) {if(!error.staleSession)connection('Connection failed');throw error;
@@ -247,10 +287,10 @@ $('#submit-form').addEventListener('submit',event=>{
     }finally{submit.disabled=false;}
   });
 });
-async function detail(id,reset=true){
+async function detail(id,reset=true,{record=true}={}){
   if(!id)return;
   const request=++state.detailRequest;
-  state.job=id;if(reset){state.browseRequest++;$('#browser-body').replaceChildren();$('#browse-path').textContent='/';state.jobInfo=null;$('#job-controls').hidden=true;state.offset=0;$('#log').textContent='';$('#detail-name').textContent='Loading…';$('#detail-id').textContent=id;$('#detail-spec').textContent='';$('#result-files').replaceChildren();panel('detail');}
+  state.job=id;if(reset){state.browseRequest++;clearList($('#browser-body'));$('#browse-path').textContent='/';state.jobInfo=null;$('#job-controls').hidden=true;state.offset=0;$('#log').textContent='';$('#detail-name').textContent='Loading…';$('#detail-id').textContent=id;$('#detail-spec').textContent='';clearList($('#result-files'));panel('detail',{record,job:id});state.job=id;}
   const current=()=>state.job===id&&state.detailRequest===request;
   const job=await api('GET','/jobs/'+id);if(!current())return;state.jobInfo=job;
   if(reset&&job.state!=='UPLOADING')safe(()=>browse(id,''));
@@ -258,16 +298,21 @@ async function detail(id,reset=true){
   if(document.activeElement!==$('#job-priority'))$('#job-priority').value=job.priority??0;
   $('#force-job').textContent=job.force_run?'Cancel force request':'Force run…';
   $('#force-job').disabled=$('#set-priority').disabled=state.queueBusy;
-  $('#detail-name').textContent=job.spec.name+' · '+job.display_state+(typeof job.queue_ahead==='number'?' · '+ahead(job.queue_ahead):'');$('#detail-id').textContent=id;
-  $('#detail-spec').textContent=job.spec.command+'\n\n'+job.spec.resources.cpus_per_task+' CPU cores · '+gb(job.spec.resources.memory_mb)+' GB · exit code '+(job.exit_code??'—')+(job.reason?'\n'+job.reason:'');
+  setText($('#detail-name'),job.spec.name+' · '+job.display_state+(typeof job.queue_ahead==='number'?' · '+ahead(job.queue_ahead):''));setText($('#detail-id'),id);
+  setText($('#detail-spec'),job.spec.command+'\n\n'+job.spec.resources.cpus_per_task+' CPU cores · '+gb(job.spec.resources.memory_mb)+' GB · exit code '+(job.exit_code??'—')+(job.reason?'\n'+job.reason:''));
   $('#cancel-job').disabled=['DONE','FAILED','CANCELLED','LOST'].includes(job.state);
   $('#mark-lost').hidden=state.me?.role!=='admin'||job.state!=='RUNNING'||!String(job.reason||'').startsWith('NEEDS_RECHECK');
-  const log=await api('GET',`/jobs/${id}/log?offset=${state.offset}&limit=65536`);if(!current())return;$('#log').textContent=($('#log').textContent+log.text).slice(-1000000);state.offset=log.next_offset;
-  $('#result-files').replaceChildren();
-  if(['DONE','FAILED','CANCELLED','LOST'].includes(job.state)){
-    const files=await api('GET','/jobs/'+id+'/files');if(!current())return;
-    for(const entry of files){const row=document.createElement('li');const name=document.createElement('span');name.textContent=entry.path;const size=document.createElement('small');size.textContent=entry.size.toLocaleString()+' bytes';name.append(size);row.append(name);button(row,'Download',()=>download(id,entry));$('#result-files').append(row);}
+  const log=await api('GET',`/jobs/${id}/log?offset=${state.offset}&limit=65536`);if(!current())return;
+  if(log.text){
+    // Follow new output only while the reader is at the end; otherwise leave them where they are.
+    const box=$('#log'),following=!(box.scrollHeight>box.clientHeight+box.scrollTop+8);
+    box.textContent=(box.textContent+log.text).slice(-1000000);
+    if(following&&typeof box.scrollHeight==='number')box.scrollTop=box.scrollHeight;
   }
+  state.offset=log.next_offset;
+  const files=['DONE','FAILED','CANCELLED','LOST'].includes(job.state)?await api('GET','/jobs/'+id+'/files'):[];
+  if(!current())return;
+  renderList($('#result-files'),[id,files],()=>files.map(entry=>{const row=document.createElement('li');const name=document.createElement('span');name.textContent=entry.path;const size=document.createElement('small');size.textContent=entry.size.toLocaleString()+' bytes';name.append(size);row.append(name);button(row,'Download',()=>download(id,entry));return row;}));
 }
 $('#refresh-detail').addEventListener('click',()=>safe(()=>detail(state.job,false)));
 $('#cancel-job').addEventListener('click',()=>safe(async()=>{if(!confirm('Stop this job and its child processes?'))return;await api('POST','/jobs/'+state.job+'/cancel');await detail(state.job,false);}));
@@ -365,7 +410,7 @@ async function accounts(){
   const devices=await api('GET','/admin/devices');
   if(request!==state.accountsRequest||generation!==state.generation)return;
   state.names=Object.fromEntries(users.map(user=>[user.id,user.username]));
-  $('#users-body').replaceChildren();
+  renderList($('#users-body'),[state.me.user_id,users.map(user=>[user.id,user.username,user.role,user.enabled])],()=>{const rows=[];
   for(const user of users){
     const own=user.id===state.me.user_id,row=document.createElement('tr');
     cell(row,user.username+(own?' (you)':''));cell(row,user.role==='admin'?'Administrator':'User');cell(row,user.enabled?'Enabled':'Disabled');
@@ -385,10 +430,12 @@ async function accounts(){
         await api('DELETE','/admin/users/'+user.id);message('');await accounts();
       });
     }
-    $('#users-body').append(row);
+    rows.push(row);
   }
-  $('#devices-body').replaceChildren();
-  for(const device of devices){const row=document.createElement('tr');cell(row,device.id);cell(row,users.find(u=>u.id===device.user_id)?.username||device.user_id);cell(row,date(device.last_access));const action=cell(row,'');if(device.revoked_at)action.textContent='Revoked';else button(action,'Revoke',async()=>{if(confirm('Revoke this device and its current tokens?')){await api('POST','/admin/devices/'+device.id+'/revoke');await accounts();}});$('#devices-body').append(row);}
+  return rows;});
+  renderList($('#devices-body'),[users,devices],()=>{const rows=[];
+  for(const device of devices){const row=document.createElement('tr');cell(row,device.id);cell(row,users.find(u=>u.id===device.user_id)?.username||device.user_id);cell(row,date(device.last_access));const action=cell(row,'');if(device.revoked_at)action.textContent='Revoked';else button(action,'Revoke',async()=>{if(confirm('Revoke this device and its current tokens?')){await api('POST','/admin/devices/'+device.id+'/revoke');await accounts();}});rows.push(row);}
+  return rows;});
 }
 function openReset(user){
   state.resetUser=user;clearPasswordForms();

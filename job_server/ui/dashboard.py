@@ -1055,8 +1055,39 @@ class Dashboard(QDialog):
             return "—"
 
     @staticmethod
+    def _table_contents(table):
+        """Each row's identifier and texts, in the table's current order."""
+        contents = []
+        for row in range(table.rowCount()):
+            texts = tuple(
+                item.text() if (item := table.item(row, column)) is not None else None
+                for column in range(table.columnCount())
+            )
+            first = table.item(row, 0)
+            contents.append((first.data(Qt.ItemDataRole.UserRole) if first else None, texts))
+        return contents
+
+    @staticmethod
     def fill(table, rows, identifiers=None):
+        wanted = [
+            (
+                identifiers[row] if identifiers is not None else str(values[0]),
+                tuple(str(value) for value in values)
+                + (None,) * (table.columnCount() - len(values)),
+            )
+            for row, values in enumerate(rows)
+        ]
+        current = Dashboard._table_contents(table)
+        # A periodic refresh that changes nothing must not touch the table: rebuilding
+        # it moved the view back to the selected row while the user was scrolling.
+        if table.isSortingEnabled():
+            if sorted(current, key=repr) == sorted(wanted, key=repr):
+                return
+        elif current == wanted:
+            return
         selected = Dashboard.selected(table)
+        current_column = max(table.currentColumn(), 0)
+        scroll = (table.verticalScrollBar().value(), table.horizontalScrollBar().value())
         sorting = table.isSortingEnabled()
         signals = table.blockSignals(True)
         try:
@@ -1075,11 +1106,14 @@ class Dashboard(QDialog):
             table.setCurrentCell(-1, -1)
             for row in range(table.rowCount()):
                 if selected is not None and table.item(row, 0).data(Qt.ItemDataRole.UserRole) == selected:
-                    table.setCurrentCell(row, 0)
+                    table.setCurrentCell(row, min(current_column, table.columnCount() - 1))
                     break
         finally:
             table.setSortingEnabled(sorting)
             table.blockSignals(signals)
+            # Selecting scrolls to the row; the user's own scroll position wins.
+            table.verticalScrollBar().setValue(scroll[0])
+            table.horizontalScrollBar().setValue(scroll[1])
 
     def _network_preview(self):
         """The network settings as currently chosen in the form."""
