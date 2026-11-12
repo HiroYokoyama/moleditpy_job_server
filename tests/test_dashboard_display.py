@@ -227,7 +227,7 @@ def test_refresh_displays_names_status_and_local_access_time(dashboard, monkeypa
     dashboard.refresh()
     assert dashboard.jobs.item(0, 1).text() == "alice"
     assert dashboard.metric_values["cpu"].text() == "2 / 8"
-    assert dashboard.metric_values["memory"].text() == "1 / 4 GiB"
+    assert dashboard.metric_values["memory"].text() == "1.0 / 4.0 GiB"
     assert dashboard.metric_values["running"].text() == "1"
     dashboard.jobs.setCurrentCell(0, 0)
     assert dashboard.selected(dashboard.jobs) == "job-id"
@@ -414,7 +414,7 @@ def test_memory_and_storage_are_edited_in_gb_but_saved_in_mb(dashboard):
     from job_server.settings import Settings
     from job_server.ui.units import gb
 
-    assert gb(16384) == "16" and gb(512) == "0.5" and gb(1000) == "1" and gb(1300) == "1.3"
+    assert gb(16384) == "16.0" and gb(512) == "0.5" and gb(1000) == "1.0" and gb(1300) == "1.3"
     assert gb(None) == "—"
     assert dashboard.fields["memory_mb"].decimals() == 1
     assert dashboard.fields["memory_mb"].suffix() == " GiB"

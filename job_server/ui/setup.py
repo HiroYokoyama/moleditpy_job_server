@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..auth import MIN_PASSWORD_LENGTH
-from ..settings import pc_resources
+from ..settings import pc_resources, pc_size_label
 from .units import GBSpinBox, FocusSpinBox, gb
 from .network import LanAddressList
 
@@ -83,10 +83,10 @@ class SetupDialog(QDialog):
         self.memory.set_mb(dashboard.fields["memory_mb"].mb())
         self.python = QLineEdit(dashboard.python_path.text())
         self.python.setPlaceholderText("Automatic; select a Python executable for portable builds")
-        resources.addRow("CPU budget", self.cpus)
+        resources.addRow("CPU budget (cores)", self.cpus)
         resources.addRow("Memory budget", self.memory)
         cpus, memory_mb = pc_resources()
-        self.match_pc = QPushButton(f"Use this PC's size ({cpus} CPUs, {gb(memory_mb)} GiB)")
+        self.match_pc = QPushButton(pc_size_label(gb(memory_mb)))
 
         def match_pc():
             self.cpus.setValue(cpus)

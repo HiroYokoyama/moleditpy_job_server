@@ -283,11 +283,15 @@ def host_usage():
                 "memory_percent": memory.percent,
                 "memory_used_mb": (memory.total - memory.available) // (1024 * 1024),
                 "memory_total_mb": memory.total // (1024 * 1024),
+                # CPU use is a share of every thread; the cores mark where hyper-threads start.
+                "cpu_threads": psutil.cpu_count(),
+                "cpu_cores": psutil.cpu_count(logical=False),
             }
         except (OSError, psutil.Error):
             reading = {
                 "cpu_percent": None, "memory_percent": None,
                 "memory_used_mb": None, "memory_total_mb": None,
+                "cpu_threads": None, "cpu_cores": None,
             }
         _usage = (time.monotonic(), reading)
         return reading

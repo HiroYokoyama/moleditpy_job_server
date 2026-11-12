@@ -1,5 +1,6 @@
 """A dial for a share of capacity, and a trend line of the last few minutes."""
 
+import math
 import time
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
@@ -30,7 +31,15 @@ class Gauge(QWidget):
         self._value = 0
         self._known = False
         self._color = QColor("#2e7d32")
+        self.mark = None
         self.setFixedSize(QSize(68, 68))
+
+    def setMark(self, value):
+        """A light dotted tick across the dial at ``value`` percent, or none."""
+        mark = None if value is None else max(0.0, min(100.0, float(value)))
+        if mark != self.mark:
+            self.mark = mark
+            self.update()
 
     def setValue(self, value):
         self._value = max(0, min(100, int(value)))
@@ -61,6 +70,18 @@ class Gauge(QWidget):
         if self._known and self._value > 0:
             painter.setPen(QPen(self._color, 7, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
             painter.drawArc(rect, start, int(span * self._value / 100))
+        if self.mark is not None:
+            # Where the limit falls, such as every core busy, as a light dotted tick.
+            angle = math.radians(225 - 270 * self.mark / 100)
+            centre, radius = rect.center(), side / 2
+            inner, outer = radius - 8, radius + 6
+            dots = QPen(_ink(self, 0.7), 1.6, Qt.PenStyle.CustomDashLine, Qt.PenCapStyle.FlatCap)
+            dots.setDashPattern([1.0, 1.0])
+            painter.setPen(dots)
+            painter.drawLine(
+                QPointF(centre.x() + inner * math.cos(angle), centre.y() - inner * math.sin(angle)),
+                QPointF(centre.x() + outer * math.cos(angle), centre.y() - outer * math.sin(angle)),
+            )
         font = QFont(self.font())
         font.setBold(True)
         font.setPointSizeF(max(7.0, font.pointSizeF()))
@@ -91,6 +112,7 @@ class Trend(QWidget):
         self.samples = []
         self.span, self.span_label = DEFAULT_SPAN
         self.gap = 30.0
+        self.marker = None
         self._hover = None
         self.setMouseTracking(True)
         self.setMinimumHeight(76)
@@ -104,6 +126,13 @@ class Trend(QWidget):
             self.gap = gap
         self._hover = None
         self.update()
+
+    def set_marker(self, value, label=""):
+        """A dotted line at ``value`` with a small label, or none when ``value`` is None."""
+        marker = None if value is None else (float(value), label)
+        if marker != self.marker:
+            self.marker = marker
+            self.update()
 
     def set_span(self, seconds, label):
         self.span, self.span_label = seconds, label
@@ -122,12 +151,16 @@ class Trend(QWidget):
 
     def top_label(self):
         """What the line at the top of the plot stands for."""
-        return f"top {self._scale():g}{self.unit}"
+        return f"{self._scale():g}{self.unit}"
 
     def _axis_font(self):
         font = QFont(self.font())
         font.setPointSizeF(max(6.5, font.pointSizeF() - 1.5))
         return font
+
+    def _ceiling(self):
+        """Where the top-of-scale line sits: low enough for its label to sit above it."""
+        return QFontMetricsF(self._axis_font()).height() + 2
 
     def _plot_height(self):
         """The line's own height, above the small time axis."""
@@ -136,7 +169,8 @@ class Trend(QWidget):
     def _points(self):
         """(time, value, point) per sample; a None point where the line must break."""
         now, top = self.clock(), self._scale()
-        width, height = self.width() - 2, self._plot_height() - 4
+        ceiling = self._ceiling()
+        width, height = self.width() - 2, self._plot_height() - ceiling - 2
         points, previous = [], None
         for when, value in self._visible():
             # The server samples every few seconds; a longer silence is time it was not running.
@@ -145,7 +179,7 @@ class Trend(QWidget):
             previous = when
             points.append((when, value, None if value is None else QPointF(
                 1 + width * (1 - (now - when) / self.span),
-                2 + height * (1 - min(value, top) / top),
+                ceiling + height * (1 - min(value, top) / top),
             )))
         return points
 
@@ -157,14 +191,13 @@ class Trend(QWidget):
         painter.drawLine(QPointF(0, base), QPointF(self.width(), base))
         # The top of the scale: without it a line's height says nothing.
         painter.setPen(QPen(_ink(self, 0.22), 1))
-        painter.drawLine(QPointF(0, 2), QPointF(self.width(), 2))
+        painter.drawLine(QPointF(0, self._ceiling()), QPointF(self.width(), self._ceiling()))
         # Says what the line spans; without it the width means nothing.
         painter.setFont(self._axis_font())
         painter.setPen(_ink(self, 0.55))
         axis = QRectF(0, self._plot_height(), self.width(), self.height() - self._plot_height())
         painter.drawText(axis, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom, f"{self.span_label} ago")
         painter.drawText(axis, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom, "now")
-        painter.drawText(axis, Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom, self.top_label())
         color = QColor(TREND_DARK if _dark(self) else TREND_LIGHT)
         path, started = QPainterPath(), False
         for _when, _value, point in self._points():
@@ -193,6 +226,24 @@ class Trend(QWidget):
         painter.setPen(QPen(color, 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap,
                             Qt.PenJoinStyle.RoundJoin))
         painter.drawPath(path)
+        if self.marker is not None:
+            # A dotted line at a level worth knowing, such as where every core is busy.
+            level, text = self.marker
+            top = self._scale()
+            span = self._plot_height() - self._ceiling() - 2
+            y = self._ceiling() + span * (1 - min(level, top) / top)
+            painter.setPen(QPen(_ink(self, 0.45), 1, Qt.PenStyle.DotLine))
+            painter.drawLine(QPointF(0, y), QPointF(self.width(), y))
+            if text:
+                height = QFontMetricsF(painter.font()).height()
+                painter.setPen(_ink(self, 0.55))
+                painter.drawText(QRectF(0, y - height - 1, self.width(), height),
+                                 Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom, text)
+        # What the top line stands for, just above its right end.
+        height = QFontMetricsF(painter.font()).height()
+        corner = QRectF(0, self._ceiling() - height - 1, self.width(), height)
+        painter.setPen(_ink(self, 0.55))
+        painter.drawText(corner, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom, self.top_label())
         if self._hover is not None:
             _when, _value, point = self._hover
             painter.setPen(QPen(_ink(self, 0.35), 1))

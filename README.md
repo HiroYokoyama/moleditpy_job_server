@@ -61,7 +61,7 @@ Right-click a job, user or device for its actions. The same actions are in the m
 
 | Tab | Use it to |
 |---|---|
-| **Dashboard** | See server state, live CPU and memory, reservations and jobs. Each figure has a dial and a trend line; switch the lines between the last 5 minutes, 15 minutes, 1 hour and 6 hours at the bottom right, and point at a line to read its value. The thin line above each plot is the top of the scale, named under the plot (100%, or a round number just above the job counts shown). A gap in a line is time the server was not running. Memory is shown in GiB (1024-based) of the memory the OS can use, so it reads a little lower than the size on the box. Filter jobs, open details, set priority, force run, cancel or open the job folder. The lists refresh every few seconds without moving your selection or scroll position. |
+| **Dashboard** | See server state, live CPU and memory, reservations and jobs. Each figure has a dial and a trend line; switch the lines between the last 5 minutes, 15 minutes, 1 hour and 6 hours at the bottom right, and point at a line to read its value. The thin line above each plot is the top of the scale, named at its right end (100%, or for job counts a round number just above the largest shown). A gap in a line is time the server was not running. Memory is shown in GiB (1024-based) of the memory the OS can use, so it reads a little lower than the size on the box. Filter jobs, open details, set priority, force run, cancel or open the job folder. The lists refresh every few seconds without moving your selection or scroll position. |
 | **Users & Devices** | Add users or administrators, reset passwords, enable, disable or delete users, switch user and administrator, and revoke devices. Change your own password. |
 | **Activity** | Read recent logins, account changes and job events. |
 | **Settings** | Set the network, budgets, commands run before each job, the job folder and the runtime. When a save changes something while the server runs, the window offers the restart that applies it. |
@@ -160,9 +160,18 @@ verify SHA-256. Browser downloads hold the file in memory, so use Python for lar
 ## Limits
 
 CPU and memory budgets are **advisory**: they decide when jobs start, not what a job may
-use. All jobs share the service OS account, so they are not isolated from each other.
+use. The CPU budget counts physical cores, and a new server starts at this PC's core
+count rather than its thread count: with hyper-threading a PC has more threads than cores,
+and calculations rarely gain from the extra ones. On Linux only the CPUs the server may
+run on count (`taskset`, containers, systemd limits). All jobs share the service OS
+account, so they are not isolated from each other.
 This is a service for trusted users. See [SECURITY.md](SECURITY.md) and
 [Execution and limits](docs/EXECUTION.md).
+
+**CPU in use now** is a share of every thread, so 100% means all threads are busy. When
+the PC has more threads than cores, a dotted line on its trend ("Phys. cores") and a
+dotted tick on its dial mark where every core is busy. The dial's colour follows the cores: green, amber from 70% of them, red from 90%
+up to every core busy, and purple past that, when jobs share cores with hyper-threads.
 
 ## Documentation
 

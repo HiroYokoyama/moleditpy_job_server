@@ -53,7 +53,7 @@ from PySide6.QtWidgets import (
 from ..client import ClientError, JobServerClient
 from .units import GBSpinBox, FocusSpinBox, gb
 from .network import LanAddressList
-from ..settings import Settings, pc_resources
+from ..settings import Settings, pc_resources, pc_size_label
 
 
 class Signals(QObject):
@@ -72,6 +72,9 @@ class Task(QRunnable):
         except Exception as exc:
             self.signals.failed.emit(str(exc))
 
+
+# Past a limit, such as CPU use beyond every core into hyper-threads: beyond red.
+PAST_LIMIT = "#7b1fa2"
 
 #: Banner colours per server status: indicator dot and a translucent tint that
 #: reads on both light and dark palettes.
@@ -247,7 +250,7 @@ class Dashboard(QDialog):
         self.metric_trends = {}
         for index, (key, title) in enumerate((
             ("running", "Running jobs"), ("cpu_usage", "CPU in use now (whole PC)"),
-            ("cpu", "CPU reserved / budget"), ("pending", "Waiting jobs"),
+            ("cpu", "CPU cores reserved / budget"), ("pending", "Waiting jobs"),
             ("memory_usage", "Memory in use now (whole PC, usable)"), ("memory", "Memory reserved / budget"),
         )):
             card = QGroupBox(title)
@@ -603,7 +606,7 @@ class Dashboard(QDialog):
         resources = QGroupBox("Resources")
         limits = QFormLayout(resources)
         for key, label, maximum in (
-            ("cpus", "CPU budget", 4096),
+            ("cpus", "CPU budget (cores)", 4096),
             ("memory_mb", "Memory budget", 2147483647),
             ("max_active_per_user", "Active jobs per user", 10000),
             ("max_queued_per_user", "Queued jobs per user", 100000),
@@ -611,7 +614,7 @@ class Dashboard(QDialog):
         ):
             limits.addRow(label, number(key, maximum))
         cpus, memory_mb = pc_resources()
-        self.match_pc_button = QPushButton(f"Use this PC's size ({cpus} CPUs, {gb(memory_mb)} GiB)")
+        self.match_pc_button = QPushButton(pc_size_label(gb(memory_mb)))
 
         def match_pc():
             self.fields["cpus"].setValue(cpus)
@@ -912,7 +915,13 @@ class Dashboard(QDialog):
                 "—" if memory_now is None
                 else f"{gb(resource.get('memory_used_mb'))} / {gb(resource.get('memory_total_mb'))} GiB"
             )
-            self._set_usage("cpu_usage", cpu_now, 100)
+            # 100% is every thread; past the dotted line the hyper-threads are in use.
+            cores, threads = resource.get("cpu_cores"), resource.get("cpu_threads")
+            hyper = isinstance(cores, int) and isinstance(threads, int) and 0 < cores < threads
+            cores_share = 100 * cores / threads if hyper else None
+            self.metric_trends["cpu_usage"].set_marker(cores_share, "Phys. cores" if hyper else "")
+            self.metric_bars["cpu_usage"].setMark(cores_share)
+            self._set_usage("cpu_usage", cpu_now, 100, limit=cores_share)
             self._set_usage("memory_usage", memory_now, 100)
             self._merge_history(data.get("history"))
             usernames = {u["id"]: u["username"] for u in data["users"]}
@@ -1030,10 +1039,15 @@ class Dashboard(QDialog):
         for trend in self.metric_trends.values():
             trend.set_span(*span)
 
-    def _set_usage(self, key, used, budget):
+    def _set_usage(self, key, used, budget, limit=None):
+        """Colour by the share of ``limit`` (100% unless given): green, amber from 70%,
+        red from 90%, and purple past the limit, such as every core busy on a
+        hyper-threaded PC."""
         share = percent(used, budget)
         value = 0 if share is None else round(share)
-        color = "#c62828" if value >= 90 else "#e08600" if value >= 70 else "#2e7d32"
+        of_limit = 100 * (share or 0) / (limit or 100)
+        color = (PAST_LIMIT if of_limit > 100.5 else "#c62828" if of_limit >= 90
+                 else "#e08600" if of_limit >= 70 else "#2e7d32")
         gauge = self.metric_bars[key]
         gauge.setValue(value)
         gauge.setKnown(share is not None)
