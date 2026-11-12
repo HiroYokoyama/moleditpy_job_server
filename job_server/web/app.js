@@ -50,8 +50,9 @@ function dial(key,value) {
   const label=$('#dial-text-'+key);if(label)setText(label,known?Math.round(value)+'%':'—');
   const arc=$('#dial-'+key);if(typeof arc?.setAttribute!=='function')return;
   arc.setAttribute('d',known&&value>0?dialArc(value/100):'');
-  const warn=key==='cpu-now'&&coreLine.share!==null?Math.min(coreLine.share,90):70;
-  arc.setAttribute('class','dial-value'+(!known||value<=0?' unknown':value>=90?' high':value>=warn?' warn':''));
+  // Coloured by the share of its limit: every core for CPU use on a hyper-threaded PC.
+  const limit=key==='cpu-now'&&coreLine.share!==null?coreLine.share:100,ofLimit=known?100*value/limit:0;
+  arc.setAttribute('class','dial-value'+(!known||value<=0?' unknown':ofLimit>100.5?' over':ofLimit>=90?' high':ofLimit>=70?' warn':''));
 }
 function mergeHistory(reply) {
   if(!reply||!Array.isArray(reply.samples))return;

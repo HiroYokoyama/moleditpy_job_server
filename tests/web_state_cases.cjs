@@ -479,7 +479,9 @@ async function overviewMeters() {
   assert.equal(app.call('coreLine').share,null,'No core line without hyper-threading');
   Object.assign(resources,{cpu_cores:8,cpu_threads:12,cpu_percent:70});await app.call('refresh')();
   assert.equal(app.call('coreLine').cores,8);assert.ok(Math.abs(app.call('coreLine').share-100*8/12)<1e-9);
-  assert.equal(app.get('#dial-cpu-now').getAttribute('class'),'dial-value warn','Amber once every core is busy');
+  assert.equal(app.get('#dial-cpu-now').getAttribute('class'),'dial-value over','Purple past every core');
+  Object.assign(resources,{cpu_percent:62});await app.call('refresh')();
+  assert.equal(app.get('#dial-cpu-now').getAttribute('class'),'dial-value high','Red as the cores fill');
   Object.assign(resources,{cpu_percent:93});
   const points=app.call('trendPoints')('running',100,30,now);
   assert.equal(points.length,4,'A silence longer than three samples breaks the line');

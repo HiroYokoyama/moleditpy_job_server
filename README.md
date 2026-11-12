@@ -163,13 +163,15 @@ CPU and memory budgets are **advisory**: they decide when jobs start, not what a
 use. The CPU budget counts physical cores, and a new server starts at this PC's core
 count rather than its thread count: with hyper-threading a PC has more threads than cores,
 and calculations rarely gain from the extra ones. On Linux only the CPUs the server may
-run on count (`taskset`, containers, systemd limits).
+run on count (`taskset`, containers, systemd limits). All jobs share the service OS
+account, so they are not isolated from each other.
+This is a service for trusted users. See [SECURITY.md](SECURITY.md) and
+[Execution and limits](docs/EXECUTION.md).
 
 **CPU in use now** is a share of every thread, so 100% means all threads are busy. When
 the PC has more threads than cores, a dotted line on its trend marks where every core is
-busy, and the dial turns amber past it: from there jobs share cores with hyper-threads. All jobs share the service OS account, so they are not isolated from each other.
-This is a service for trusted users. See [SECURITY.md](SECURITY.md) and
-[Execution and limits](docs/EXECUTION.md).
+busy. The dial's colour follows the cores: green, amber from 70% of them, red from 90%
+up to every core busy, and purple past that, when jobs share cores with hyper-threads.
 
 ## Documentation
 

@@ -73,6 +73,9 @@ class Task(QRunnable):
             self.signals.failed.emit(str(exc))
 
 
+# Past a limit, such as CPU use beyond every core into hyper-threads: beyond red.
+PAST_LIMIT = "#7b1fa2"
+
 #: Banner colours per server status: indicator dot and a translucent tint that
 #: reads on both light and dark palettes.
 STATUS_COLORS = {
@@ -919,7 +922,7 @@ class Dashboard(QDialog):
             self.metric_trends["cpu_usage"].set_marker(
                 cores_share, f"{cores} cores" if hyper else ""
             )
-            self._set_usage("cpu_usage", cpu_now, 100, warn=cores_share)
+            self._set_usage("cpu_usage", cpu_now, 100, limit=cores_share)
             self._set_usage("memory_usage", memory_now, 100)
             self._merge_history(data.get("history"))
             usernames = {u["id"]: u["username"] for u in data["users"]}
@@ -1037,12 +1040,15 @@ class Dashboard(QDialog):
         for trend in self.metric_trends.values():
             trend.set_span(*span)
 
-    def _set_usage(self, key, used, budget, warn=None):
-        """Green, then amber from ``warn`` (70% unless given), then red from 90%."""
+    def _set_usage(self, key, used, budget, limit=None):
+        """Colour by the share of ``limit`` (100% unless given): green, amber from 70%,
+        red from 90%, and purple past the limit, such as every core busy on a
+        hyper-threaded PC."""
         share = percent(used, budget)
         value = 0 if share is None else round(share)
-        warn = 70 if warn is None else min(warn, 90)
-        color = "#c62828" if value >= 90 else "#e08600" if (share or 0) >= warn else "#2e7d32"
+        of_limit = 100 * (share or 0) / (limit or 100)
+        color = (PAST_LIMIT if of_limit > 100.5 else "#c62828" if of_limit >= 90
+                 else "#e08600" if of_limit >= 70 else "#2e7d32")
         gauge = self.metric_bars[key]
         gauge.setValue(value)
         gauge.setKnown(share is not None)
