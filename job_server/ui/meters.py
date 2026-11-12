@@ -69,6 +69,17 @@ class Gauge(QWidget):
         painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, f"{self._value}%" if self._known else "—")
 
 
+def round_top(largest):
+    """A round number above the largest count (1, 2, 5, 10, 20, 50...), so the line
+    never lies on the top of the plot and the scale changes rarely."""
+    step = 1.0
+    while True:
+        for factor in (1, 2, 5):
+            if factor * step > largest:
+                return factor * step
+        step *= 10
+
+
 class Trend(QWidget):
     """One measure over the chosen span, with its value under the pointer."""
 
@@ -82,8 +93,8 @@ class Trend(QWidget):
         self.gap = 30.0
         self._hover = None
         self.setMouseTracking(True)
-        self.setMinimumHeight(44)
-        self.setMaximumHeight(48)
+        self.setMinimumHeight(76)
+        self.setMaximumHeight(80)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
     def set_samples(self, samples, gap=None):
@@ -105,11 +116,12 @@ class Trend(QWidget):
 
     def _scale(self):
         values = [value for _, value in self._visible() if value is not None]
-        top = self.maximum if self.maximum is not None else max(values + [1.0])
-        return top or 1.0
+        if self.maximum is not None:
+            return self.maximum or 1.0
+        return round_top(max(values + [0.0]))
 
     def top_label(self):
-        """What the dashed line at the top of the plot stands for."""
+        """What the line at the top of the plot stands for."""
         return f"top {self._scale():g}{self.unit}"
 
     def _axis_font(self):
@@ -144,7 +156,7 @@ class Trend(QWidget):
         base = self._plot_height() - 1.5
         painter.drawLine(QPointF(0, base), QPointF(self.width(), base))
         # The top of the scale: without it a line's height says nothing.
-        painter.setPen(QPen(_ink(self, 0.22), 1, Qt.PenStyle.DashLine))
+        painter.setPen(QPen(_ink(self, 0.22), 1))
         painter.drawLine(QPointF(0, 2), QPointF(self.width(), 2))
         # Says what the line spans; without it the width means nothing.
         painter.setFont(self._axis_font())
@@ -163,6 +175,21 @@ class Trend(QWidget):
             else:
                 path.moveTo(point)
                 started = True
+        # A faint fill under the line gives the plot weight without hiding the figure over it.
+        shade = QColor(color)
+        shade.setAlphaF(0.10)
+        run = []
+        for _when, _value, point in [*self._points(), (None, None, None)]:
+            if point is not None:
+                run.append(point)
+                continue
+            if len(run) > 1:
+                area = QPainterPath(QPointF(run[0].x(), base))
+                for corner in run:
+                    area.lineTo(corner)
+                area.lineTo(QPointF(run[-1].x(), base))
+                painter.fillPath(area, shade)
+            run = []
         painter.setPen(QPen(color, 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap,
                             Qt.PenJoinStyle.RoundJoin))
         painter.drawPath(path)

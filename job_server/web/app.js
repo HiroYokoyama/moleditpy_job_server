@@ -59,10 +59,12 @@ function mergeHistory(reply) {
   while(trendState.rows.length&&trendState.rows[0][0]<horizon)trendState.rows.shift();
   for(const key of Object.keys(TRENDS))drawTrend(key);
 }
-// The value the top of the plot stands for: 100% for a share, the largest count shown for jobs.
+// The value the top of the plot stands for: 100% for a share, a round number above the counts shown for jobs.
 function trendTop(key,rows=trendState.rows.filter(row=>row[0]>=Date.now()/1000-trendState.span)) {
   if(!['running','pending'].includes(key))return 100;
-  return Math.max(1,...rows.map(row=>row[TRENDS[key]]).filter(value=>typeof value==='number'));
+  // A round number above the largest count (1, 2, 5, 10, 20, 50...), so the line never lies on the top.
+  const largest=Math.max(0,...rows.map(row=>row[TRENDS[key]]).filter(value=>typeof value==='number'));
+  for(let step=1;;step*=10)for(const factor of [1,2,5])if(factor*step>largest)return factor*step;
 }
 function trendPoints(key,width,height,now=Date.now()/1000) {
   const column=TRENDS[key],rows=trendState.rows.filter(row=>row[0]>=now-trendState.span);
@@ -80,15 +82,18 @@ function drawTrend(key,hover=null) {
   const svg=$('#trend-'+key);if(typeof svg?.setAttribute!=='function'||typeof document.createElementNS!=='function')return;
   const width=svg.clientWidth||200,height=svg.clientHeight||30;
   svg.setAttribute('viewBox','0 0 '+width+' '+height);
-  let path='',drawing=false;
+  let path='',area='',drawing=false,last=null;
+  const close=()=>{if(last!==null)area+='L'+last+' '+height+'Z';last=null;};
   for(const point of trendPoints(key,width,height)){
-    if(point.x===null){drawing=false;continue;}
-    path+=(drawing?'L':'M')+point.x.toFixed(1)+' '+point.y.toFixed(1);drawing=true;
+    if(point.x===null){drawing=false;close();continue;}
+    const x=point.x.toFixed(1),y=point.y.toFixed(1);
+    path+=(drawing?'L':'M')+x+' '+y;area+=drawing?'L'+x+' '+y:'M'+x+' '+height+'L'+x+' '+y;drawing=true;last=x;
   }
-  // A dashed line marks the top of the scale, and the axis says what it stands for.
+  close();
+  // A thin line marks the top of the scale, and the axis says what it stands for.
   const top=trendTop(key),peak=$('#trend-top-'+key);
   if(peak)peak.textContent='top '+(['running','pending'].includes(key)?top:top+'%');
-  const parts=[svgElement('line',{class:'trend-top',x1:0,x2:width,y1:2,y2:2}),svgElement('line',{class:'trend-base',x1:0,x2:width,y1:height-0.5,y2:height-0.5}),svgElement('path',{class:'trend-line',d:path})];
+  const parts=[svgElement('line',{class:'trend-top',x1:0,x2:width,y1:2,y2:2}),svgElement('line',{class:'trend-base',x1:0,x2:width,y1:height-0.5,y2:height-0.5}),svgElement('path',{class:'trend-area',d:area}),svgElement('path',{class:'trend-line',d:path})];
   if(hover)parts.push(svgElement('line',{class:'trend-cross',x1:hover.x,x2:hover.x,y1:0,y2:height}),svgElement('circle',{class:'trend-dot',cx:hover.x,cy:hover.y,r:4}));
   svg.replaceChildren(...parts);
 }

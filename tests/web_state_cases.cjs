@@ -478,8 +478,8 @@ async function overviewMeters() {
   const points=app.call('trendPoints')('running',100,30,now);
   assert.equal(points.length,4,'A silence longer than three samples breaks the line');
   assert.equal(points[1].x,null);assert.equal(Math.round(points[3].x),100);
-  assert.equal(points[0].y,2,'The largest count shown sits on the top line');
-  assert.equal(app.call('trendTop')('running'),4);assert.equal(app.call('trendTop')('cpu'),100);
+  assert.ok(Math.abs(points[0].y-7.2)<1e-9,'The largest count shown stays below the top line');
+  assert.equal(app.call('trendTop')('running'),5);assert.equal(app.call('trendTop')('cpu'),100);
   await app.call('refresh')();
   assert.equal(asked[1],now,'Later requests ask only for what is new');
   assert.equal(state.rows.length,3,'Samples already held are not added twice');
