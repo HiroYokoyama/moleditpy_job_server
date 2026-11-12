@@ -30,7 +30,10 @@ _WAITING_LISTING = (
 )
 
 
-def work_directory(settings, work_root, job_id, staging=False):
+def work_directory(settings, work_root, job_id, staging=False, archive_path=""):
+    if archive_path and not staging:
+        # Moved to the finished-jobs folder once the job ended.
+        return Path(archive_path)
     root = Path(work_root) if work_root else settings.root
     if settings.execution_os == "wsl":
         from .executor.wsl import native_root
@@ -57,8 +60,11 @@ class Jobs:
     def directory(self, job_id, staging=False):
         # Each job keeps the root it started in, so changing the setting cannot
         # lose earlier results or move a job while it is running.
-        job = self.db.one("SELECT work_root FROM jobs WHERE id=?", (job_id,))
-        return work_directory(self.settings, job["work_root"] if job else "", job_id, staging)
+        job = self.db.one("SELECT work_root,archive_path FROM jobs WHERE id=?", (job_id,))
+        return work_directory(
+            self.settings, job["work_root"] if job else "", job_id, staging,
+            job["archive_path"] if job else "",
+        )
 
     def authorize(self, job_id, principal):
         job = self.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
@@ -128,7 +134,9 @@ class Jobs:
         }
 
     def public(self, job):
-        result = {k: v for k, v in job.items() if k not in {"work_root", "pid", "process_started", "force_actor"}}
+        result = {k: v for k, v in job.items() if k not in {
+            "work_root", "archive_path", "relocate", "pid", "process_started", "force_actor"
+        }}
         result["force_run"] = bool(result["force_run"])
         result["spec"] = json.loads(result["spec"])
         if result["state"] == "PENDING" and result["spec"]["after_job"]:
@@ -327,8 +335,9 @@ class Jobs:
                 return self.public(job)
             if job["state"] != "RUNNING":
                 c.execute(
-                    "UPDATE jobs SET state='CANCELLED',ended_at=?,cancel_requested=1,force_run=0,force_actor=NULL WHERE id=?",
-                    (time.time(), job_id),
+                    "UPDATE jobs SET state='CANCELLED',ended_at=?,cancel_requested=1,force_run=0,"
+                    "force_actor=NULL,relocate=? WHERE id=?",
+                    (time.time(), self.settings.relocates, job_id),
                 )
             else:
                 c.execute("UPDATE jobs SET cancel_requested=1 WHERE id=?", (job_id,))

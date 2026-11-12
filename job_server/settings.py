@@ -17,6 +17,11 @@ def pc_resources():
 class Settings:
     data_dir: str = "~/.moleditpy/job_server"
     job_dir: str = ""
+    finished_dir: str = ""
+    db_backup: bool = True
+    db_backup_hours: int = 24
+    db_backup_keep: int = 7
+    db_backup_dir: str = ""
     port: int = 8766
     cpus: int = 2
     memory_mb: int = 4096
@@ -96,6 +101,24 @@ class Settings:
         return Path(self.job_dir).expanduser().resolve() if self.job_dir else self.root
 
     @property
+    def finished_root(self):
+        """Where ended jobs are moved to, as <user>/<job name>; None leaves them in place."""
+        return Path(self.finished_dir).expanduser().resolve() if self.finished_dir else None
+
+    @property
+    def relocates(self):
+        """1 when jobs ending now should be moved to the finished-jobs folder."""
+        return int(bool(self.finished_dir))
+
+    @property
+    def backup_root(self):
+        return (
+            Path(self.db_backup_dir).expanduser().resolve()
+            if self.db_backup_dir
+            else self.root / "backups"
+        )
+
+    @property
     def execution_os(self):
         return (
             ("windows" if os.name == "nt" else "linux")
@@ -104,7 +127,10 @@ class Settings:
         )
 
     def validate(self):
-        for key in ("trusted_users_only", "allow_privileged", "web_ui", "allow_lan_http", "lan_tls"):
+        for key in (
+            "trusted_users_only", "allow_privileged", "web_ui", "allow_lan_http", "lan_tls",
+            "db_backup",
+        ):
             if type(getattr(self, key)) is not bool:
                 raise ValueError(f"{key} must be a boolean")
         from .connection import is_mdns_name, validate_server_url
@@ -163,6 +189,8 @@ class Settings:
             "max_connections",
             "token_seconds",
             "challenge_seconds",
+            "db_backup_hours",
+            "db_backup_keep",
         ):
             value = getattr(self, key)
             if type(value) is not int or value < 1:
@@ -172,6 +200,8 @@ class Settings:
         if self.execution_os not in {"linux", "windows", "wsl"}:
             raise ValueError("Invalid executor")
         self._validate_job_dir()
+        self._validate_finished_dir()
+        self._validate_backup_dir()
         self._validate_job_setup()
         if not self.trusted_users_only:
             raise ValueError(
@@ -219,6 +249,55 @@ class Settings:
             raise ValueError("Job working directory must be a real directory, not a link or file")
         if self.job_root.is_relative_to(self.root / "tls"):
             raise ValueError("Job working directory must not be inside the TLS folder")
+
+    @staticmethod
+    def _check_folder(value, label):
+        """A real absolute folder, or empty. Returns the resolved path or None."""
+        if not isinstance(value, str):
+            raise ValueError(f"{label} must be a path or empty")
+        if not value:
+            return None
+        if any(ord(c) < 32 for c in value):
+            raise ValueError(f"{label} contains invalid characters")
+        path = Path(value).expanduser()
+        if not path.is_absolute() or ".." in path.parts:
+            raise ValueError(f"{label} must be an absolute path")
+        from .files import is_link
+
+        if is_link(path) or (path.exists() and not path.is_dir()):
+            raise ValueError(f"{label} must be a real directory, not a link or file")
+        return path.resolve()
+
+    def _server_folders(self):
+        """Folders the server itself writes to, which no other setting may point into."""
+        folders = [self.root / name for name in ("jobs", "staging", "control", "logs", "tls")]
+        folders += [self.job_root / "jobs", self.job_root / "staging"]
+        return folders
+
+    def _validate_finished_dir(self):
+        path = self._check_folder(self.finished_dir, "Finished jobs folder")
+        if path is None:
+            return
+        if path in {self.root, self.job_root} or any(
+            path.is_relative_to(folder) for folder in [*self._server_folders(), self.backup_root]
+        ):
+            raise ValueError(
+                "Finished jobs folder must be separate from the data, job and backup folders"
+            )
+        if self.root.is_relative_to(path) or self.job_root.is_relative_to(path):
+            # A user named like the data folder would land inside it.
+            raise ValueError("Finished jobs folder must not contain the data or job folder")
+
+    def _validate_backup_dir(self):
+        path = self._check_folder(self.db_backup_dir, "Database backup folder")
+        if path is None:
+            return
+        if path in {self.root, self.job_root} or any(
+            path.is_relative_to(folder) for folder in self._server_folders()
+        ):
+            raise ValueError("Database backup folder must not be a server or job folder")
+        if self.finished_root and path.is_relative_to(self.finished_root):
+            raise ValueError("Database backup folder must not be inside the finished jobs folder")
 
     @classmethod
     def load(cls, path=None):
