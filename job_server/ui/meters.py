@@ -129,6 +129,10 @@ class Trend(QWidget):
         font.setPointSizeF(max(6.5, font.pointSizeF() - 1.5))
         return font
 
+    def _ceiling(self):
+        """Where the top-of-scale line sits: low enough for its label to sit above it."""
+        return QFontMetricsF(self._axis_font()).height() + 2
+
     def _plot_height(self):
         """The line's own height, above the small time axis."""
         return self.height() - QFontMetricsF(self._axis_font()).height() - 3
@@ -136,7 +140,8 @@ class Trend(QWidget):
     def _points(self):
         """(time, value, point) per sample; a None point where the line must break."""
         now, top = self.clock(), self._scale()
-        width, height = self.width() - 2, self._plot_height() - 4
+        ceiling = self._ceiling()
+        width, height = self.width() - 2, self._plot_height() - ceiling - 2
         points, previous = [], None
         for when, value in self._visible():
             # The server samples every few seconds; a longer silence is time it was not running.
@@ -145,7 +150,7 @@ class Trend(QWidget):
             previous = when
             points.append((when, value, None if value is None else QPointF(
                 1 + width * (1 - (now - when) / self.span),
-                2 + height * (1 - min(value, top) / top),
+                ceiling + height * (1 - min(value, top) / top),
             )))
         return points
 
@@ -157,7 +162,7 @@ class Trend(QWidget):
         painter.drawLine(QPointF(0, base), QPointF(self.width(), base))
         # The top of the scale: without it a line's height says nothing.
         painter.setPen(QPen(_ink(self, 0.22), 1))
-        painter.drawLine(QPointF(0, 2), QPointF(self.width(), 2))
+        painter.drawLine(QPointF(0, self._ceiling()), QPointF(self.width(), self._ceiling()))
         # Says what the line spans; without it the width means nothing.
         painter.setFont(self._axis_font())
         painter.setPen(_ink(self, 0.55))
@@ -197,7 +202,7 @@ class Trend(QWidget):
         metrics = QFontMetricsF(painter.font())
         text = self.top_label()
         width = metrics.horizontalAdvance(text) + 6
-        corner = QRectF(self.width() - width - 1, 4, width, metrics.height())
+        corner = QRectF(self.width() - width - 1, self._ceiling() - metrics.height() - 1, width, metrics.height())
         veil = QColor(self.palette().window().color())
         veil.setAlphaF(0.8)
         painter.setPen(Qt.PenStyle.NoPen)
