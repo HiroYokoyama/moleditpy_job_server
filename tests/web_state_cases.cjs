@@ -434,7 +434,24 @@ async function steadyLists() {
   await app.call('detail')(JOB_A,false);
   assert.equal(log.textContent,'kept');
 }
-const cases={browserHistory,steadyLists,userChip,insecureContext,sessionRestore,submittedAndCompleted,queuedRefresh,queueControls,expiredDownload,keylessLogin,authentication,refresh,details,accountsPolling,accountsOrdering,loginView,connectionFailure,connectionTimeout,sharedQueue};
+async function jobRows() {
+  const records=[{...job(JOB_A),state:'RUNNING',display_state:'RUNNING'},{...job(JOB_B),state:'FAILED',display_state:'FAILED'}];
+  const app=await application(steadyServer(()=>records));
+  signedIn(app);await app.call('refresh')();
+  const [running,failed]=app.get('#jobs-body').children;
+  app.get('#job-state-filter').value='problem';app.get('#job-state-filter').listeners.change();
+  assert.equal(running.hidden,true);assert.equal(failed.hidden,false);
+  app.get('#job-state-filter').value='active';app.get('#job-state-filter').listeners.change();
+  assert.equal(running.hidden,false);assert.equal(failed.hidden,true);
+  // A refresh keeps the filter applied.
+  records.push({...job('00000000-0000-0000-0000-00000000000c'),state:'DONE',display_state:'DONE'});
+  await app.call('refresh')();
+  assert.deepEqual(app.get('#jobs-body').children.map(row=>row.hidden),[false,true,true]);
+  running.listeners.click({target:{closest:()=>null}});await new Promise(done=>setTimeout(done,0));
+  assert.equal(app.state.job,JOB_A,'Clicking a row opens its job');
+  assert.equal(app.context.document.title,'Job details · Job Server');
+}
+const cases={jobRows,browserHistory,steadyLists,userChip,insecureContext,sessionRestore,submittedAndCompleted,queuedRefresh,queueControls,expiredDownload,keylessLogin,authentication,refresh,details,accountsPolling,accountsOrdering,loginView,connectionFailure,connectionTimeout,sharedQueue};
 async function runCases() {
   const selected=process.argv[3]==='all'?Object.keys(cases):[process.argv[3]];
   for(const name of selected){

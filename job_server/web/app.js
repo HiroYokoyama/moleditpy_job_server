@@ -29,6 +29,7 @@ function renderList(container,data,build) {
 function clearList(container) { container.replaceChildren(); delete container.dataset.rendered; }
 // Rewriting unchanged text still drops a selection the user is making in it.
 function setText(element,value) { if(element.textContent!==value)element.textContent=value; }
+function cores(count) { return count+(count===1?' core':' cores'); }
 function ahead(count) { return count===0 ? 'next in line' : count+' ahead'; }
 function renderQueue(queue) {
   const rows=[];
@@ -36,7 +37,7 @@ function renderQueue(queue) {
     const row=document.createElement('tr');if(entry.mine)row.className='mine';
     cell(row,place);const name=cell(row,entry.name,'job-name');
     cell(row,entry.mine?entry.owner+' (you)':entry.owner);
-    cell(row,entry.cpus+' cores · '+gb(entry.memory_mb)+' GB');
+    cell(row,cores(entry.cpus)+' · '+gb(entry.memory_mb)+' GB');
     const status=cell(row,'');const badge=document.createElement('span');badge.className='badge '+stateText.toLowerCase();badge.textContent=stateText;status.append(badge);
     if(entry.priority){const note=document.createElement('small');note.className='job-id';note.textContent='Priority '+entry.priority;status.append(note);}
     const open=cell(row,'');if(entry.job_id)button(open,'Open',()=>detail(entry.job_id));
@@ -200,7 +201,10 @@ function panel(name,{record=true,job=null}={}) {
   if (record) remember(name,job);
   document.querySelectorAll('.panel').forEach(element=>element.hidden=element.id!==name);
   document.querySelectorAll('.nav').forEach(element=>element.classList.toggle('active',element.dataset.panel===name));
-  $('#page-title').textContent={overview:'Overview',submit:'Submit a job',accounts:'Users & devices',account:'My account',detail:'Job details'}[name];
+  const title={overview:'Overview',submit:'Submit a job',accounts:'Users & devices',account:'My account',detail:'Job details'}[name];
+  $('#page-title').textContent=title;
+  // Named per page, so the browser's history and tab list say where each entry leads.
+  document.title=title+' · Job Server';
   if (name!=='detail') {state.job=null;state.detailRequest++;}
   if (name==='accounts') safe(accounts);
   if (name==='account'&&state.me) safe(accountPage);
@@ -235,10 +239,13 @@ async function refresh() {
     }
     renderList($('#jobs-body'),jobs.map(job=>[job.id,job.spec.name,admin?state.names[job.owner_id]||null:null,job.display_state,job.priority,job.force_run,job.queue_ahead,job.spec.resources.cpus_per_task,job.spec.resources.memory_mb,job.created_at]),()=>{const rows=[];
     for(const job of jobs){
-      const row=document.createElement('tr');const name=cell(row,job.spec.name,'job-name');
+      const row=document.createElement('tr');row.className='clickable';row.dataset.state=job.state;
+      // The whole row opens the job, unless the click was on a button or ends a text selection.
+      row.addEventListener('click',event=>{if(event.target?.closest?.('button')||String(globalThis.getSelection?.()||''))return;safe(()=>detail(job.id));});
+      const name=cell(row,job.spec.name,'job-name');
       const id=document.createElement('small');id.className='job-id';id.textContent=(admin?(state.names[job.owner_id]||'(deleted user)')+' · ':'')+job.id;name.append(id);
       const status=cell(row,'');const badge=document.createElement('span');badge.className='badge '+job.display_state.toLowerCase();badge.textContent=job.display_state;status.append(badge);const priority=document.createElement('small');priority.className='job-id';priority.textContent='Priority '+(job.priority??0)+(job.force_run?' · Force requested':'')+(typeof job.queue_ahead==='number'?' · '+ahead(job.queue_ahead):'');status.append(priority);
-      cell(row,job.spec.resources.cpus_per_task+' cores · '+gb(job.spec.resources.memory_mb)+' GB');cell(row,date(job.created_at));button(cell(row,''),'Open',()=>detail(job.id));rows.push(row);
+      cell(row,cores(job.spec.resources.cpus_per_task)+' · '+gb(job.spec.resources.memory_mb)+' GB');cell(row,date(job.created_at));button(cell(row,''),'Open',()=>detail(job.id));rows.push(row);
     }
     if(!jobs.length){const row=document.createElement('tr');const empty=cell(row,'No jobs on this page.','empty');empty.colSpan=5;rows.push(row);}
     return rows;});
@@ -253,11 +260,18 @@ async function refresh() {
     }
   }
 }
+const STATE_FILTERS={active:['UPLOADING','PENDING','RUNNING'],finished:['DONE','FAILED','CANCELLED','LOST'],problem:['FAILED','CANCELLED','LOST']};
 function filterJobs() {
   const words=($('#job-filter').value||'').toLowerCase().split(/\s+/).filter(Boolean);
-  for(const row of $('#jobs-body').children){const text=(row.textContent||'').toLowerCase();row.hidden=!words.every(word=>text.includes(word));}
+  const states=STATE_FILTERS[$('#job-state-filter').value||''];
+  for(const row of $('#jobs-body').children){
+    if(!row.dataset?.state){row.hidden=false;continue;}
+    const text=(row.textContent||'').toLowerCase();
+    row.hidden=!words.every(word=>text.includes(word))||(states!==undefined&&!states.includes(row.dataset.state));
+  }
 }
 $('#job-filter').addEventListener('input',filterJobs);
+$('#job-state-filter').addEventListener('change',filterJobs);
 $('#refresh').addEventListener('click',()=>safe(refresh));
 $('#previous-page').addEventListener('click',()=>{state.page=Math.max(0,state.page-1);safe(refresh);});
 $('#next-page').addEventListener('click',()=>{state.page++;safe(refresh);});

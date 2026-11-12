@@ -109,3 +109,48 @@ def test_job_detail_authentication_error_clears_previous_contents(details, monke
     assert dialog.files.rowCount() == 0
     assert "expired" in dialog.status.text()
     assert dialog.refresh_button.isEnabled()
+
+
+def test_refreshing_the_shown_job_keeps_it_on_screen_and_follows_until_it_ends(details, monkeypatch):
+    dashboard, dialog, queued, app = details
+    state = {"value": "RUNNING"}
+
+    def request(method, path):
+        if path.endswith("/files"):
+            return [{"path": "result.txt", "size": 4, "sha256": "0" * 64}]
+        if "/log" in path:
+            return {"size": 3, "offset": 0, "text": "line"}
+        return {**record("job-a"), "state": state["value"], "display_state": state["value"]}
+
+    monkeypatch.setattr(dashboard.client, "request", request)
+    dialog.show_job("job-a", "alice")
+    queued.pop(0).run()
+    app.processEvents()
+    assert dialog.follow.isActive(), "An unfinished job is followed"
+    item = dialog.files.item(0, 0)
+    dialog._follow()
+    assert dialog.values["id"].text() == "job-a", "A refresh does not blank the job first"
+    assert dialog.log.toPlainText() == "line"
+    state["value"] = "DONE"
+    queued.pop(0).run()
+    app.processEvents()
+    assert dialog.values["state"].text() == "DONE"
+    assert dialog.files.item(0, 0) is item, "Unchanged result files are not redrawn"
+    assert not dialog.follow.isActive(), "A finished job is no longer followed"
+    dialog._follow()
+    assert queued == []
+
+
+def test_the_log_stays_where_the_reader_scrolled(details):
+    _dashboard, dialog, _queued, _app = details
+    dialog.show()
+    dialog.tabs.setCurrentWidget(dialog.log)
+    dialog._show_log("\n".join(f"line {n}" for n in range(500)))
+    bar = dialog.log.verticalScrollBar()
+    assert bar.value() == bar.maximum(), "The first output opens at its end"
+    bar.setValue(10)
+    dialog._show_log("\n".join(f"line {n}" for n in range(501)))
+    assert bar.value() == 10
+    bar.setValue(bar.maximum())
+    dialog._show_log("\n".join(f"line {n}" for n in range(502)))
+    assert bar.value() == bar.maximum()
