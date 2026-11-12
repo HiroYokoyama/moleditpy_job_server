@@ -74,6 +74,25 @@ async function authentication() {
   assert.equal(app.state.token,null,'Late authentication must not restore a signed-out session');
   assert.equal(app.state.me,null);
 }
+async function userChip() {
+  const app=await application(async url=>{
+    if(url==='/api/v1/me')return response({username:'alice',role:'user'});
+    if(url==='/api/v1/capabilities')return response({});
+    if(url==='/api/v1/auth/logout')return response({signed_out:true});
+    return response(url.startsWith('/api/v1/jobs?')?[]:{running:[],waiting:[],paused:false});
+  });
+  app.state.token='token';app.state.expires=Date.now()/1000+3600;app.state.authenticated=Date.now()/1000;
+  await app.call('openSession')();
+  assert.equal(app.get('#signin').hidden,true,'Sign in is not relabelled as the user once signed in');
+  assert.equal(app.get('#user-chip').hidden,false);
+  assert.equal(app.get('#user-name').textContent,'alice');
+  assert.equal(app.get('#user-role').textContent,'User');
+  assert.equal(app.get('#user-initial').textContent,'A');
+  assert.equal(app.get('#signout').hidden,false);
+  app.get('#signout').listeners.click();
+  assert.equal(app.get('#user-chip').hidden,true);
+  assert.equal(app.get('#signin').hidden,false);
+}
 async function refresh() {
   const entered=deferred(), reply=deferred();
   const app=await application(async url=>{
@@ -344,7 +363,7 @@ async function sharedQueue() {
   assert.equal(rows[1].children[5].children.length,0);assert.equal(rows[2].children[5].children.length,1);
   assert.match(app.get('#jobs-body').children[0].children[1].children[1].textContent,/1 ahead$/);
 }
-const cases={insecureContext,sessionRestore,submittedAndCompleted,queuedRefresh,queueControls,expiredDownload,keylessLogin,authentication,refresh,details,accountsPolling,accountsOrdering,loginView,connectionFailure,connectionTimeout,sharedQueue};
+const cases={userChip,insecureContext,sessionRestore,submittedAndCompleted,queuedRefresh,queueControls,expiredDownload,keylessLogin,authentication,refresh,details,accountsPolling,accountsOrdering,loginView,connectionFailure,connectionTimeout,sharedQueue};
 async function runCases() {
   const selected=process.argv[3]==='all'?Object.keys(cases):[process.argv[3]];
   for(const name of selected){

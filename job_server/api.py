@@ -567,6 +567,21 @@ def create_app(settings=None, dispatch=True):
             db.event(c, "job_marked_lost", p["user_id"], job_id, previous_reason=job["reason"])
         return jobs.public(jobs.authorize(job_id, p))
 
+    @app.post(prefix + "/admin/jobs/move-finished")
+    def move_finished(p=Depends(admin)):
+        """Queue jobs that ended earlier, and were never moved, for the finished-jobs folder."""
+        if not settings.finished_dir:
+            reject(409, "finished_dir_unset",
+                   "Set a finished jobs folder and restart the server first")
+        with db.transaction() as c:
+            auth.admin(p)
+            queued = c.execute(
+                "UPDATE jobs SET relocate=1 WHERE state IN ('DONE','FAILED','CANCELLED','LOST') "
+                "AND archive_path='' AND relocate=0"
+            ).rowcount
+            db.event(c, "move_finished_requested", p["user_id"], queued=queued)
+        return {"queued": queued, "destination": str(settings.finished_root)}
+
     @app.get(prefix + "/admin/events")
     def events(
         p=Depends(admin), after: int = Query(0, ge=0, le=2**63 - 1),

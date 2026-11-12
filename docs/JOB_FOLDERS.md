@@ -10,6 +10,38 @@ server's SHA-256, and names are only ever shown as text.
 
 **From Job Manager:** see the end of this page.
 
+## Finished jobs folder
+
+In the desktop window's settings, **Finished jobs folder** (`finished_dir` in
+`settings.json`) moves each job that ends (done, failed, cancelled or lost) out of the
+working directory to `<finished folder>/<username>/<job name>`. A job name already used by
+that user gets `_2`, `_3`, and so on. Characters a folder name cannot hold become `_`.
+Jobs of deleted accounts go to `deleted-users`.
+
+- The move happens on a background thread, a few seconds after the job's supervisor exits.
+  A file still held open is retried every minute, up to ten times. A move to another drive
+  copies first and removes the original only after the copy is complete.
+- The new location is recorded. The desktop window, the web job folder and Job Manager
+  still open, browse and download the moved results through the same job ID.
+- The setting applies after a restart, to jobs that end from then on. **Move existing
+  finished jobs now** (or `POST /api/v1/admin/jobs/move-finished`, administrators only)
+  also moves jobs that ended earlier. Running and waiting jobs are never moved.
+- The folder must not be, or be inside, the data folder's job, control, log, TLS or backup
+  folders, and must not contain the data or job working directory.
+
+## Database backups
+
+The server copies `server.db` (accounts, jobs and activity) with SQLite's backup API, so
+each copy is consistent even while jobs are running. Defaults: on, every 24 hours
+(`db_backup_hours`), keeping the newest 7 copies (`db_backup_keep`), in
+`<data folder>/backups` unless `db_backup_dir` names another folder. A backup is taken
+at start-up when the newest copy is older than the interval. Copies are named
+`server-YYYYMMDD-HHMMSS.db`. Copies contain password hashes, so keep the folder private.
+A folder on another disk also protects against a disk failure.
+
+To restore, stop the server and replace `server.db` with a copy. Also delete
+`server.db-wal` and `server.db-shm` if they exist.
+
 ## API (Server 0.7.0)
 
 Authenticated clients can browse a virtual root containing committed job UUIDs.

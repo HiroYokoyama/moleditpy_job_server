@@ -154,6 +154,33 @@ def test_a_held_file_is_retried_later_not_copied(tmp_path):
         assert (client.app.state.settings.finished_root / "alice" / "busy").is_dir()
 
 
+def test_move_existing_queues_only_ended_unmoved_jobs(tmp_path):
+    data = tmp_path / "data"
+    plain = Settings(data_dir=str(data), cpus=2, memory_mb=1024)
+    with TestClient(create_app(plain, dispatch=False)) as client:
+        alice = enroll(client)
+        old = run_job(client, alice, name="before")
+        waiting = reserve(client, alice, name="waiting").json()["id"]
+        client.post(f"/api/v1/jobs/{waiting}/commit", headers=alice["headers"])
+        admin = enroll(client, "root", "admin")
+        unset = client.post("/api/v1/admin/jobs/move-finished", headers=admin["headers"])
+        assert unset.status_code == 409
+    with make_client(tmp_path) as client:
+        headers = enroll(client, "root2", "admin")["headers"]
+        user_call = client.post("/api/v1/admin/jobs/move-finished", headers=alice["headers"])
+        assert user_call.status_code in (401, 403)
+        moved = client.post("/api/v1/admin/jobs/move-finished", headers=headers)
+        assert moved.status_code == 200 and moved.json()["queued"] == 1
+        maintenance(client).relocate_finished()
+        root = client.app.state.settings.finished_root / "alice"
+        assert (root / "before").is_dir() and not (root / "waiting").exists()
+        assert client.app.state.db.one(
+            "SELECT relocate FROM jobs WHERE id=?", (old,)
+        )["relocate"] == 0
+        again_moved = client.post("/api/v1/admin/jobs/move-finished", headers=headers)
+        assert again_moved.json()["queued"] == 0
+
+
 def test_dashboard_folder_lookup_follows_the_move(tmp_path):
     from job_server.jobs import work_directory
 

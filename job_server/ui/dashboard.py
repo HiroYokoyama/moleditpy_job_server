@@ -666,6 +666,13 @@ class Dashboard(QDialog):
         )
         finished_help.setWordWrap(True)
         finished_layout.addWidget(finished_help)
+        move_existing = QPushButton("Move existing finished jobs now")
+        move_existing.setToolTip(
+            "Also move jobs that ended before the folder was set. Uses the folder the running "
+            "server was started with."
+        )
+        move_existing.clicked.connect(self.move_finished_jobs)
+        finished_layout.addWidget(move_existing, alignment=Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(finished)
 
         backup = QGroupBox("Database backups")
@@ -1899,6 +1906,26 @@ class Dashboard(QDialog):
     @staticmethod
     def _stuck(job):
         return job.get("state") == "RUNNING" and str(job.get("reason", "")).startswith("NEEDS_RECHECK")
+
+    def move_finished_jobs(self):
+        if not self.require_admin_registration():
+            return
+        if QMessageBox.question(
+            self, "Move finished jobs",
+            "Move every job that has already ended into the finished jobs folder, as "
+            "<user>/<job name>? Running and waiting jobs are not touched, and clients can "
+            "still download the moved results.\n\nThe running server's folder is used: save "
+            "and restart first if you have just changed it.",
+        ) != QMessageBox.StandardButton.Yes:
+            return
+
+        def done(result):
+            self.message.setText(
+                f"{result['queued']} finished job(s) are being moved to {result['destination']}."
+            )
+            self.refresh()
+
+        self.task(lambda: self.client.request("POST", "/admin/jobs/move-finished"), done)
 
     def mark_lost(self):
         identifier = self.selected(self.jobs)
