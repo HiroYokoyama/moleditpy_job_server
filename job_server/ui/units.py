@@ -7,10 +7,10 @@ MB_PER_GB = 1024
 
 
 def gb(mb):
-    """Return an MB amount in GiB to one decimal place, such as "16", "0.5" or "—"."""
+    """Return an MB amount in GiB, always to one decimal place, such as "16.0", "0.5" or "—"."""
     if mb is None or isinstance(mb, bool) or not isinstance(mb, (int, float)):
         return "—"
-    return f"{mb / MB_PER_GB:.1f}".removesuffix(".0")
+    return f"{mb / MB_PER_GB:.1f}"
 
 
 class FocusedWheel:

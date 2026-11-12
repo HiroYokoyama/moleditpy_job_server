@@ -216,7 +216,7 @@ def test_dashboard_shows_live_usage_apart_from_the_budget(dashboard, monkeypatch
         "cpu_percent": 37.4, "memory_percent": 50.0, "memory_used_mb": 8192, "memory_total_mb": 16384,
     })
     assert dashboard.metric_values["cpu_usage"].text() == "37%"
-    assert dashboard.metric_values["memory_usage"].text() == "8 / 16 GiB"
+    assert dashboard.metric_values["memory_usage"].text() == "8.0 / 16.0 GiB"
     assert dashboard.metric_bars["cpu_usage"].value() == 37
     assert dashboard.metric_values["cpu"].text() == "0 / 8"
     show_users(dashboard, monkeypatch, resources={"cpu_percent": None, "memory_percent": None})

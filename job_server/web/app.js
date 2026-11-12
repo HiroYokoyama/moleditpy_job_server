@@ -16,7 +16,7 @@ function randomId() {
 }
 function message(text) { $('#notice').textContent = text; $('#notice').hidden = !text; }
 // Memory is stored in MB but shown and entered in GiB (1024 MB, the unit Windows calls GB).
-function gb(mb) { return typeof mb==='number' ? String(Number((mb/1024).toFixed(1))) : '—'; }
+function gb(mb) { return typeof mb==='number' ? (mb/1024).toFixed(1) : '—'; }
 function date(value) { return value ? new Date(value*1000).toLocaleString() : '—'; }
 function cell(row,text,className='') { const td = document.createElement('td'); td.textContent=String(text); td.className=className; row.append(td); return td; }
 // Lists are rebuilt only when what they show has changed: rebuilding identical rows on
