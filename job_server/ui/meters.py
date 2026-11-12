@@ -69,6 +69,17 @@ class Gauge(QWidget):
         painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, f"{self._value}%" if self._known else "—")
 
 
+def round_top(largest):
+    """A round number above the largest count (1, 2, 5, 10, 20, 50...), so the line
+    never lies on the top of the plot and the scale changes rarely."""
+    step = 1.0
+    while True:
+        for factor in (1, 2, 5):
+            if factor * step > largest:
+                return factor * step
+        step *= 10
+
+
 class Trend(QWidget):
     """One measure over the chosen span, with its value under the pointer."""
 
@@ -105,8 +116,9 @@ class Trend(QWidget):
 
     def _scale(self):
         values = [value for _, value in self._visible() if value is not None]
-        top = self.maximum if self.maximum is not None else max(values + [1.0])
-        return top or 1.0
+        if self.maximum is not None:
+            return self.maximum or 1.0
+        return round_top(max(values + [0.0]))
 
     def top_label(self):
         """What the dashed line at the top of the plot stands for."""

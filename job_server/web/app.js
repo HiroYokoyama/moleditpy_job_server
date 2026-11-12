@@ -59,10 +59,12 @@ function mergeHistory(reply) {
   while(trendState.rows.length&&trendState.rows[0][0]<horizon)trendState.rows.shift();
   for(const key of Object.keys(TRENDS))drawTrend(key);
 }
-// The value the top of the plot stands for: 100% for a share, the largest count shown for jobs.
+// The value the top of the plot stands for: 100% for a share, a round number above the counts shown for jobs.
 function trendTop(key,rows=trendState.rows.filter(row=>row[0]>=Date.now()/1000-trendState.span)) {
   if(!['running','pending'].includes(key))return 100;
-  return Math.max(1,...rows.map(row=>row[TRENDS[key]]).filter(value=>typeof value==='number'));
+  // A round number above the largest count (1, 2, 5, 10, 20, 50...), so the line never lies on the top.
+  const largest=Math.max(0,...rows.map(row=>row[TRENDS[key]]).filter(value=>typeof value==='number'));
+  for(let step=1;;step*=10)for(const factor of [1,2,5])if(factor*step>largest)return factor*step;
 }
 function trendPoints(key,width,height,now=Date.now()/1000) {
   const column=TRENDS[key],rows=trendState.rows.filter(row=>row[0]>=now-trendState.span);

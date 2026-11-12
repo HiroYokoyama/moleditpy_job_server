@@ -40,7 +40,11 @@ def test_a_count_trend_scales_to_its_largest_value(qt):
     trend.set_samples([(1.0, 0), (2.0, 4)])
     low, high = (point for _, _, point in trend._points())
     assert high.y() < low.y()
-    assert trend._scale() == 4
+    # The scale is a round number above the largest count, so the line has headroom.
+    assert trend._scale() == 5
+    from job_server.ui.meters import round_top
+
+    assert [round_top(n) for n in (0, 1, 2, 4, 5, 9, 10, 37, 50)] == [1, 2, 5, 5, 10, 10, 20, 50, 100]
     assert trend.describe(0, 4.0).endswith("— 4")
 
 
