@@ -164,7 +164,6 @@ class Trend(QWidget):
         axis = QRectF(0, self._plot_height(), self.width(), self.height() - self._plot_height())
         painter.drawText(axis, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom, f"{self.span_label} ago")
         painter.drawText(axis, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom, "now")
-        painter.drawText(axis, Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom, self.top_label())
         color = QColor(TREND_DARK if _dark(self) else TREND_LIGHT)
         path, started = QPainterPath(), False
         for _when, _value, point in self._points():
@@ -193,6 +192,19 @@ class Trend(QWidget):
         painter.setPen(QPen(color, 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap,
                             Qt.PenJoinStyle.RoundJoin))
         painter.drawPath(path)
+        # What the top line stands for, in the corner it marks, over a veil so a
+        # line passing under it does not hide it.
+        metrics = QFontMetricsF(painter.font())
+        text = self.top_label()
+        width = metrics.horizontalAdvance(text) + 6
+        corner = QRectF(self.width() - width - 1, 4, width, metrics.height())
+        veil = QColor(self.palette().window().color())
+        veil.setAlphaF(0.8)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(veil)
+        painter.drawRoundedRect(corner, 3, 3)
+        painter.setPen(_ink(self, 0.55))
+        painter.drawText(corner, Qt.AlignmentFlag.AlignCenter, text)
         if self._hover is not None:
             _when, _value, point = self._hover
             painter.setPen(QPen(_ink(self, 0.35), 1))
