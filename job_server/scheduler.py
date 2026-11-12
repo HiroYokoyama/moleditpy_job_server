@@ -10,6 +10,7 @@ from pathlib import Path
 import psutil
 
 from .jobs import PENDING_IN_ORDER, TERMINAL
+from .history import ResourceHistory
 from .maintenance import Maintenance
 from .worker import atomic_json
 
@@ -21,6 +22,7 @@ class Scheduler:
         self.thread = None
         self.children = []
         self.maintenance = Maintenance(db, jobs, settings, self.supervisor_alive)
+        self.history = ResourceHistory(self.resources, host_usage)
 
     def start(self):
         if self.thread and self.thread.is_alive():
@@ -30,10 +32,12 @@ class Scheduler:
         self.thread.start()
         # Moves and backups can take minutes; they never hold up dispatching.
         self.maintenance.start()
+        self.history.start()
 
     def stop(self):
         self.stop_event.set()
         self.maintenance.stop()
+        self.history.stop()
         if self.thread:
             self.thread.join(timeout=5)
 

@@ -60,7 +60,7 @@ Right-click a job, user or device for its actions. The same actions are in the m
 
 | Tab | Use it to |
 |---|---|
-| **Dashboard** | See server state, live CPU and memory, reservations and jobs. Each figure has a dial and a 15-minute trend line; point at a line to read its value. Filter jobs, open details, set priority, force run, cancel or open the job folder. The lists refresh every few seconds without moving your selection or scroll position. |
+| **Dashboard** | See server state, live CPU and memory, reservations and jobs. Each figure has a dial and a 15-minute trend line, recorded while the window is open; point at a line to read its value. Filter jobs, open details, set priority, force run, cancel or open the job folder. The lists refresh every few seconds without moving your selection or scroll position. |
 | **Users & Devices** | Add users or administrators, reset passwords, enable, disable or delete users, switch user and administrator, and revoke devices. Change your own password. |
 | **Activity** | Read recent logins, account changes and job events. |
 | **Settings** | Set the network, budgets, commands run before each job, the job folder and the runtime. When a save changes something while the server runs, the window offers the restart that applies it. |
@@ -79,6 +79,11 @@ password and revoke their own devices. **Shared queue** shows every user's runni
 waiting jobs by name and owner, in the order they start, and each waiting job says how
 many jobs are ahead of it. Commands, files and output stay private to each job's owner. Administrators also get queue controls and
 **Users & devices**.
+
+The overview shows the same dials and 15-minute trend lines as the desktop window; point at
+a line to read a value. The lines are drawn from that browser tab's own readings while you
+are signed in: the server keeps no history, so they start empty after a reload and are
+cleared when you sign out.
 
 Click a job row to open it, and narrow the list by text or by state (unfinished, finished,
 failed or stopped). Each page has its own address, so the browser's Back and Forward move

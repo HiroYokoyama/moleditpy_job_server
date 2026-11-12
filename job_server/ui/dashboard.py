@@ -1,7 +1,8 @@
 
 from ._qt_callbacks import connect_queued
-from .meters import Gauge, Trend, percent
+from .meters import DEFAULT_SPAN, SPANS, Gauge, Trend, percent
 import json
+import logging
 import os
 import sqlite3
 import subprocess
@@ -18,6 +19,7 @@ from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal, Qt
 from PySide6.QtGui import QIcon, QAction, QBrush, QColor
 from PySide6.QtWidgets import (
     QApplication,
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QGridLayout,
@@ -41,6 +43,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QAbstractItemView,
     QTabWidget,
+    QToolButton,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -133,6 +136,8 @@ class Dashboard(QDialog):
         self.setup_dialog = None
         self._setup_checked = False
         self.detail_dialog = None
+        self.history_rows = deque()
+        self.span = DEFAULT_SPAN
         self.job_records = {}
         self.usernames = {}
         self.user_records = {}
@@ -243,7 +248,7 @@ class Dashboard(QDialog):
         for index, (key, title) in enumerate((
             ("running", "Running jobs"), ("cpu_usage", "CPU in use now (whole PC)"),
             ("cpu", "CPU reserved / budget"), ("pending", "Waiting jobs"),
-            ("memory_usage", "Memory in use now (whole PC)"), ("memory", "Memory reserved / budget"),
+            ("memory_usage", "Memory in use now (whole PC, usable)"), ("memory", "Memory reserved / budget"),
         )):
             card = QGroupBox(title)
             card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
@@ -257,7 +262,7 @@ class Dashboard(QDialog):
             column.addWidget(value)
             self.metric_values[key] = value
             share = key in ("cpu", "memory", "cpu_usage", "memory_usage")
-            # The last fifteen minutes under each figure, so a spike between glances still shows.
+            # Recent history under each figure, so a spike between glances still shows.
             trend = Trend("%" if share else "", 100 if share else None)
             column.addWidget(trend)
             self.metric_trends[key] = trend
@@ -271,9 +276,22 @@ class Dashboard(QDialog):
             content.addLayout(column, 1)
             metrics.addWidget(card, index // 3, index % 3)
         layout.addLayout(metrics)
-        note = QLabel("Lines show the last 15 minutes; point at one to read a value. Gaps are times the server did not answer.")
+        under = QHBoxLayout()
+        note = QLabel("Point at a line to read its value. Gaps are times the server was not running.")
         note.setEnabled(False)
-        layout.addWidget(note)
+        under.addWidget(note, 1)
+        # The span the lines cover; the server keeps the longest, so switching is instant.
+        self.span_buttons = QButtonGroup(self)
+        for seconds, label in SPANS:
+            button = QToolButton()
+            button.setText(label)
+            button.setCheckable(True)
+            button.setChecked((seconds, label) == DEFAULT_SPAN)
+            button.setAutoRaise(True)
+            button.clicked.connect(lambda _=False, span=(seconds, label): self._set_span(span))
+            self.span_buttons.addButton(button)
+            under.addWidget(button)
+        layout.addLayout(under)
         filters = QHBoxLayout()
         self.job_caption = QLabel("Jobs — right-click for actions")
         filters.addWidget(self.job_caption, 1)
@@ -585,7 +603,7 @@ class Dashboard(QDialog):
         ):
             limits.addRow(label, number(key, maximum))
         cpus, memory_mb = pc_resources()
-        self.match_pc_button = QPushButton(f"Use this PC's size ({cpus} CPUs, {gb(memory_mb)} GB)")
+        self.match_pc_button = QPushButton(f"Use this PC's size ({cpus} CPUs, {gb(memory_mb)} GiB)")
 
         def match_pc():
             self.fields["cpus"].setValue(cpus)
@@ -792,6 +810,17 @@ class Dashboard(QDialog):
             return
 
         page = self.job_page
+        since = self.history_rows[-1][0] if self.history_rows else 0
+        client = self.client
+
+        def history():
+            # The lines are extra: a daemon from before 0.12 has no history, and a failed
+            # read must not take the figures and job list down with it.
+            try:
+                return client.request("GET", f"/system/resources/history?since={since}")
+            except Exception as exc:  # noqa: BLE001 - logged; the rest of the refresh goes on
+                logging.info("Job Server: load history unavailable: %s", exc)
+                return None
 
         def work():
             try:
@@ -816,6 +845,7 @@ class Dashboard(QDialog):
                     ),
                     "users": self.client.request("GET", "/admin/users"),
                     "devices": self.client.request("GET", "/admin/devices"),
+                    "history": history(),
                 }
             except Exception as exc:
                 # /health answered, so the daemon is online; only the signed-in calls failed.
@@ -864,7 +894,7 @@ class Dashboard(QDialog):
                 f"{resource.get('reserved_cpus', '—')} / {resource.get('cpus', '—')}"
             )
             self.metric_values["memory"].setText(
-                f"{gb(resource.get('reserved_memory_mb'))} / {gb(resource.get('memory_mb'))} GB"
+                f"{gb(resource.get('reserved_memory_mb'))} / {gb(resource.get('memory_mb'))} GiB"
             )
             self._set_usage("cpu", resource.get("reserved_cpus"), resource.get("cpus"))
             self._set_usage("memory", resource.get("reserved_memory_mb"), resource.get("memory_mb"))
@@ -872,17 +902,11 @@ class Dashboard(QDialog):
             self.metric_values["cpu_usage"].setText("—" if cpu_now is None else f"{cpu_now:.0f}%")
             self.metric_values["memory_usage"].setText(
                 "—" if memory_now is None
-                else f"{gb(resource.get('memory_used_mb'))} / {gb(resource.get('memory_total_mb'))} GB"
+                else f"{gb(resource.get('memory_used_mb'))} / {gb(resource.get('memory_total_mb'))} GiB"
             )
             self._set_usage("cpu_usage", cpu_now, 100)
             self._set_usage("memory_usage", memory_now, 100)
-            for key, sample in (
-                ("running", resource.get("running")), ("pending", resource.get("pending")),
-                ("cpu_usage", cpu_now), ("memory_usage", memory_now),
-                ("cpu", percent(resource.get("reserved_cpus"), resource.get("cpus"))),
-                ("memory", percent(resource.get("reserved_memory_mb"), resource.get("memory_mb"))),
-            ):
-                self.metric_trends[key].add(sample)
+            self._merge_history(data.get("history"))
             usernames = {u["id"]: u["username"] for u in data["users"]}
             self.usernames = usernames
             self.job_records = {job["id"]: job for job in data["jobs"]}
@@ -966,14 +990,37 @@ class Dashboard(QDialog):
             value.setText("—")
         for key in self.metric_bars:
             self._set_usage(key, None, None)
+        self.history_rows.clear()
         for trend in self.metric_trends.values():
-            trend.add(None)  # A gap in the line, not a fall to zero.
+            trend.set_samples([])
         for table in (self.jobs, self.users, self.devices, self.activity):
             self.fill(table, [])
         self._update_job_actions()
         self._update_account_actions()
         if self.detail_dialog is not None:
             self.detail_dialog.invalidate("Connection unavailable. Sign in and refresh to view this job.")
+
+    # Where each figure sits in a history sample from the server.
+    HISTORY_COLUMNS = {"running": 1, "pending": 2, "cpu_usage": 3, "memory_usage": 4, "cpu": 5, "memory": 6}
+
+    def _merge_history(self, history):
+        if not history:
+            return
+        last = self.history_rows[-1][0] if self.history_rows else 0
+        self.history_rows.extend(row for row in history["samples"] if row[0] > last)
+        horizon = time.time() - history.get("keep_seconds", SPANS[-1][0])
+        while self.history_rows and self.history_rows[0][0] < horizon:
+            self.history_rows.popleft()
+        gap = 3 * history.get("interval", 10)
+        for key, column in self.HISTORY_COLUMNS.items():
+            self.metric_trends[key].set_samples(
+                [(row[0], row[column]) for row in self.history_rows], gap=gap
+            )
+
+    def _set_span(self, span):
+        self.span = span
+        for trend in self.metric_trends.values():
+            trend.set_span(*span)
 
     def _set_usage(self, key, used, budget):
         share = percent(used, budget)

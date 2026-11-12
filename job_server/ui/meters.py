@@ -1,13 +1,14 @@
 """A dial for a share of capacity, and a trend line of the last few minutes."""
 
 import time
-from collections import deque
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QSizePolicy, QToolTip, QWidget
 
-HISTORY_SECONDS = 15 * 60
+# The spans the dashboard offers, as (seconds, label); the server keeps the longest.
+SPANS = ((5 * 60, "5 min"), (15 * 60, "15 min"), (60 * 60, "1 h"), (6 * 60 * 60, "6 h"))
+DEFAULT_SPAN = SPANS[1]
 TREND_LIGHT, TREND_DARK = "#2a78d6", "#3987e5"
 
 
@@ -69,51 +70,81 @@ class Gauge(QWidget):
 
 
 class Trend(QWidget):
-    """The last fifteen minutes of one measure, with its value under the pointer."""
+    """One measure over the chosen span, with its value under the pointer."""
 
-    def __init__(self, unit="", maximum=None, parent=None):
+    def __init__(self, unit="", maximum=None, parent=None, clock=time.time):
         super().__init__(parent)
         self.unit = unit
         self.maximum = maximum
-        self.samples = deque()
+        self.clock = clock
+        self.samples = []
+        self.span, self.span_label = DEFAULT_SPAN
+        self.gap = 30.0
         self._hover = None
         self.setMouseTracking(True)
-        self.setMinimumHeight(30)
-        self.setMaximumHeight(34)
+        self.setMinimumHeight(44)
+        self.setMaximumHeight(48)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
-    def add(self, value, when=None):
-        """Record a sample; None marks a gap, such as the server being off."""
-        when = time.time() if when is None else when
-        self.samples.append((when, None if value is None else float(value)))
-        while self.samples and self.samples[0][0] < when - HISTORY_SECONDS:
-            self.samples.popleft()
+    def set_samples(self, samples, gap=None):
+        """``(time, value)`` pairs, oldest first; None or a missing stretch breaks the line."""
+        self.samples = [(when, None if value is None else float(value)) for when, value in samples]
+        if gap is not None:
+            self.gap = gap
+        self._hover = None
         self.update()
 
+    def set_span(self, seconds, label):
+        self.span, self.span_label = seconds, label
+        self._hover = None
+        self.update()
+
+    def _visible(self):
+        horizon = self.clock() - self.span
+        return [(when, value) for when, value in self.samples if when >= horizon]
+
     def _scale(self):
-        values = [value for _, value in self.samples if value is not None]
+        values = [value for _, value in self._visible() if value is not None]
         top = self.maximum if self.maximum is not None else max(values + [1.0])
         return top or 1.0
 
+    def _axis_font(self):
+        font = QFont(self.font())
+        font.setPointSizeF(max(6.5, font.pointSizeF() - 1.5))
+        return font
+
+    def _plot_height(self):
+        """The line's own height, above the small time axis."""
+        return self.height() - QFontMetricsF(self._axis_font()).height() - 3
+
     def _points(self):
-        if not self.samples:
-            return []
-        now = self.samples[-1][0]
-        top = self._scale()
-        width, height = self.width() - 2, self.height() - 4
-        return [
-            (when, value, None if value is None else QPointF(
-                1 + width * (1 - (now - when) / HISTORY_SECONDS),
+        """(time, value, point) per sample; a None point where the line must break."""
+        now, top = self.clock(), self._scale()
+        width, height = self.width() - 2, self._plot_height() - 4
+        points, previous = [], None
+        for when, value in self._visible():
+            # The server samples every few seconds; a longer silence is time it was not running.
+            if previous is not None and when - previous > self.gap:
+                points.append((previous, None, None))
+            previous = when
+            points.append((when, value, None if value is None else QPointF(
+                1 + width * (1 - (now - when) / self.span),
                 2 + height * (1 - min(value, top) / top),
-            ))
-            for when, value in self.samples
-        ]
+            )))
+        return points
 
     def paintEvent(self, _event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(QPen(_ink(self, 0.12), 1))
-        painter.drawLine(QPointF(0, self.height() - 1.5), QPointF(self.width(), self.height() - 1.5))
+        base = self._plot_height() - 1.5
+        painter.drawLine(QPointF(0, base), QPointF(self.width(), base))
+        # Says what the line spans; without it the width means nothing.
+        painter.setFont(self._axis_font())
+        painter.setPen(_ink(self, 0.55))
+        axis = QRectF(0, self._plot_height(), self.width(), self.height() - self._plot_height())
+        painter.drawText(axis, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom, f"{self.span_label} ago")
+        painter.drawText(axis, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom, "now")
         color = QColor(TREND_DARK if _dark(self) else TREND_LIGHT)
         path, started = QPainterPath(), False
         for _when, _value, point in self._points():
@@ -130,7 +161,7 @@ class Trend(QWidget):
         if self._hover is not None:
             _when, _value, point = self._hover
             painter.setPen(QPen(_ink(self, 0.35), 1))
-            painter.drawLine(QPointF(point.x(), 0), QPointF(point.x(), self.height()))
+            painter.drawLine(QPointF(point.x(), 0), QPointF(point.x(), self._plot_height()))
             painter.setPen(QPen(self.palette().window().color(), 2))
             painter.setBrush(color)
             painter.drawEllipse(point, 4, 4)

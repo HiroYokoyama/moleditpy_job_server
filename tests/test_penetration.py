@@ -68,6 +68,7 @@ PROTECTED = [
     ("GET", "/browse", None),
     ("GET", "/browse/stat", None),
     ("GET", "/system/resources", None),
+    ("GET", "/system/resources/history", None),
     ("GET", "/queue", None),
     ("GET", "/admin/jobs", None),
     ("GET", "/admin/users", None),

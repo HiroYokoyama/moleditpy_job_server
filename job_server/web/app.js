@@ -15,7 +15,7 @@ function randomId() {
   return [hex.slice(0,8),hex.slice(8,12),hex.slice(12,16),hex.slice(16,20),hex.slice(20)].join('-');
 }
 function message(text) { $('#notice').textContent = text; $('#notice').hidden = !text; }
-// Memory is stored in MB but shown and entered in GB.
+// Memory is stored in MB but shown and entered in GiB (1024 MB, the unit Windows calls GB).
 function gb(mb) { return typeof mb==='number' ? String(Number((mb/1024).toFixed(1))) : '—'; }
 function date(value) { return value ? new Date(value*1000).toLocaleString() : '—'; }
 function cell(row,text,className='') { const td = document.createElement('td'); td.textContent=String(text); td.className=className; row.append(td); return td; }
@@ -29,6 +29,69 @@ function renderList(container,data,build) {
 function clearList(container) { container.replaceChildren(); delete container.dataset.rendered; }
 // Rewriting unchanged text still drops a selection the user is making in it.
 function setText(element,value) { if(element.textContent!==value)element.textContent=value; }
+// Dials and fifteen-minute trend lines for the overview figures. The samples are this
+// tab's own readings: the server keeps no history, and a reload starts the lines again.
+const HISTORY_SECONDS=900, TRENDS={running:[],pending:[],'cpu-now':[],'memory-now':[],cpu:[],memory:[]};
+const SVG='http://www.w3.org/2000/svg';
+function share(used,total) { return typeof used==='number'&&typeof total==='number'&&total>0?Math.max(0,Math.min(100,100*used/total)):null; }
+function svgElement(name,attributes) { const element=document.createElementNS(SVG,name); for(const [key,value] of Object.entries(attributes))element.setAttribute(key,String(value)); return element; }
+// A 270-degree dial opening at the bottom, filled clockwise from its lower left.
+function dialArc(fraction) {
+  const point=angle=>(22+17*Math.cos(angle)).toFixed(2)+' '+(22+17*Math.sin(angle)).toFixed(2);
+  const start=Math.PI*3/4,sweep=Math.PI*3/2*Math.min(fraction,0.9999);
+  return 'M'+point(start)+'A17 17 0 '+(sweep>Math.PI?1:0)+' 1 '+point(start+sweep);
+}
+function dial(key,value) {
+  const known=typeof value==='number';
+  const label=$('#dial-text-'+key);if(label)setText(label,known?Math.round(value)+'%':'—');
+  const arc=$('#dial-'+key);if(typeof arc?.setAttribute!=='function')return;
+  arc.setAttribute('d',known&&value>0?dialArc(value/100):'');
+  arc.setAttribute('class','dial-value'+(!known||value<=0?' unknown':value>=90?' high':value>=70?' warn':''));
+}
+function record(key,value,now=Date.now()/1000) {
+  const list=TRENDS[key];list.push([now,typeof value==='number'?value:null]);
+  while(list.length&&list[0][0]<now-HISTORY_SECONDS)list.shift();
+  drawTrend(key);
+}
+function trendPoints(key,width,height) {
+  const list=TRENDS[key],values=list.map(sample=>sample[1]).filter(value=>value!==null);
+  const top=['running','pending'].includes(key)?Math.max(1,...values):100,now=list.length?list[list.length-1][0]:0;
+  return list.map(([when,value])=>({when,value,x:value===null?null:width*(1-(now-when)/HISTORY_SECONDS),y:value===null?null:2+(height-4)*(1-Math.min(value,top)/top)}));
+}
+function drawTrend(key,hover=null) {
+  const svg=$('#trend-'+key);if(typeof svg?.setAttribute!=='function'||typeof document.createElementNS!=='function')return;
+  const width=svg.clientWidth||200,height=svg.clientHeight||30;
+  svg.setAttribute('viewBox','0 0 '+width+' '+height);
+  let path='',drawing=false;
+  for(const point of trendPoints(key,width,height)){
+    if(point.x===null){drawing=false;continue;}
+    path+=(drawing?'L':'M')+point.x.toFixed(1)+' '+point.y.toFixed(1);drawing=true;
+  }
+  const parts=[svgElement('line',{class:'trend-base',x1:0,x2:width,y1:height-0.5,y2:height-0.5}),svgElement('path',{class:'trend-line',d:path})];
+  if(hover)parts.push(svgElement('line',{class:'trend-cross',x1:hover.x,x2:hover.x,y1:0,y2:height}),svgElement('circle',{class:'trend-dot',cx:hover.x,cy:hover.y,r:4}));
+  svg.replaceChildren(...parts);
+}
+function describeSample(key,point) {
+  const amount=['running','pending'].includes(key)?String(Math.round(point.value)):Math.round(point.value)+'%';
+  return new Date(point.when*1000).toLocaleTimeString()+' — '+amount;
+}
+for(const key of Object.keys(TRENDS)){
+  const svg=$('#trend-'+key);
+  svg.addEventListener('pointermove',event=>{
+    const box=svg.getBoundingClientRect?.();if(!box)return;
+    const x=event.clientX-box.left,points=trendPoints(key,box.width,box.height).filter(point=>point.x!==null);
+    const nearest=points.reduce((best,point)=>!best||Math.abs(point.x-x)<Math.abs(best.x-x)?point:best,null);
+    const tip=$('#trend-tip');
+    // Only a reading close to the pointer is described: across a gap there is nothing to read.
+    if(!nearest||Math.abs(nearest.x-x)>12){tip.hidden=true;drawTrend(key);return;}
+    tip.textContent=describeSample(key,nearest);tip.hidden=false;
+    const room=(globalThis.innerWidth||Infinity)-(tip.offsetWidth||0)-8;tip.style.left=Math.min(event.clientX+12,room)+'px';tip.style.top=(event.clientY-38)+'px';
+    drawTrend(key,nearest);
+  });
+  svg.addEventListener('pointerleave',()=>{$('#trend-tip').hidden=true;drawTrend(key);});
+}
+globalThis.addEventListener?.('resize',()=>{for(const key of Object.keys(TRENDS))drawTrend(key);});
+function clearTrends() { for(const key of Object.keys(TRENDS)){TRENDS[key].length=0;drawTrend(key);if(!['running','pending'].includes(key))dial(key,null);} }
 function cores(count) { return count+(count===1?' core':' cores'); }
 function ahead(count) { return count===0 ? 'next in line' : count+' ahead'; }
 function renderQueue(queue) {
@@ -37,7 +100,7 @@ function renderQueue(queue) {
     const row=document.createElement('tr');if(entry.mine)row.className='mine';
     cell(row,place);const name=cell(row,entry.name,'job-name');
     cell(row,entry.mine?entry.owner+' (you)':entry.owner);
-    cell(row,cores(entry.cpus)+' · '+gb(entry.memory_mb)+' GB');
+    cell(row,cores(entry.cpus)+' · '+gb(entry.memory_mb)+' GiB');
     const status=cell(row,'');const badge=document.createElement('span');badge.className='badge '+stateText.toLowerCase();badge.textContent=stateText;status.append(badge);
     if(entry.priority){const note=document.createElement('small');note.className='job-id';note.textContent='Priority '+entry.priority;status.append(note);}
     const open=cell(row,'');if(entry.job_id)button(open,'Open',()=>detail(entry.job_id));
@@ -84,6 +147,7 @@ function clearSession() {
   for(const id of ['jobs-body','queue-body','users-body','devices-body','result-files','my-devices-body','browser-body','activity-body'])clearList($('#'+id));
   for(const id of ['log','detail-name','detail-id','detail-spec','queue-summary'])$('#'+id).textContent='';
   for(const id of ['running','pending','cpu','memory','cpu-now','memory-now'])$('#'+id).textContent='—';
+  clearTrends();
   $('#job-controls').hidden=true;panel('overview',{record:false});setSignedIn(false);return state.generation;
 }
 
@@ -228,6 +292,9 @@ async function refresh() {
     $('#memory').textContent=gb(resource.reserved_memory_mb)+' / '+gb(resource.memory_mb);
     $('#cpu-now').textContent=typeof resource.cpu_percent==='number'?Math.round(resource.cpu_percent)+'%':'—';
     $('#memory-now').textContent=typeof resource.memory_percent==='number'?gb(resource.memory_used_mb)+' / '+gb(resource.memory_total_mb):'—';
+    const shares={'cpu-now':typeof resource.cpu_percent==='number'?resource.cpu_percent:null,'memory-now':typeof resource.memory_percent==='number'?resource.memory_percent:null,cpu:share(resource.reserved_cpus,resource.cpus),memory:share(resource.reserved_memory_mb,resource.memory_mb)};
+    for(const [key,value] of Object.entries(shares)){dial(key,value);record(key,value);}
+    record('running',resource.running);record('pending',resource.pending);
     renderQueue(await api('GET','/queue'));
     state.paused=resource.paused;$('#queue-label').textContent=resource.paused?'Queue paused':'Shared queue';$('#pause').textContent=resource.paused?'Resume queue':'Pause queue';
     const page=state.page;
@@ -245,14 +312,14 @@ async function refresh() {
       const name=cell(row,job.spec.name,'job-name');
       const id=document.createElement('small');id.className='job-id';id.textContent=(admin?(state.names[job.owner_id]||'(deleted user)')+' · ':'')+job.id;name.append(id);
       const status=cell(row,'');const badge=document.createElement('span');badge.className='badge '+job.display_state.toLowerCase();badge.textContent=job.display_state;status.append(badge);const priority=document.createElement('small');priority.className='job-id';priority.textContent='Priority '+(job.priority??0)+(job.force_run?' · Force requested':'')+(typeof job.queue_ahead==='number'?' · '+ahead(job.queue_ahead):'');status.append(priority);
-      cell(row,cores(job.spec.resources.cpus_per_task)+' · '+gb(job.spec.resources.memory_mb)+' GB');cell(row,date(job.created_at));button(cell(row,''),'Open',()=>detail(job.id));rows.push(row);
+      cell(row,cores(job.spec.resources.cpus_per_task)+' · '+gb(job.spec.resources.memory_mb)+' GiB');cell(row,date(job.created_at));button(cell(row,''),'Open',()=>detail(job.id));rows.push(row);
     }
     if(!jobs.length){const row=document.createElement('tr');const empty=cell(row,'No jobs on this page.','empty');empty.colSpan=5;rows.push(row);}
     return rows;});
     filterJobs();
     $('#previous-page').disabled=state.page===0;$('#next-page').disabled=jobs.length<50;$('#page-number').textContent='Page '+(state.page+1);
     if(state.job)await detail(state.job,false);
-  } catch(error) {if(!error.staleSession)connection('Connection failed');throw error;
+  } catch(error) {if(!error.staleSession){connection('Connection failed');if(state.me)for(const key of Object.keys(TRENDS))record(key,null);}throw error;
   } finally {
     if(state.busyGeneration===generation){
       state.busy=false;
@@ -313,7 +380,7 @@ async function detail(id,reset=true,{record=true}={}){
   $('#force-job').textContent=job.force_run?'Cancel force request':'Force run…';
   $('#force-job').disabled=$('#set-priority').disabled=state.queueBusy;
   setText($('#detail-name'),job.spec.name+' · '+job.display_state+(typeof job.queue_ahead==='number'?' · '+ahead(job.queue_ahead):''));setText($('#detail-id'),id);
-  setText($('#detail-spec'),job.spec.command+'\n\n'+job.spec.resources.cpus_per_task+' CPU cores · '+gb(job.spec.resources.memory_mb)+' GB · exit code '+(job.exit_code??'—')+(job.reason?'\n'+job.reason:''));
+  setText($('#detail-spec'),job.spec.command+'\n\n'+job.spec.resources.cpus_per_task+' CPU cores · '+gb(job.spec.resources.memory_mb)+' GiB · exit code '+(job.exit_code??'—')+(job.reason?'\n'+job.reason:''));
   $('#cancel-job').disabled=['DONE','FAILED','CANCELLED','LOST'].includes(job.state);
   $('#mark-lost').hidden=state.me?.role!=='admin'||job.state!=='RUNNING'||!String(job.reason||'').startsWith('NEEDS_RECHECK');
   const log=await api('GET',`/jobs/${id}/log?offset=${state.offset}&limit=65536`);if(!current())return;
