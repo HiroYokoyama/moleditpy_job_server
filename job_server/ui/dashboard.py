@@ -253,18 +253,26 @@ class Dashboard(QDialog):
             card = QGroupBox(title)
             card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
             content = QHBoxLayout(card)
-            column = QVBoxLayout()
+            # The plot runs up behind the figure: the number reads against its own history.
+            column = QGridLayout()
             value = QLabel("—")
+            value.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            # A veil in the card's own colour keeps the figure readable where the line crosses it.
+            veil = value.palette().window().color()
+            value.setStyleSheet(
+                f"background: rgba({veil.red()}, {veil.green()}, {veil.blue()}, 0.78);"
+                " border-radius: 4px; padding: 0 5px 1px 2px;"
+            )
             font = value.font()
             font.setPointSize(font.pointSize() + 6)
             font.setBold(True)
             value.setFont(font)
-            column.addWidget(value)
             self.metric_values[key] = value
             share = key in ("cpu", "memory", "cpu_usage", "memory_usage")
             # Recent history under each figure, so a spike between glances still shows.
             trend = Trend("%" if share else "", 100 if share else None)
-            column.addWidget(trend)
+            column.addWidget(trend, 0, 0)
+            column.addWidget(value, 0, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
             self.metric_trends[key] = trend
             if share:
                 gauge = Gauge()
