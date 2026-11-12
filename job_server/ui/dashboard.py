@@ -1,5 +1,6 @@
 
 from ._qt_callbacks import connect_queued
+from .meters import Gauge, Trend, percent
 import json
 import os
 import sqlite3
@@ -35,7 +36,6 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QMessageBox,
     QMenuBar,
-    QProgressBar,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -239,6 +239,7 @@ class Dashboard(QDialog):
         metrics.setSpacing(12)
         self.metric_values = {}
         self.metric_bars = {}
+        self.metric_trends = {}
         for index, (key, title) in enumerate((
             ("running", "Running jobs"), ("cpu_usage", "CPU in use now (whole PC)"),
             ("cpu", "CPU reserved / budget"), ("pending", "Waiting jobs"),
@@ -246,30 +247,33 @@ class Dashboard(QDialog):
         )):
             card = QGroupBox(title)
             card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-            content = QVBoxLayout(card)
+            content = QHBoxLayout(card)
+            column = QVBoxLayout()
             value = QLabel("—")
             font = value.font()
             font.setPointSize(font.pointSize() + 6)
             font.setBold(True)
             value.setFont(font)
-            content.addWidget(value)
+            column.addWidget(value)
             self.metric_values[key] = value
-            bar = QProgressBar()
-            bar.setTextVisible(False)
-            bar.setFixedHeight(6)
-            bar.setRange(0, 100)
-            content.addWidget(bar)
-            if key in ("cpu", "memory", "cpu_usage", "memory_usage"):
-                self.metric_bars[key] = bar
+            share = key in ("cpu", "memory", "cpu_usage", "memory_usage")
+            # The last fifteen minutes under each figure, so a spike between glances still shows.
+            trend = Trend("%" if share else "", 100 if share else None)
+            column.addWidget(trend)
+            self.metric_trends[key] = trend
+            if share:
+                gauge = Gauge()
+                content.addWidget(gauge)
+                self.metric_bars[key] = gauge
                 self._set_usage(key, None, None)
             else:
-                # Count cards keep the bar's space so all four cards line up.
-                policy = bar.sizePolicy()
-                policy.setRetainSizeWhenHidden(True)
-                bar.setSizePolicy(policy)
-                bar.hide()
+                content.addStrut(Gauge().height())  # Count cards line up with dial cards.
+            content.addLayout(column, 1)
             metrics.addWidget(card, index // 3, index % 3)
         layout.addLayout(metrics)
+        note = QLabel("Lines show the last 15 minutes; point at one to read a value. Gaps are times the server did not answer.")
+        note.setEnabled(False)
+        layout.addWidget(note)
         filters = QHBoxLayout()
         self.job_caption = QLabel("Jobs — right-click for actions")
         filters.addWidget(self.job_caption, 1)
@@ -872,6 +876,13 @@ class Dashboard(QDialog):
             )
             self._set_usage("cpu_usage", cpu_now, 100)
             self._set_usage("memory_usage", memory_now, 100)
+            for key, sample in (
+                ("running", resource.get("running")), ("pending", resource.get("pending")),
+                ("cpu_usage", cpu_now), ("memory_usage", memory_now),
+                ("cpu", percent(resource.get("reserved_cpus"), resource.get("cpus"))),
+                ("memory", percent(resource.get("reserved_memory_mb"), resource.get("memory_mb"))),
+            ):
+                self.metric_trends[key].add(sample)
             usernames = {u["id"]: u["username"] for u in data["users"]}
             self.usernames = usernames
             self.job_records = {job["id"]: job for job in data["jobs"]}
@@ -955,6 +966,8 @@ class Dashboard(QDialog):
             value.setText("—")
         for key in self.metric_bars:
             self._set_usage(key, None, None)
+        for trend in self.metric_trends.values():
+            trend.add(None)  # A gap in the line, not a fall to zero.
         for table in (self.jobs, self.users, self.devices, self.activity):
             self.fill(table, [])
         self._update_job_actions()
@@ -963,17 +976,13 @@ class Dashboard(QDialog):
             self.detail_dialog.invalidate("Connection unavailable. Sign in and refresh to view this job.")
 
     def _set_usage(self, key, used, budget):
-        try:
-            percent = max(0, min(100, round(100 * used / budget)))
-        except (TypeError, ZeroDivisionError):
-            percent = 0
-        color = "#c62828" if percent >= 90 else "#e08600" if percent >= 70 else "#2e7d32"
-        bar = self.metric_bars[key]
-        bar.setValue(percent)
-        bar.setStyleSheet(
-            "QProgressBar { border: none; border-radius: 3px; background: rgba(127, 127, 127, 0.25); }"
-            f"QProgressBar::chunk {{ border-radius: 3px; background: {color}; }}"
-        )
+        share = percent(used, budget)
+        value = 0 if share is None else round(share)
+        color = "#c62828" if value >= 90 else "#e08600" if value >= 70 else "#2e7d32"
+        gauge = self.metric_bars[key]
+        gauge.setValue(value)
+        gauge.setKnown(share is not None)
+        gauge.setColor(color)
 
     def _color_states(self):
         for row in range(self.jobs.rowCount()):
