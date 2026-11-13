@@ -320,7 +320,9 @@ def short_name(path):
     return alias if alias.casefold() != path.name.casefold() else None
 
 
-@pytest.mark.parametrize("reserved", ["moleditpy_run.ps1", "moleditpy_run.sh", ".moleditpy_rc", ".server_process"])
+# The job's log and script are readable on purpose (files.READABLE); these two
+# stay private under every name, the 8.3 alias included.
+@pytest.mark.parametrize("reserved", [".moleditpy_rc", ".server_process"])
 def test_reserved_file_is_not_served_under_its_short_name(client, alice, reserved):
     job = committed_job(client, alice)
     work = client.app.state.jobs.directory(job)
@@ -724,16 +726,23 @@ def test_guessed_short_name_serves_no_reserved_file(client, alice, guess):
     """As an attacker would try it: guessing the alias, with every reserved file present."""
     job = committed_job(client, alice)
     work = client.app.state.jobs.directory(job)
-    for name in ("moleditpy_run.ps1", "moleditpy_run.sh", ".moleditpy_rc", ".server_process",
-                 "payload.ps1", "job.log"):
+    # The private ones hold the secret; the readable log and script hold
+    # something harmless, so an alias that reaches them proves nothing leaked.
+    for name in (".moleditpy_rc", ".server_process"):
         (work / name).write_bytes(MARKER)
+    for name in ("moleditpy_run.ps1", "moleditpy_run.sh", "payload.ps1", "job.log"):
+        (work / name).write_bytes(b"readable")
     for who in (alice, enroll(client, "root", "admin")):
         download = client.get(f"{API}/jobs/{job}/files/{guess}", headers=who["headers"])
-        assert download.status_code in (400, 404) and MARKER not in download.content
+        assert MARKER not in download.content
         stat = client.get(f"{API}/browse/stat", params={"path": f"{job}/{guess}", "digest": "true"},
                           headers=who["headers"])
-        assert stat.status_code in (400, 404)
+        assert stat.status_code in (200, 400, 404)
+        if stat.status_code == 200:
+            assert stat.json()["sha256"] != hashlib.sha256(MARKER).hexdigest()
     archive = client.get(f"{API}/jobs/{job}/archive", headers=alice["headers"])
     assert archive.status_code == 200 and MARKER not in archive.content
     listing = client.get(f"{API}/browse", params={"path": job}, headers=alice["headers"]).json()
-    assert {entry["name"] for entry in listing["entries"]} == {"in.txt", "out.txt", "sub"}
+    assert {entry["name"] for entry in listing["entries"]} == {
+        "in.txt", "out.txt", "sub", "moleditpy_run.ps1", "moleditpy_run.sh", "payload.ps1", "job.log",
+    }

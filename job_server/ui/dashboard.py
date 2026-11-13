@@ -113,6 +113,7 @@ JOB_PAGE = 100
 EVENT_LIMIT = 200
 #: The queue filter's choices and the job states each one shows.
 JOB_FILTERS = {
+    "Running and waiting": {"RUNNING", "PENDING", "QUEUED", "BLOCKED", "HELD", "UPLOADING"},
     "All jobs": None,
     "Running": {"RUNNING"},
     "Waiting": {"PENDING", "QUEUED", "BLOCKED", "HELD", "UPLOADING"},
@@ -328,6 +329,9 @@ class Dashboard(QDialog):
         filters.addWidget(self.job_search)
         self.job_filter = QComboBox()
         self.job_filter.addItems(JOB_FILTERS)
+        # What is still to happen is what an administrator opens the queue for;
+        # finished and failed jobs are one choice away.
+        self.job_filter.setCurrentText("Running and waiting")
         self.job_filter.currentIndexChanged.connect(lambda _: self._apply_job_filter())
         filters.addWidget(self.job_filter)
         self.newer_jobs = QPushButton("Newer")

@@ -296,6 +296,11 @@ def test_job_filter_hides_rows_by_text_and_state(dashboard):
     dashboard.fill(dashboard.jobs, [
         ("opt", "alice", "RUNNING", 0, "id-1"), ("freq", "bob", "FAILED", 0, "id-2"),
     ], ["id-1", "id-2"])
+    # The list opens on what is still to happen: finished and failed jobs hidden.
+    assert dashboard.job_filter.currentText() == "Running and waiting"
+    dashboard._apply_job_filter()
+    assert not dashboard.jobs.isRowHidden(0) and dashboard.jobs.isRowHidden(1)
+    dashboard.job_filter.setCurrentText("All jobs")
     dashboard.job_search.setText("BOB")
     assert dashboard.jobs.isRowHidden(0) and not dashboard.jobs.isRowHidden(1)
     dashboard.job_search.clear()

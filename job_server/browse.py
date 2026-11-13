@@ -22,7 +22,7 @@ def split_path(path):
     if head != identifier or ("/" in path and not relative):
         reject(400, "invalid_path", "Use a canonical job path without trailing slashes")
     if relative:
-        validate_path(relative)
+        validate_path(relative, readable=True)
     return identifier, relative
 
 
@@ -36,7 +36,7 @@ def target_for(jobs, path, principal):
     root = jobs.directory(identifier)
     if is_link(root):
         reject(400, "unsafe_path", "Linked job roots are forbidden")
-    return contained(root, relative) if relative else root
+    return contained(root, relative, readable=True) if relative else root
 
 
 def listing(jobs, path, principal, offset=0, limit=1000):
@@ -62,7 +62,7 @@ def listing(jobs, path, principal, offset=0, limit=1000):
                 if count >= 50000:
                     reject(413, "directory_too_large", "Folder contains too many entries")
                 try:
-                    child = contained(target, entry.name)
+                    child = contained(target, entry.name, readable=True)
                     info = child.lstat()
                     if stat.S_ISDIR(info.st_mode):
                         kind = "directory"
@@ -114,7 +114,7 @@ def archive(jobs, path, principal):
                             reject(413, "archive_too_large", "Folder contains too many entries")
                         relative = prefix + entry.name
                         try:
-                            child = contained(target, relative)
+                            child = contained(target, relative, readable=True)
                             info = child.lstat()
                             if stat.S_ISDIR(info.st_mode):
                                 bundle.writestr(relative + "/", b"")
