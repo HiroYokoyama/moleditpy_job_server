@@ -264,3 +264,42 @@ def test_old_database_queue_migration_preserves_records_and_is_idempotent(tmp_pa
             assert record == {"owner_id": "user", "state": "PENDING", "priority": 0, "force_run": 0, "force_actor": None}
         finally:
             db.close()
+
+
+def test_a_job_that_reserves_nothing_starts_beside_a_full_budget(client, admin, alice, launches):
+    settings = client.app.state.settings
+    settings.cpus, settings.memory_mb, settings.max_active_per_user = 2, 4096, 5
+    full = pending(client, alice, resources={"cpus_per_task": 2, "memory_mb": 4096})
+    waiter = pending(client, alice, resources={"cpus_per_task": 0, "memory_mb": 0})
+    blocked = pending(client, alice, resources={"cpus_per_task": 1, "memory_mb": 0})
+    forced = pending(client, alice, resources={"cpus_per_task": 2, "memory_mb": 4096})
+    with client.app.state.db.transaction() as c:
+        for index, identifier in enumerate((full, waiter, blocked, forced)):
+            c.execute("UPDATE jobs SET created_at=? WHERE id=?", (index, identifier))
+    for _ in range(3):
+        client.app.state.scheduler.tick()
+    assert launches == [full, waiter]
+    # A forced job takes the budget past its limit; a job asking for nothing still fits.
+    assert change(client, admin, forced, "force-run", {"force_run": True}).status_code == 200
+    client.app.state.scheduler.tick()
+    second_waiter = pending(client, alice, resources={"cpus_per_task": 0, "memory_mb": 0})
+    for _ in range(2):
+        client.app.state.scheduler.tick()
+    assert launches == [full, waiter, forced, second_waiter]
+    resources = client.app.state.scheduler.resources()
+    assert (resources["reserved_cpus"], resources["reserved_memory_mb"]) == (4, 8192)
+    assert client.app.state.db.one("SELECT state FROM jobs WHERE id=?", (blocked,))["state"] == "PENDING"
+
+
+def test_a_job_that_reserves_nothing_still_counts_towards_its_owner_limit(client, alice, launches):
+    client.app.state.settings.max_active_per_user = 1
+    first = pending(client, alice, resources={"cpus_per_task": 0, "memory_mb": 0})
+    pending(client, alice, resources={"cpus_per_task": 0, "memory_mb": 0})
+    client.app.state.scheduler.tick()
+    client.app.state.scheduler.tick()
+    assert launches == [first]
+
+
+@pytest.mark.parametrize("resources", [{"cpus_per_task": -1}, {"memory_mb": -1}])
+def test_a_negative_reservation_is_refused(client, alice, resources):
+    assert reserve(client, alice, resources=resources).status_code == 400

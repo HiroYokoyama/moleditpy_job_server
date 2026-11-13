@@ -1,6 +1,7 @@
 """High-level backend contract for Job Manager; no remote shell transport."""
 
 import fnmatch
+import re
 import uuid
 from pathlib import Path
 
@@ -50,8 +51,11 @@ class JobServerBackend:
         else:
             hours, minutes, seconds = 0, 0, 0
         memory = parse_memory_mb(preset.memory) if preset.memory else 512
-        if memory <= 0:
+        # "0" is a real request for no memory; anything else that reads as zero is a typo.
+        if memory <= 0 and not re.fullmatch(r"\s*0+(\.0+)?\s*[A-Za-z]*\s*", str(preset.memory)):
             raise ValueError("Invalid memory request")
+        if preset.cpus_per_task < 0:
+            raise ValueError("Invalid CPU request")
         names = [Path(path).name for path in local_files]
         if len(set(name.casefold() for name in names)) != len(names):
             raise ValueError("Input files must have distinct basenames")
