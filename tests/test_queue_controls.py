@@ -322,6 +322,29 @@ def test_a_held_job_waits_even_when_forced_and_starts_once_released(client, admi
     assert response.status_code == 409
 
 
+def test_hold_rechecks_the_session_after_request_authorization(client, alice, monkeypatch):
+    held = pending(client, alice)
+    db = client.app.state.db
+    other = Database(client.app.state.settings.root)
+    transaction = db.transaction
+
+    @contextmanager
+    def concurrent_disable():
+        # Admission already succeeded. The owner is disabled before the hold obtains its write lock.
+        with other.transaction() as c:
+            c.execute("UPDATE users SET enabled=0 WHERE id=?", (alice["user"]["id"],))
+        with transaction() as c:
+            yield c
+
+    monkeypatch.setattr(db, "transaction", concurrent_disable)
+    try:
+        response = client.post(f"/api/v1/jobs/{held}/hold", headers=alice["headers"], json={"held": True})
+        assert response.status_code == 401
+        assert db.one("SELECT held FROM jobs WHERE id=?", (held,)) == {"held": 0}
+    finally:
+        other.close()
+
+
 def test_only_the_owner_or_an_administrator_can_hold(client, alice):
     other = enroll(client, "other-user", "user")
     held = pending(client, alice)

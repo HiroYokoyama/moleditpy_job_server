@@ -54,6 +54,7 @@ def test_the_endpoint_needs_a_session_and_returns_the_scheduler_history(client, 
     assert client.get("/api/v1/system/resources/history").status_code == 401
     data = client.get("/api/v1/system/resources/history", headers=alice["headers"]).json()
     assert data["interval"] == INTERVAL and data["fields"] == list(FIELDS)
+    assert isinstance(data["now"], float), "The reply carries the server's time for the browser's plots"
     assert len(data["samples"]) >= 1
     later = client.get(
         f"/api/v1/system/resources/history?since={data['samples'][-1][0]}", headers=alice["headers"]

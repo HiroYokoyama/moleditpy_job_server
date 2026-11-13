@@ -499,6 +499,16 @@ async function overviewMeters() {
   assert.equal(app.get('#dial-text-cpu').textContent,'75%','A server without history still shows its figures');
   app.get('#signout').listeners.click();
   assert.equal(state.rows.length,0,'Signing out forgets the readings');
+  // A server whose clock runs ahead of this PC's: the newest sample still ends at the right edge.
+  const ahead=Date.now()/1000+20,row=time=>[time,1,0,10,20,30,40];
+  app.call('mergeHistory')({interval:10,now:ahead,samples:[row(ahead-15),row(ahead)]});
+  let skewed=app.call('trendPoints')('running',100,30);
+  assert.ok(Math.abs(skewed[1].x-100)<0.5&&Math.abs(skewed[0].x-95)<0.5,'Samples are placed by the server clock');
+  app.call('clearTrends')();assert.equal(state.skew,0,'Signing out forgets the clock difference');
+  app.call('mergeHistory')({interval:10,samples:[row(ahead-15),row(ahead)]});
+  skewed=app.call('trendPoints')('running',100,30);
+  assert.ok(skewed.every(point=>point.x>=0&&point.x<=100),'A server without its own time stays inside the plot');
+  assert.ok(Math.abs(skewed[1].x-100)<0.5);
   assert.match(app.call('dialArc')(0.5),/^M9\.98 34\.02A17 17 0 0 1 22\.00 5\.00$/);
 }
 const cases={overviewMeters,jobRows,browserHistory,steadyLists,userChip,insecureContext,sessionRestore,submittedAndCompleted,queuedRefresh,queueControls,expiredDownload,keylessLogin,authentication,refresh,details,accountsPolling,accountsOrdering,loginView,connectionFailure,connectionTimeout,sharedQueue};
