@@ -33,7 +33,10 @@ function setText(element,value) { if(element.textContent!==value)element.textCon
 // few seconds whether or not anyone is signed in; this tab fetches it a little at a time.
 const TRENDS={running:1,pending:2,'cpu-now':3,'memory-now':4,cpu:5,memory:6};
 // The web overview always shows the last five minutes.
-const trendState={rows:[],gap:30,span:300};
+// skew: how far the server's clock is ahead of this browser's. Samples carry the server's
+// time, so the plots measure 'now' by its clock; otherwise the lines run off the cards.
+const trendState={rows:[],gap:30,span:300,skew:0};
+function serverNow() { return Date.now()/1000+trendState.skew; }
 const SVG='http://www.w3.org/2000/svg';
 function share(used,total) { return typeof used==='number'&&typeof total==='number'&&total>0?Math.max(0,Math.min(100,100*used/total)):null; }
 function svgElement(name,attributes) { const element=document.createElementNS(SVG,name); for(const [key,value] of Object.entries(attributes))element.setAttribute(key,String(value)); return element; }
@@ -65,21 +68,25 @@ function dialMark(key,value) {
 }
 function mergeHistory(reply) {
   if(!reply||!Array.isArray(reply.samples))return;
+  const clientNow=Date.now()/1000,newest=reply.samples.length?reply.samples[reply.samples.length-1][0]:null;
+  // An older server sends no time of its own: then a sample from its future sets the difference.
+  if(typeof reply.now==='number')trendState.skew=reply.now-clientNow;
+  else if(typeof newest==='number'&&newest>clientNow+trendState.skew)trendState.skew=newest-clientNow;
   const last=trendState.rows.length?trendState.rows[trendState.rows.length-1][0]:0;
   for(const row of reply.samples)if(row[0]>last)trendState.rows.push(row);
   trendState.gap=3*(reply.interval||10);
-  const horizon=Date.now()/1000-trendState.span;
+  const horizon=serverNow()-trendState.span;
   while(trendState.rows.length&&trendState.rows[0][0]<horizon)trendState.rows.shift();
   for(const key of Object.keys(TRENDS))drawTrend(key);
 }
 // The value the top of the plot stands for: 100% for a share, a round number above the counts shown for jobs.
-function trendTop(key,rows=trendState.rows.filter(row=>row[0]>=Date.now()/1000-trendState.span)) {
+function trendTop(key,rows=trendState.rows.filter(row=>row[0]>=serverNow()-trendState.span)) {
   if(!['running','pending'].includes(key))return 100;
   // A round number above the largest count (1, 2, 5, 10, 20, 50...), so the line never lies on the top.
   const largest=Math.max(0,...rows.map(row=>row[TRENDS[key]]).filter(value=>typeof value==='number'));
   for(let step=1;;step*=10)for(const factor of [1,2,5])if(factor*step>largest)return factor*step;
 }
-function trendPoints(key,width,height,now=Date.now()/1000) {
+function trendPoints(key,width,height,now=serverNow()) {
   const column=TRENDS[key],rows=trendState.rows.filter(row=>row[0]>=now-trendState.span);
   const top=trendTop(key,rows),points=[];
   let previous=null;
@@ -87,7 +94,7 @@ function trendPoints(key,width,height,now=Date.now()/1000) {
     // A silence longer than a few samples is time the server was not running: break the line.
     if(previous!==null&&row[0]-previous>trendState.gap)points.push({when:previous,value:null,x:null,y:null});
     previous=row[0];const value=typeof row[column]==='number'?row[column]:null;
-    points.push({when:row[0],value,x:value===null?null:width*(1-(now-row[0])/trendState.span),y:value===null?null:2+(height-4)*(1-Math.min(value,top)/top)});
+    points.push({when:row[0],value,x:value===null?null:width*Math.max(0,Math.min(1,1-(now-row[0])/trendState.span)),y:value===null?null:2+(height-4)*(1-Math.min(value,top)/top)});
   }
   return points;
 }
@@ -136,7 +143,7 @@ for(const key of Object.keys(TRENDS)){
   svg.addEventListener('pointerleave',()=>{$('#trend-tip').hidden=true;drawTrend(key);});
 }
 globalThis.addEventListener?.('resize',()=>{for(const key of Object.keys(TRENDS))drawTrend(key);});
-function clearTrends() { trendState.rows.length=0; coreLine.share=coreLine.cores=null; dialMark('cpu-now',null); for(const key of Object.keys(TRENDS)){drawTrend(key);if(!['running','pending'].includes(key))dial(key,null);} }
+function clearTrends() { trendState.rows.length=0; trendState.skew=0; coreLine.share=coreLine.cores=null; dialMark('cpu-now',null); for(const key of Object.keys(TRENDS)){drawTrend(key);if(!['running','pending'].includes(key))dial(key,null);} }
 
 function cores(count) { return count+(count===1?' core':' cores'); }
 function ahead(count) { return count===0 ? 'next in line' : count+' ahead'; }
@@ -344,7 +351,7 @@ async function refresh() {
     for(const [key,value] of Object.entries(shares))dial(key,value);
     dialMark('cpu-now',coreLine.share);drawTrend('cpu-now');
     // Optional: a server from before 0.12 has no history, and the figures work without it.
-    const since=trendState.rows.length?trendState.rows[trendState.rows.length-1][0]:Math.max(0,Date.now()/1000-trendState.span);
+    const since=trendState.rows.length?trendState.rows[trendState.rows.length-1][0]:Math.max(0,serverNow()-trendState.span);
     try {mergeHistory(await api('GET','/system/resources/history?since='+since));} catch(error) {if(error.staleSession||error.status===401)throw error;}
     renderQueue(await api('GET','/queue'));
     state.paused=resource.paused;$('#queue-label').textContent=resource.paused?'Queue paused':'Shared queue';$('#pause').textContent=resource.paused?'Resume queue':'Pause queue';

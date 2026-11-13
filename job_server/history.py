@@ -47,11 +47,13 @@ class ResourceHistory:
 
     def since(self, after=0.0):
         """Samples newer than ``after``, oldest first."""
-        horizon = self.clock() - KEEP_SECONDS
+        now = self.clock()
+        horizon = now - KEEP_SECONDS
         with self.lock:
             rows = [row for row in self.samples if row[0] > after and row[0] >= horizon]
+        # The server's own time, so a browser on a PC whose clock differs places the samples right.
         return {"interval": INTERVAL, "keep_seconds": KEEP_SECONDS, "fields": FIELDS,
-                "samples": rows}
+                "now": round(now, 1), "samples": rows}
 
     def start(self):
         if self.thread and self.thread.is_alive():
