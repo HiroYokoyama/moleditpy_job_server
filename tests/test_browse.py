@@ -13,7 +13,9 @@ def populated(client, alice):
     root = client.app.state.jobs.directory(identifier)
     (root / "nested" / "empty").mkdir(parents=True)
     (root / "nested" / "result.txt").write_bytes(b"synthetic result")
-    (root / "job.log").write_bytes(b"private wrapper log")
+    (root / "job.log").write_bytes(b"synthetic wrapper log")
+    (root / "moleditpy_run.sh").write_bytes(b"#!/bin/sh")
+    (root / ".moleditpy_rc").write_bytes(b"0")
     return identifier, root
 
 
@@ -41,13 +43,13 @@ def test_lazy_listing_and_stat_do_not_hash_unless_requested(client, alice, monke
         pytest.fail("Listing and size-only stat must not hash results")
     monkeypatch.setattr("job_server.browse.sha256", no_hash)
     listing = client.get("/api/v1/browse", params={"path": identifier}, headers=alice["headers"]).json()
-    assert [entry["name"] for entry in listing["entries"]] == ["nested"]
+    assert [entry["name"] for entry in listing["entries"]] == ["nested", "job.log", "moleditpy_run.sh"]
     info = client.get("/api/v1/browse/stat", params={"path": identifier + "/nested/result.txt"}, headers=alice["headers"]).json()
     assert info["type"] == "file" and info["size"] == 16
     assert "sha256" not in info
 
 
-@pytest.mark.parametrize("suffix", ["/../server.db", "/nested/../../server.db", "/C:/data", "/job.log", "/nested\\escape", "/nested/", "/nested/a:stream"])
+@pytest.mark.parametrize("suffix", ["/../server.db", "/nested/../../server.db", "/C:/data", "/.moleditpy_rc", "/nested\\escape", "/nested/", "/nested/a:stream"])
 def test_browse_rejects_unsafe_paths(client, alice, suffix):
     identifier, _ = populated(client, alice)
     for route in ("browse", "browse/stat"):
@@ -63,10 +65,13 @@ def test_archive_preserves_subfolders_and_empty_folders_but_excludes_private_and
     response = client.get(f"/api/v1/jobs/{identifier}/archive", headers=alice["headers"])
     assert response.status_code == 200
     with ZipFile(io.BytesIO(response.content)) as archive:
-        assert set(archive.namelist()) == {"nested/", "nested/empty/", "nested/result.txt"}
+        assert set(archive.namelist()) == {
+            "nested/", "nested/empty/", "nested/result.txt", "job.log", "moleditpy_run.sh",
+        }
         assert archive.read("nested/result.txt") == b"synthetic result"
+        assert archive.read("job.log") == b"synthetic wrapper log"
     result = client.get("/api/v1/browse", params={"path": identifier}, headers=alice["headers"]).json()
-    assert [entry["name"] for entry in result["entries"]] == ["nested"]
+    assert [entry["name"] for entry in result["entries"]] == ["nested", "job.log", "moleditpy_run.sh"]
 
 
 def test_archive_is_bounded_and_uploading_jobs_are_hidden(client, alice):
@@ -96,3 +101,28 @@ def test_linked_directory_cannot_be_browsed_or_archived(client, alice, tmp_path)
             os.rmdir(root / "linked")
         else:
             (root / "linked").unlink()
+
+
+def test_the_log_and_script_download_but_can_never_be_uploaded_over(client, alice):
+    identifier, root = populated(client, alice)
+    response = client.get(f"/api/v1/jobs/{identifier}/files/job.log", headers=alice["headers"])
+    assert response.status_code == 200 and response.content == b"synthetic wrapper log"
+    stat = client.get("/api/v1/browse/stat", params={"path": identifier + "/moleditpy_run.sh"},
+                      headers=alice["headers"])
+    assert stat.status_code == 200 and stat.json()["type"] == "file"
+    for hidden in (".moleditpy_rc", ".server_process"):
+        assert client.get(f"/api/v1/jobs/{identifier}/files/{hidden}", headers=alice["headers"]).status_code == 400
+    bob = enroll(client, "bob")
+    assert client.get(f"/api/v1/jobs/{identifier}/files/job.log", headers=bob["headers"]).status_code == 404
+    for name in ("job.log", "moleditpy_run.sh", "payload.ps1"):
+        files = [{"path": name, "size": 1, "sha256": "0" * 64}]
+        assert reserve(client, alice, files=files).status_code in {400, 422}
+
+
+def test_a_readable_path_is_never_created():
+    import pytest as _pytest
+
+    from job_server.files import contained
+
+    with _pytest.raises(ValueError):
+        contained(".", "job.log", create=True, readable=True)

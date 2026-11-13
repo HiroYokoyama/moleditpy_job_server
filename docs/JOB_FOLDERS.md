@@ -62,8 +62,11 @@ accepts a host filesystem path or exposes the data/control/TLS directories.
   whole job work folder. ZIP member names are relative to the selected folder.
 
 Paths are canonical lowercase UUIDs followed by safe relative components.
-Traversal, absolute/Windows paths, alternate streams, wrapper/control names,
-symlinks, junctions, special files and hardlinks are excluded or rejected.
+Traversal, absolute/Windows paths, alternate streams, control names
+(`.moleditpy_rc`, `.server_process`), symlinks, junctions, special files and
+hardlinks are excluded or rejected. The job's own log (`job.log`) and the script
+that ran it (`moleditpy_run.sh` or `moleditpy_run.ps1`, with `payload.ps1`) are
+listed, downloadable and included in a ZIP; nothing can be uploaded over them.
 Each directory and archive permits at most 50,000 entries; archive source bytes
 are capped by the configured per-job storage quota. ZIPs are prepared in private
 temporary storage and closed after transfer or failure. Live files may change;

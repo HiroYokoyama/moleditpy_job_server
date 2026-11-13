@@ -17,6 +17,10 @@ RESERVED = {
     "payload.ps1",
     ".server_process",
 }
+#: Reserved names an owner may still read from the job folder: the job's log and
+#: the script that ran it. Nothing may upload over them, but downloading them
+#: shows the owner nothing a command in their own job could not already print.
+READABLE = {"job.log", "moleditpy_run.sh", "moleditpy_run.ps1", "payload.ps1"}
 DEVICES = re.compile(r"^(con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)", re.I)
 
 
@@ -46,7 +50,12 @@ def is_link(path):
     )
 
 
-def validate_path(value):
+def _reserved(part, readable):
+    name = part.casefold()
+    return name in RESERVED and not (readable and name in READABLE)
+
+
+def validate_path(value, readable=False):
     if not isinstance(value, str) or not value or len(value) > 1024 or "\\" in value:
         reject(400, "invalid_path", "Use a relative slash-separated path")
     parts = value.split("/")
@@ -57,15 +66,18 @@ def validate_path(value):
             or len(part) > 255
             or any(ord(c) < 32 or c in ':<>"|?*' for c in part)
             or DEVICES.match(part)
-            or part.casefold() in RESERVED
+            or _reserved(part, readable)
         ):
             reject(400, "invalid_path", "Unsafe or reserved file path")
     return value
 
 
-def contained(root, relative, create=False):
+def contained(root, relative, create=False, readable=False):
+    """``readable`` lets the job's log and script through, for reading only."""
+    if create and readable:
+        raise ValueError("A readable-only path cannot be created")
     root = Path(root)
-    validate_path(relative)
+    validate_path(relative, readable)
     if is_link(root):
         reject(400, "unsafe_path", "Linked job root is forbidden")
     target = root / relative
@@ -79,7 +91,7 @@ def contained(root, relative, create=False):
         reject(400, "unsafe_path", "File escapes job directory")
     # A Windows 8.3 short name (MOLEDI~1.PS1) reaches a file under a name the
     # check above never saw, so judge the name the file really has.
-    if any(part.casefold() in RESERVED for part in resolved.relative_to(base).parts):
+    if any(_reserved(part, readable) for part in resolved.relative_to(base).parts):
         reject(400, "invalid_path", "Unsafe or reserved file path")
     if create:
         target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)

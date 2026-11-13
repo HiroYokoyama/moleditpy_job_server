@@ -411,7 +411,7 @@ def create_app(settings=None, dispatch=True):
     @app.get(prefix + "/jobs/{job_id}/files/{path:path}")
     def download(job_id: str, path: str, request: Request, p=Depends(principal)):
         jobs.authorize(job_id, p)
-        target = contained(jobs.directory(job_id), path)
+        target = contained(jobs.directory(job_id), path, readable=True)
         range_header = request.headers.get("range")
         match = None
         if range_header is not None:
