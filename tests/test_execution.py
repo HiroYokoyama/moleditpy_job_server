@@ -15,7 +15,13 @@ from job_server.scheduler import Scheduler
 from .conftest import enroll, reserve
 
 
-def wait_job(client, job_id, state, timeout=20):
+#: Windows CI starts a detached Python worker and a cold PowerShell under
+#: xdist and coverage, which now and then takes longer than 20 seconds. These
+#: tests check execution, not latency; a wait still returns as soon as it can.
+NATIVE_WAIT = 60 if os.name == "nt" else 20
+
+
+def wait_job(client, job_id, state, timeout=NATIVE_WAIT):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         client.app.state.scheduler.tick()
@@ -150,7 +156,7 @@ def test_running_cancel_waits_for_process_tree_exit(client, alice):
     client.post(f"/api/v1/jobs/{job_id}/commit", headers=alice["headers"])
     client.app.state.scheduler.tick()
     control = client.app.state.settings.root / "control" / job_id
-    deadline = time.monotonic() + 10
+    deadline = time.monotonic() + NATIVE_WAIT
     while not (control / "worker.json").exists() and time.monotonic() < deadline:
         time.sleep(0.1)
     supervisor = json.loads((control / "worker.json").read_text())
