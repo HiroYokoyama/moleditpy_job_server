@@ -61,6 +61,7 @@ def call(client, method, path, headers=None, json=None):
     return client.request(method, API + path, headers=headers, json=json)
 
 
+NOBODY = "00000000-0000-0000-0000-000000000000"
 PROTECTED = [
     ("GET", "/capabilities", None),
     ("GET", "/me", None),
@@ -85,6 +86,25 @@ PROTECTED = [
     ("POST", "/admin/users/00000000-0000-0000-0000-000000000000/disable", {}),
     ("POST", "/admin/users/00000000-0000-0000-0000-000000000000/role", {"role": "admin"}),
     ("DELETE", "/admin/users/00000000-0000-0000-0000-000000000000", None),
+    # Added by the 0.13.2 penetration test: every route that names a job, and the newer controls.
+    ("GET", f"/jobs/{NOBODY}", None),
+    ("GET", f"/jobs/{NOBODY}/log", None),
+    ("GET", f"/jobs/{NOBODY}/files", None),
+    ("GET", f"/jobs/{NOBODY}/files/out.txt", None),
+    ("GET", f"/jobs/{NOBODY}/archive", None),
+    ("GET", f"/jobs/{NOBODY}/uploads", None),
+    ("POST", f"/jobs/{NOBODY}/commit", {}),
+    ("POST", f"/jobs/{NOBODY}/cancel", {}),
+    ("POST", f"/jobs/{NOBODY}/hold", {"held": True}),
+    ("POST", f"/me/devices/{NOBODY}/revoke", {}),
+    ("POST", f"/admin/users/{NOBODY}/enable", {}),
+    ("POST", f"/admin/users/{NOBODY}/password", {"new_password": "b-password"}),
+    ("POST", f"/admin/devices/{NOBODY}/revoke", {}),
+    ("POST", f"/admin/jobs/{NOBODY}/priority", {"priority": 1}),
+    ("POST", f"/admin/jobs/{NOBODY}/resources", {"cpus_per_task": 0, "memory_mb": 0}),
+    ("POST", f"/admin/jobs/{NOBODY}/force-run", {"force_run": True}),
+    ("POST", f"/admin/jobs/{NOBODY}/mark-lost", {}),
+    ("POST", "/admin/jobs/move-finished", {}),
 ]
 
 
@@ -152,6 +172,7 @@ def test_token_scopes_do_not_cross(client, alice):
 @pytest.mark.parametrize("origin", [
     "http://evil.example", "null", "http://127.0.0.1:8766.evil.example", "https://127.0.0.1:8766",
     "http://127.0.0.1:8766/", "http://LOCALHOST:8766", "file://",
+    "http://localhost:8766@evil.example", "http://127.0.0.1:1",
 ])
 def test_foreign_browser_origin_is_refused_without_cors_headers(client, origin):
     port = client.app.state.settings.port
@@ -207,6 +228,9 @@ def test_odd_static_path_is_not_found_and_never_a_server_error(client, path):
     {"force_run": True},
     {"state": "DONE"},
     {"work_root": "C:/"},
+    {"archive_path": "C:/"},
+    {"held": False},
+    {"role": "admin"},
     {"shell": "bash"},
     {"command": "who\x00ami"},
     {"command": "   "},
@@ -486,6 +510,9 @@ ADMIN_ONLY = [
     ("POST", "/admin/jobs/{job}/priority", {"priority": 5}),
     ("POST", "/admin/jobs/{job}/force-run", {"force_run": True}),
     ("POST", "/admin/jobs/{job}/mark-lost", {}),
+    ("POST", "/admin/jobs/{job}/resources", {"cpus_per_task": 0, "memory_mb": 0}),
+    ("POST", "/admin/jobs/move-finished", {}),
+    ("POST", "/admin/users/{admin}/enable", {}),
     ("POST", "/admin/devices/{device}/revoke", {}),
     ("POST", "/admin/shutdown", {}),
 ]
@@ -746,3 +773,132 @@ def test_guessed_short_name_serves_no_reserved_file(client, alice, guess):
     assert {entry["name"] for entry in listing["entries"]} == {
         "in.txt", "out.txt", "sub", "moleditpy_run.ps1", "moleditpy_run.sh", "payload.ps1", "job.log",
     }
+
+
+# Sweeps added by the penetration test of 0.13.2.
+
+def test_hold_is_refused_to_a_stranger_and_outside_the_waiting_state(client, alice):
+    bob = enroll(client, "bob")
+    job = pending(client, alice)
+    hold = lambda who, target=job, body={"held": True}: client.post(  # noqa: E731
+        f"{API}/jobs/{target}/hold", headers=who, json=body
+    ).status_code
+    assert hold(bob["headers"]) == 404
+    assert hold(alice["enrollment"]) == 401
+    assert hold(alice["headers"], NOBODY) == 404
+    for body in ({"held": "yes"}, {"held": 1}, {"held": None}, {}, {"held": True, "force_run": True}):
+        assert hold(alice["headers"], body=body) == 400
+    assert client.app.state.db.one("SELECT held,force_run FROM jobs WHERE id=?", (job,)) == {"held": 0, "force_run": 0}
+    with client.app.state.db.transaction() as connection:
+        connection.execute("UPDATE jobs SET state='DONE' WHERE id=?", (job,))
+    assert hold(alice["headers"]) == 409
+    uploading = reserve(client, alice).json()["id"]
+    assert hold(alice["headers"], uploading) == 409
+
+
+@pytest.mark.parametrize("query", [
+    "since=-1", "since=1e12", "since=nan", "since=inf", "since=abc", "since=1;DROP TABLE jobs", "since=" + "9" * 400,
+])
+def test_history_query_is_strict(client, alice, query):
+    response = client.get(f"{API}/system/resources/history?{query}", headers=alice["headers"])
+    assert response.status_code == 400
+
+
+def test_history_and_resources_name_no_job_or_user(client, alice):
+    bob = enroll(client, "bob")
+    job = pending(client, alice, name="alice-secret-name", command="secret-program --alice")
+    client.app.state.scheduler.history.sample()
+    history = client.get(
+        f"{API}/system/resources/history?since=0&owner=alice&job_id={job}&limit=999999", headers=bob["headers"]
+    )
+    assert history.status_code == 200
+    assert set(history.json()) == {"interval", "keep_seconds", "fields", "now", "samples"}
+    assert history.json()["samples"] and all(len(row) == 7 for row in history.json()["samples"])
+    resources = client.get(API + "/system/resources", headers=bob["headers"])
+    for response in (history, resources):
+        assert not any(text in response.text for text in (job, "alice", "secret-program"))
+    assert client.get(API + "/system/resources/history", headers=bob["enrollment"]).status_code == 401
+
+
+def test_deleted_account_cannot_sign_in_or_be_revived(client):
+    admin = enroll(client, "admin", "admin")
+    bob = enroll(client, "bob")
+    user = bob["user"]["id"]
+    deleted = client.delete(f"{API}/admin/users/{user}", headers=admin["headers"])
+    assert deleted.status_code == 200
+    assert client.get(API + "/me", headers=bob["headers"]).status_code == 401
+    assert client.post(API + "/auth/challenge", json={"device_id": bob["device_id"]}).status_code == 401
+    for username, password in (
+        ("bob", "example-password-123"), ("deleted-" + user, ""), ("deleted-" + user, "example-password-123"),
+    ):
+        for route in ("/auth/login", "/auth/web-login"):
+            response = client.post(API + route, json={"username": username, "password": password})
+            assert response.status_code == 401
+    for method, path, body in (
+        ("POST", f"/admin/users/{user}/enable", {}),
+        ("POST", f"/admin/users/{user}/role", {"role": "admin"}),
+        ("POST", f"/admin/users/{user}/password", {"new_password": "back-again-123"}),
+        ("DELETE", f"/admin/users/{user}", None),
+    ):
+        assert call(client, method, path, admin["headers"], body).status_code == 404
+    row = client.app.state.db.one("SELECT role,enabled,password_hash FROM users WHERE id=?", (user,))
+    assert row == {"role": "deleted", "enabled": 0, "password_hash": ""}
+
+
+def test_password_change_needs_the_old_password_and_cannot_be_aimed(client, alice):
+    bob = enroll(client, "bob")
+    before = client.app.state.db.rows("SELECT id,password_hash FROM users ORDER BY id")
+    change = lambda body: client.post(API + "/me/password", headers=alice["headers"], json=body)  # noqa: E731
+    assert change({"current_password": "a-wrong-guess", "new_password": "new-password-123"}).status_code == 403
+    assert change({"new_password": "new-password-123"}).status_code == 400
+    assert change({"current_password": "example-password-123", "new_password": "abc"}).status_code == 400
+    aimed = {"current_password": "example-password-123", "new_password": "new-password-123"}
+    for extra in ({"user_id": bob["user"]["id"]}, {"username": "bob"}, {"role": "admin"}):
+        assert change({**aimed, **extra}).status_code == 400
+    assert client.app.state.db.rows("SELECT id,password_hash FROM users ORDER BY id") == before
+    # A mistyped password does not end the session that typed it.
+    assert client.get(API + "/me", headers=alice["headers"]).status_code == 200
+
+
+def test_activity_log_holds_no_password_or_token(client):
+    admin = enroll(client, "admin", "admin")
+    secret = "S3cretMarker-do-not-record"
+    client.post(API + "/auth/login", json={"username": "admin", "password": secret})
+    client.post(API + "/auth/web-login", json={"username": "admin", "password": secret})
+    created = client.post(
+        API + "/admin/users", headers=admin["headers"], json={"username": "carol", "password": secret}
+    )
+    assert created.status_code == 201
+    session = client.post(API + "/auth/web-login", json={"username": "carol", "password": secret}).json()
+    carol = {"Authorization": "Bearer " + session["token"]}
+    changed = client.post(
+        API + "/me/password", headers=carol, json={"current_password": secret, "new_password": secret + "-2"}
+    )
+    assert changed.status_code == 200
+    reset = client.post(
+        f"{API}/admin/users/{created.json()['id']}/password", headers=admin["headers"],
+        json={"new_password": secret + "-3"},
+    )
+    assert reset.status_code == 200
+    events = client.get(API + "/admin/events?newest=1000", headers=admin["headers"])
+    assert events.status_code == 200 and "password_changed" in events.text
+    token = admin["headers"]["Authorization"].split()[1]
+    assert not any(text in events.text for text in (secret, token, session["token"], "example-password-123"))
+
+
+@pytest.mark.parametrize("path", [
+    "/tls/ca", "/tls/ca-key", "/tls/ca-key.bin", "/tls/server-key.pem", "/tls/server-key-password.bin",
+    "/tls/ca/../ca-key.bin", "/tls/ca%2f..%2fca-key.bin", "/tls/",
+])
+def test_no_key_is_served_from_the_certificate_route(client, alice, path):
+    root = client.app.state.settings.root
+    (root / "tls").mkdir(exist_ok=True)
+    for name in ("ca-key.bin", "server-key.pem", "server-key-password.bin"):
+        (root / "tls" / name).write_bytes(MARKER)
+    # Local HTTPS is off here, so even the public certificate is not offered.
+    for headers in ({}, alice["headers"]):
+        response = client.get(API + path, headers=headers)
+        assert response.status_code in (400, 404) and MARKER not in response.content
+    for method in ("POST", "PUT", "DELETE"):
+        response = client.request(method, API + "/tls/ca", headers=alice["headers"], content=b"x")
+        assert response.status_code == 405
