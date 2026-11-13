@@ -23,7 +23,12 @@ Python, and an administrator runs the server from MoleditPy or the command line.
 
 ## What it does
 
-- **Queue:** CPU and memory budgets, priorities, dependencies, pause and force run. The
+- **Queue:** CPU and memory budgets, priorities, dependencies, pause and force run. A job
+  that only waits, such as a script watching for a file, can ask for 0 cores and 0 memory
+  and then takes no share of the budget. A waiting job can be held (`POST /jobs/{id}/hold`)
+  by its owner or an administrator; a held job does not start, even when forced. In the
+  dashboard, right-click a waiting job to hold or release it, set its priority, change its
+  reserved cores and memory, or force it to run past the budget. The
   dashboard shows what is reserved beside what the whole PC is using right now, as dials
   with a trend line under each figure. The server records its load every ten seconds for
   the last six hours, whether or not anyone is signed in.
@@ -171,7 +176,7 @@ This is a service for trusted users. See [SECURITY.md](SECURITY.md) and
 **CPU in use now** is a share of every thread, so 100% means all threads are busy. When
 the PC has more threads than cores, a dotted line on its trend ("Phys. cores") and a
 dotted tick on its dial mark where every core is busy. The dial's colour follows the cores: green, amber from 70% of them, red from 90%
-up to every core busy, and purple past that, when jobs share cores with hyper-threads.
+up to every core busy and a little beyond (10 points of the whole PC, since the OS uses some too), and purple past that, when jobs share cores with hyper-threads.
 
 ## Documentation
 

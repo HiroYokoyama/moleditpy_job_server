@@ -10,8 +10,10 @@ class Model(BaseModel):
 
 
 class Resources(Model):
-    cpus_per_task: StrictInt = Field(default=1, ge=1)
-    memory_mb: StrictInt = Field(default=512, ge=1)
+    # Zero reserves nothing: a script that only waits for something else takes no
+    # share of the budget, though it still counts towards its owner's active jobs.
+    cpus_per_task: StrictInt = Field(default=1, ge=0)
+    memory_mb: StrictInt = Field(default=512, ge=0)
     walltime_seconds: StrictInt = Field(default=0, ge=0, le=30 * 86400)
 
 
@@ -115,3 +117,12 @@ class Priority(Model):
 
 class ForceRun(Model):
     force_run: StrictBool
+
+
+class Hold(Model):
+    held: StrictBool
+
+
+class JobResources(Model):
+    cpus_per_task: StrictInt = Field(ge=0)
+    memory_mb: StrictInt = Field(ge=0)

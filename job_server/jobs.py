@@ -138,8 +138,11 @@ class Jobs:
             "work_root", "archive_path", "relocate", "pid", "process_started", "force_actor"
         }}
         result["force_run"] = bool(result["force_run"])
+        result["held"] = bool(result.get("held", 0))
         result["spec"] = json.loads(result["spec"])
-        if result["state"] == "PENDING" and result["spec"]["after_job"]:
+        if result["state"] == "PENDING" and result["held"]:
+            result["display_state"] = "HELD"
+        elif result["state"] == "PENDING" and result["spec"]["after_job"]:
             predecessor = self.db.one(
                 "SELECT state FROM jobs WHERE id=?", (result["spec"]["after_job"],)
             )

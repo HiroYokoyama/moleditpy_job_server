@@ -51,7 +51,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..client import ClientError, JobServerClient
-from .units import GBSpinBox, FocusSpinBox, gb
+from .units import MB_PER_GB, GBSpinBox, FocusSpinBox, gb
 from .network import LanAddressList
 from ..settings import Settings, pc_resources, pc_size_label
 
@@ -86,7 +86,18 @@ STATUS_COLORS = {
 }
 
 #: Job state colours in the queue table.
+#: A calculation that keeps every core busy reads a little over the core line
+#: (the OS and the GUI use some too), and that is still just "full", not "past it".
+OVER_LIMIT_MARGIN = 10
+
+
+def past_limit(limit):
+    """The whole-PC CPU share above which a reading is purple; never for no limit."""
+    return 101 if limit is None else min(limit + OVER_LIMIT_MARGIN, 100)
+
+
 STATE_COLORS = {
+    "HELD": "#757575",
     "RUNNING": "#2e7d32",
     "PENDING": "#e08600",
     "QUEUED": "#e08600",
@@ -104,7 +115,7 @@ EVENT_LIMIT = 200
 JOB_FILTERS = {
     "All jobs": None,
     "Running": {"RUNNING"},
-    "Waiting": {"PENDING", "QUEUED", "BLOCKED", "UPLOADING"},
+    "Waiting": {"PENDING", "QUEUED", "BLOCKED", "HELD", "UPLOADING"},
     "Finished": {"DONE"},
     "Failed or cancelled": {"FAILED", "CANCELLED", "CANCELED", "LOST"},
 }
@@ -220,7 +231,10 @@ class Dashboard(QDialog):
         self.copy_job_action = action(queue, "Copy job ID", self.copy_job_id)
         queue.addSeparator()
         self.priority_action = action(queue, "Set priority...", self.set_priority)
-        self.force_action = action(queue, "Force run selected job...", lambda: self.force_run(True))
+        self.resources_action = action(queue, "Change reserved cores and memory...", self.change_resources)
+        self.hold_action = action(queue, "Hold (keep from starting)", lambda: self.hold(True))
+        self.release_action = action(queue, "Release hold", lambda: self.hold(False))
+        self.force_action = action(queue, "Force run, ignoring budget...", lambda: self.force_run(True))
         self.unforce_action = action(queue, "Cancel force-run request", lambda: self.force_run(False))
         self.cancel_action = action(queue, "Cancel selected job...", self.cancel)
         self.lost_action = action(queue, "Mark stuck job as lost...", self.mark_lost)
@@ -477,7 +491,8 @@ class Dashboard(QDialog):
         if table is self.jobs:
             return [
                 self.detail_action, self.folder_action, self.copy_job_action, None,
-                self.priority_action, self.force_action, self.unforce_action, None,
+                self.priority_action, self.resources_action, self.hold_action, self.release_action,
+                self.force_action, self.unforce_action, None,
                 self.cancel_action, self.lost_action,
             ]
         if table is self.users:
@@ -1041,12 +1056,12 @@ class Dashboard(QDialog):
 
     def _set_usage(self, key, used, budget, limit=None):
         """Colour by the share of ``limit`` (100% unless given): green, amber from 70%,
-        red from 90%, and purple past the limit, such as every core busy on a
-        hyper-threaded PC."""
+        red from 90%, and purple well past the limit, such as more threads busy
+        than a hyper-threaded PC has cores."""
         share = percent(used, budget)
         value = 0 if share is None else round(share)
         of_limit = 100 * (share or 0) / (limit or 100)
-        color = (PAST_LIMIT if of_limit > 100.5 else "#c62828" if of_limit >= 90
+        color = (PAST_LIMIT if (share or 0) > past_limit(limit) else "#c62828" if of_limit >= 90
                  else "#e08600" if of_limit >= 70 else "#2e7d32")
         gauge = self.metric_bars[key]
         gauge.setValue(value)
@@ -2058,7 +2073,8 @@ class Dashboard(QDialog):
     def _update_job_actions(self):
         identifier = self.selected(self.jobs)
         record = self.job_records.get(identifier, {})
-        pending = record.get("state", record.get("display_state")) in {"PENDING", "QUEUED", "BLOCKED"}
+        pending = record.get("state", record.get("display_state")) in {"PENDING", "QUEUED", "BLOCKED", "HELD"}
+        held = bool(record.get("held", False))
         self.lost_action.setEnabled(self._stuck(record))
         self.detail_action.setEnabled(identifier is not None)
         self.folder_action.setEnabled(identifier is not None)
@@ -2068,6 +2084,9 @@ class Dashboard(QDialog):
             and record.get("state", record.get("display_state")) not in TERMINAL_STATES
         )
         self.priority_action.setEnabled(pending)
+        self.resources_action.setEnabled(pending)
+        self.hold_action.setEnabled(pending and not held)
+        self.release_action.setEnabled(pending and held)
         self.force_action.setEnabled(pending and not record.get("force_run", False))
         self.unforce_action.setEnabled(pending and record.get("force_run", False))
 
@@ -2098,6 +2117,49 @@ class Dashboard(QDialog):
                 success_message="Job priority updated.",
             )
 
+    def change_resources(self):
+        identifier = self.selected(self.jobs)
+        if identifier is None or not self.require_admin_registration():
+            return
+        current = (self.job_records.get(identifier, {}).get("spec") or {}).get("resources") or {}
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Change reserved cores and memory")
+        form = QFormLayout(dialog)
+        form.addRow(QLabel(
+            "What this waiting job takes from the server's budget while it runs. "
+            "0 and 0 suit a job that only waits for something else."
+        ))
+        cores = FocusSpinBox()
+        cores.setRange(0, max(self.settings.cpus, 1))
+        cores.setValue(min(int(current.get("cpus_per_task", 1)), cores.maximum()))
+        memory = GBSpinBox(max(self.settings.memory_mb, 1))
+        memory.setMinimum(0)
+        memory.set_mb(current.get("memory_mb", 512))
+        form.addRow("CPU cores", cores)
+        form.addRow("Memory", memory)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        body = {"cpus_per_task": cores.value(), "memory_mb": round(memory.value() * MB_PER_GB)}
+        self.task(
+            lambda: self.client.request("POST", f"/admin/jobs/{identifier}/resources", body),
+            lambda _: self.refresh(),
+            success_message="Reservation changed.",
+        )
+
+    def hold(self, value=True):
+        identifier = self.selected(self.jobs)
+        if identifier is None or not self.require_admin_registration():
+            return
+        self.task(
+            lambda: self.client.request("POST", f"/jobs/{identifier}/hold", {"held": value}),
+            lambda _: self.refresh(),
+            success_message="Job held; it will not start until released." if value else "Hold released.",
+        )
+
     def force_run(self, value=True):
         identifier = self.selected(self.jobs)
         if identifier is None or not self.require_admin_registration():
@@ -2109,10 +2171,17 @@ class Dashboard(QDialog):
             "Overcommitting memory can cause jobs to fail.",
         ) != QMessageBox.StandardButton.Yes:
             return
+        # The one thing a force run does not override: say so when it applies, so a
+        # job that stays waiting does not look like a request that was lost.
+        earlier = (self.job_records.get(identifier, {}).get("spec") or {}).get("after_job")
+        requested = (
+            f"Force run requested. This job waits for job {earlier} to finish and starts after that."
+            if earlier else "Force run requested. The job starts within a few seconds."
+        )
         self.task(
             lambda: self.client.request("POST", f"/admin/jobs/{identifier}/force-run", {"force_run": value}),
             lambda _: self.refresh(),
-            success_message="Force-run requested; dependencies still apply." if value else "Force-run request cancelled.",
+            success_message=requested if value else "Force-run request cancelled.",
         )
 
     def cancel(self):

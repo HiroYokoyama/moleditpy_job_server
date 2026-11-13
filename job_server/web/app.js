@@ -52,7 +52,7 @@ function dial(key,value) {
   arc.setAttribute('d',known&&value>0?dialArc(value/100):'');
   // Coloured by the share of its limit: every core for CPU use on a hyper-threaded PC.
   const limit=key==='cpu-now'&&coreLine.share!==null?coreLine.share:100,ofLimit=known?100*value/limit:0;
-  arc.setAttribute('class','dial-value'+(!known||value<=0?' unknown':ofLimit>100.5?' over':ofLimit>=90?' high':ofLimit>=70?' warn':''));
+  arc.setAttribute('class','dial-value'+(!known||value<=0?' unknown':limit<100&&value>Math.min(limit+10,100)?' over':ofLimit>=90?' high':ofLimit>=70?' warn':''));
 }
 // A light dotted tick across a dial where its limit falls, such as every core busy.
 function dialMark(key,value) {
@@ -403,7 +403,7 @@ $('#submit-form').addEventListener('submit',event=>{
     try{
       const fields=form.elements,files=[...fields.files.files],manifest=[];
       for(const file of files){$('#upload-progress').textContent='Verifying '+file.name+'…';manifest.push({path:file.name,size:file.size,sha256:await digest(await file.arrayBuffer())});}
-      const spec={name:fields.name.value,command:fields.command.value,files:manifest,resources:{cpus_per_task:Number(fields.cpus.value),memory_mb:Math.max(1,Math.round(Number(fields.memory.value)*1024)),walltime_seconds:Number(fields.walltime.value)},after_job:fields.after.value||null,chain_any:fields.chain_any.checked,auto_download:true,fetch_globs:fields.globs.value.split(',').map(x=>x.trim()).filter(Boolean)};
+      const spec={name:fields.name.value,command:fields.command.value,files:manifest,resources:{cpus_per_task:Number(fields.cpus.value),memory_mb:Math.max(0,Math.round(Number(fields.memory.value)*1024)),walltime_seconds:Number(fields.walltime.value)},after_job:fields.after.value||null,chain_any:fields.chain_any.checked,auto_download:true,fetch_globs:fields.globs.value.split(',').map(x=>x.trim()).filter(Boolean)};
       const fingerprint=await digest(encoder.encode(JSON.stringify(spec)));
       requireSession(generation);
       const prior=JSON.parse(sessionStorage.getItem('pending-submit')||'null');

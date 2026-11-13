@@ -155,6 +155,9 @@ class Scheduler:
             used_memory = sum(json.loads(j["spec"])["resources"]["memory_mb"] for j in running)
             for job in self.db.rows(PENDING_IN_ORDER):
                 forced = bool(job["force_run"])
+                # A hold outranks a force request: the owner said "not yet".
+                if job["held"]:
+                    continue
                 if paused and not forced:
                     continue
                 spec = json.loads(job["spec"])
@@ -171,9 +174,11 @@ class Scheduler:
                 resources = spec["resources"]
                 if not forced and active >= self.settings.max_active_per_user:
                     continue
+                # A request for nothing always fits, even when a forced job has
+                # already taken the budget past its limit.
                 if not forced and (
-                    used_cpu + resources["cpus_per_task"] > self.settings.cpus
-                    or used_memory + resources["memory_mb"] > self.settings.memory_mb
+                    (resources["cpus_per_task"] and used_cpu + resources["cpus_per_task"] > self.settings.cpus)
+                    or (resources["memory_mb"] and used_memory + resources["memory_mb"] > self.settings.memory_mb)
                 ):
                     continue
                 control = self.settings.root / "control" / job["id"]
