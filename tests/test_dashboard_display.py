@@ -232,13 +232,15 @@ def test_refresh_displays_names_status_and_local_access_time(dashboard, monkeypa
     dashboard.jobs.setCurrentCell(0, 0)
     assert dashboard.selected(dashboard.jobs) == "job-id"
     assert dashboard.jobs.item(0, 0).text() == "test"
+    assert dashboard.jobs.item(0, 4).text() == "—"  # This reply carries no resources.
+    assert dashboard.jobs.item(0, 6).text() == "job-id"
     assert dashboard.users.item(0, 0).text() == "alice"
     assert dashboard.users.item(0, 2).text() == "Enabled"
     assert dashboard.devices.item(0, 1).text() == "alice"
     assert dashboard.devices.item(0, 2).text() == "Active"
     assert dashboard.devices.item(0, 3).text() == datetime.fromtimestamp(
         timestamp
-    ).astimezone().strftime("%Y-%m-%d %H:%M:%S %z")
+    ).astimezone().strftime("%Y-%m-%d %H:%M:%S")
     assert dashboard.timestamp(None) == "Never"
     replies["/admin/users"][0]["enabled"] = 0
     replies["/admin/devices"][0]["revoked_at"] = timestamp
@@ -734,3 +736,27 @@ def test_right_click_holds_releases_and_changes_a_waiting_job_reservation(dashbo
         ("POST", "/jobs/job-id/hold", {"held": True}),
         ("POST", "/jobs/job-id/hold", {"held": False}),
     ]
+
+
+def test_reserved_and_elapsed_columns_read_plainly():
+    from job_server.ui.dashboard import elapsed_text, reserved_text
+
+    spec = {"spec": {"resources": {"cpus_per_task": 4, "memory_mb": 8192}}}
+    assert reserved_text(spec) == "4 cores · 8.0 GiB"
+    assert reserved_text({"spec": {"resources": {"cpus_per_task": 1, "memory_mb": 0}}}) == "1 core · 0.0 GiB"
+    assert reserved_text({}) == "—"
+    now = 1_000_000.0
+    assert elapsed_text({"started_at": None}, now) == "—"
+    assert elapsed_text({"started_at": now - 30}, now) == "< 1 min"
+    assert elapsed_text({"started_at": now - 12 * 60 - 59}, now) == "12 min"
+    assert elapsed_text({"started_at": now - 3 * 3600 - 5 * 60}, now) == "3 h 05 min"
+    assert elapsed_text({"started_at": now - 50 * 3600}, now) == "2 d 2 h"
+    # A finished job keeps its run time instead of growing.
+    assert elapsed_text({"started_at": now - 7200, "ended_at": now - 3600}, now) == "1 h 00 min"
+
+
+def test_times_carry_no_utc_offset():
+    from job_server.ui.dashboard import Dashboard
+
+    assert "+" not in Dashboard.timestamp(1_800_000_000) and len(Dashboard.timestamp(1_800_000_000)) == 19
+
