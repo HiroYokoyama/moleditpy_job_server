@@ -12,7 +12,7 @@ from job_server.maintenance import Maintenance, safe_component
 from job_server.settings import Settings
 
 from .conftest import enroll, reserve
-from .test_execution import wait_job
+from .test_execution import NATIVE_WAIT, wait_job
 
 
 def make_client(tmp_path, **extra):
@@ -32,7 +32,7 @@ def run_job(client, identity, name="water opt", command="echo example > result.t
     client.post(f"/api/v1/jobs/{job_id}/commit", headers=identity["headers"])
     job = wait_job(client, job_id, {"DONE", "FAILED", "LOST"})
     # A move waits for the supervisor to exit; let it, so each test is deterministic.
-    deadline = time.monotonic() + 20
+    deadline = time.monotonic() + NATIVE_WAIT
     while client.app.state.scheduler.supervisor_alive(job) and time.monotonic() < deadline:
         time.sleep(0.05)
     return job_id
