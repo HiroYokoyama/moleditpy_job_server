@@ -367,6 +367,9 @@ def create_app(settings=None, dispatch=True):
     def hold(job_id: str, body: Hold, p=Depends(principal)):
         """Keep a waiting job from starting, or let it go again; its owner or an administrator."""
         with db.transaction() as c:
+            # Rechecked under the write lock, like every job mutation: a logout,
+            # revocation or disable that completed meanwhile must win.
+            p = auth.current(p)
             job = jobs.authorize(job_id, p)
             if job["state"] != "PENDING":
                 reject(409, "job_not_pending", "Only a waiting job can be held or released")
