@@ -23,7 +23,9 @@ Python, and an administrator runs the server from MoleditPy or the command line.
 
 ## What it does
 
-- **Queue:** CPU and memory budgets, priorities, dependencies, pause and force run. The
+- **Queue:** CPU and memory budgets, priorities, dependencies, pause and force run. A job
+  that only waits, such as a script watching for a file, can ask for 0 cores and 0 memory
+  and then takes no share of the budget. The
   dashboard shows what is reserved beside what the whole PC is using right now, as dials
   with a trend line under each figure. The server records its load every ten seconds for
   the last six hours, whether or not anyone is signed in.

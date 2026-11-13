@@ -341,6 +341,26 @@ def test_queue_actions_use_stable_job_id_and_explicit_force_confirmation(dashboa
     dashboard.job_records["job-id"]["state"] = "RUNNING"
     dashboard._update_job_actions()
     assert not dashboard.priority_action.isEnabled() and not dashboard.force_action.isEnabled()
+    assert "ignoring budget" in dashboard.force_action.text()
+    assert dashboard.force_action in dashboard._context_actions(dashboard.jobs)
+
+
+def test_force_run_says_when_the_job_still_waits_for_another(dashboard, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    dashboard.client.key_path.parent.mkdir(parents=True, exist_ok=True)
+    dashboard.client.key_path.write_text("synthetic placeholder")
+    dashboard.fill(dashboard.jobs, [("friendly name", "alice", "BLOCKED", 0, "job-id")], ["job-id"])
+    dashboard.jobs.setCurrentCell(0, 0)
+    messages = []
+    monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(dashboard, "task", lambda call, *args, **kwargs: messages.append(kwargs["success_message"]))
+    dashboard.job_records = {"job-id": {"state": "PENDING", "spec": {"after_job": "earlier-id"}}}
+    dashboard.force_run()
+    dashboard.job_records = {"job-id": {"state": "PENDING", "spec": {"after_job": None}}}
+    dashboard.force_run()
+    assert "waits for job earlier-id" in messages[0]
+    assert "starts within a few seconds" in messages[1]
 
 
 def test_queue_force_cancel_and_priority_dialog_cancel_make_no_request(dashboard, monkeypatch):

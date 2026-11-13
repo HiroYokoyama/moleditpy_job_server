@@ -220,7 +220,7 @@ class Dashboard(QDialog):
         self.copy_job_action = action(queue, "Copy job ID", self.copy_job_id)
         queue.addSeparator()
         self.priority_action = action(queue, "Set priority...", self.set_priority)
-        self.force_action = action(queue, "Force run selected job...", lambda: self.force_run(True))
+        self.force_action = action(queue, "Force run, ignoring budget...", lambda: self.force_run(True))
         self.unforce_action = action(queue, "Cancel force-run request", lambda: self.force_run(False))
         self.cancel_action = action(queue, "Cancel selected job...", self.cancel)
         self.lost_action = action(queue, "Mark stuck job as lost...", self.mark_lost)
@@ -2109,10 +2109,17 @@ class Dashboard(QDialog):
             "Overcommitting memory can cause jobs to fail.",
         ) != QMessageBox.StandardButton.Yes:
             return
+        # The one thing a force run does not override: say so when it applies, so a
+        # job that stays waiting does not look like a request that was lost.
+        earlier = (self.job_records.get(identifier, {}).get("spec") or {}).get("after_job")
+        requested = (
+            f"Force run requested. This job waits for job {earlier} to finish and starts after that."
+            if earlier else "Force run requested. The job starts within a few seconds."
+        )
         self.task(
             lambda: self.client.request("POST", f"/admin/jobs/{identifier}/force-run", {"force_run": value}),
             lambda _: self.refresh(),
-            success_message="Force-run requested; dependencies still apply." if value else "Force-run request cancelled.",
+            success_message=requested if value else "Force-run request cancelled.",
         )
 
     def cancel(self):
