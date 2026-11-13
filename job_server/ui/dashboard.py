@@ -109,6 +109,37 @@ STATE_COLORS = {
 
 
 TERMINAL_STATES = {"DONE", "FAILED", "CANCELLED", "CANCELED", "LOST"}
+
+
+def reserved_text(job):
+    """What a job takes from the budget, such as "4 cores · 8.0 GiB"."""
+    resources = (job.get("spec") or {}).get("resources") or {}
+    cores = resources.get("cpus_per_task")
+    if not isinstance(cores, int) or isinstance(cores, bool):
+        return "—"
+    return f"{cores} core{'' if cores == 1 else 's'} · {gb(resources.get('memory_mb'))} GiB"
+
+
+def elapsed_text(job, now):
+    """How long a job has run, or ran; "—" for one that has not started.
+
+    Whole minutes only: a finer clock would change the row at every refresh,
+    and an unchanged table is left alone.
+    """
+    started, ended = job.get("started_at"), job.get("ended_at")
+    if not isinstance(started, (int, float)) or isinstance(started, bool):
+        return "—"
+    end = ended if isinstance(ended, (int, float)) and not isinstance(ended, bool) else now
+    minutes = max(0, int(end - started)) // 60
+    if minutes < 1:
+        return "< 1 min"
+    if minutes < 60:
+        return f"{minutes} min"
+    hours, minutes = divmod(minutes, 60)
+    if hours < 24:
+        return f"{hours} h {minutes:02d} min"
+    days, hours = divmod(hours, 24)
+    return f"{days} d {hours} h"
 JOB_PAGE = 100
 EVENT_LIMIT = 200
 #: The queue filter's choices and the job states each one shows.
@@ -343,14 +374,16 @@ class Dashboard(QDialog):
         self.newer_jobs.setEnabled(False)
         self.older_jobs.setEnabled(False)
         layout.addLayout(filters)
-        self.jobs = QTableWidget(0, 6)
-        self.jobs.setHorizontalHeaderLabels(["Name", "Owner", "State", "Priority", "Job ID", "Submitted (local)"])
+        self.jobs = QTableWidget(0, 8)
+        self.jobs.setHorizontalHeaderLabels(
+            ["Name", "Owner", "State", "Priority", "Reserved", "Elapsed", "Job ID", "Submitted (local)"]
+        )
         self.jobs.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.jobs.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.jobs.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.jobs.verticalHeader().setVisible(False)
         self.jobs.verticalHeader().setDefaultSectionSize(34)
-        self._table_layout(self.jobs, (220, 110, 110, 70, 270, 170))
+        self._table_layout(self.jobs, (220, 110, 110, 70, 130, 90, 270, 170))
         self.jobs.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.jobs.setShowGrid(False)
         self.jobs.itemSelectionChanged.connect(self._update_job_actions)
@@ -946,13 +979,15 @@ class Dashboard(QDialog):
             usernames = {u["id"]: u["username"] for u in data["users"]}
             self.usernames = usernames
             self.job_records = {job["id"]: job for job in data["jobs"]}
+            now = time.time()
             self.fill(
                 self.jobs,
                 [
                     (j["spec"]["name"], usernames.get(j["owner_id"], "(deleted user)"),
                      j["display_state"] + (" · force requested" if j.get("force_run") else "")
                      + (" · needs recheck" if self._stuck(j) else ""),
-                     j.get("priority", 0), j["id"], self.timestamp(j.get("created_at")))
+                     j.get("priority", 0), reserved_text(j), elapsed_text(j, now), j["id"],
+                     self.timestamp(j.get("created_at")))
                     for j in data["jobs"]
                 ], identifiers=[j["id"] for j in data["jobs"]],
             )
@@ -1147,7 +1182,7 @@ class Dashboard(QDialog):
         if value is None:
             return "Never"
         try:
-            return datetime.fromtimestamp(value).astimezone().strftime("%Y-%m-%d %H:%M:%S %z")
+            return datetime.fromtimestamp(value).astimezone().strftime("%Y-%m-%d %H:%M:%S")
         except (ValueError, TypeError, OSError, OverflowError):
             return "—"
 
