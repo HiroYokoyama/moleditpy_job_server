@@ -695,3 +695,42 @@ def test_a_sorted_table_is_left_alone_when_only_the_order_differs(dashboard):
     first = table.item(0, 0)
     dashboard.fill(table, [("bob", "user", "Enabled"), ("alice", "user", "Enabled")], ["b", "a"])
     assert table.item(0, 0) is first
+
+
+def test_right_click_holds_releases_and_changes_a_waiting_job_reservation(dashboard, monkeypatch):
+    from PySide6.QtWidgets import QDialog
+
+    dashboard.client.key_path.parent.mkdir(parents=True, exist_ok=True)
+    dashboard.client.key_path.write_text("synthetic placeholder")
+    dashboard.settings.cpus, dashboard.settings.memory_mb = 8, 16384
+    dashboard.fill(dashboard.jobs, [("friendly name", "alice", "QUEUED", 0, "job-id")], ["job-id"])
+    dashboard.jobs.setCurrentCell(0, 0)
+    dashboard.job_records = {"job-id": {"state": "PENDING", "held": False,
+                                        "spec": {"resources": {"cpus_per_task": 4, "memory_mb": 4096}}}}
+    dashboard._update_job_actions()
+    menu = dashboard._context_actions(dashboard.jobs)
+    for name in ("priority_action", "resources_action", "hold_action", "force_action"):
+        assert getattr(dashboard, name) in menu and getattr(dashboard, name).isEnabled()
+    assert not dashboard.release_action.isEnabled()
+    calls = []
+    monkeypatch.setattr(dashboard, "task", lambda call, *args, **kwargs: call())
+    monkeypatch.setattr(dashboard.client, "request", lambda *args: calls.append(args))
+
+    def accept(dialog):
+        from job_server.ui.units import FocusSpinBox, GBSpinBox
+        dialog.findChild(FocusSpinBox).setValue(0)
+        dialog.findChild(GBSpinBox).setValue(0)
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(QDialog, "exec", accept)
+    dashboard.change_resources()
+    dashboard.hold()
+    dashboard.job_records["job-id"]["held"] = True
+    dashboard._update_job_actions()
+    assert dashboard.release_action.isEnabled() and not dashboard.hold_action.isEnabled()
+    dashboard.hold(False)
+    assert calls == [
+        ("POST", "/admin/jobs/job-id/resources", {"cpus_per_task": 0, "memory_mb": 0}),
+        ("POST", "/jobs/job-id/hold", {"held": True}),
+        ("POST", "/jobs/job-id/hold", {"held": False}),
+    ]

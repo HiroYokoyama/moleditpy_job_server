@@ -52,7 +52,7 @@ function dial(key,value) {
   arc.setAttribute('d',known&&value>0?dialArc(value/100):'');
   // Coloured by the share of its limit: every core for CPU use on a hyper-threaded PC.
   const limit=key==='cpu-now'&&coreLine.share!==null?coreLine.share:100,ofLimit=known?100*value/limit:0;
-  arc.setAttribute('class','dial-value'+(!known||value<=0?' unknown':ofLimit>100.5?' over':ofLimit>=90?' high':ofLimit>=70?' warn':''));
+  arc.setAttribute('class','dial-value'+(!known||value<=0?' unknown':limit<100&&value>Math.min(limit+10,100)?' over':ofLimit>=90?' high':ofLimit>=70?' warn':''));
 }
 // A light dotted tick across a dial where its limit falls, such as every core busy.
 function dialMark(key,value) {

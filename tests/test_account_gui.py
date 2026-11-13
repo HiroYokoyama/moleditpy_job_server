@@ -392,7 +392,9 @@ def test_cpu_dial_is_red_at_every_core_and_purple_past_it(dashboard, monkeypatch
     assert color(50.0) == "#e08600"
     assert color(62.0) == "#c62828"
     assert color(66.7) == "#c62828"
-    assert color(70.0) == "#7b1fa2"
+    # A full calculation reads a little over the line; that is still red.
+    assert color(76.0) == "#c62828"
+    assert color(77.0) == "#7b1fa2"
     # Without hyper-threading there is no core line and nothing past red.
     assert color(68.0, cpu_threads=8) == "#2e7d32"
     assert dashboard.metric_trends["cpu_usage"].marker is None

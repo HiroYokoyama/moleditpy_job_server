@@ -117,3 +117,12 @@ class Priority(Model):
 
 class ForceRun(Model):
     force_run: StrictBool
+
+
+class Hold(Model):
+    held: StrictBool
+
+
+class JobResources(Model):
+    cpus_per_task: StrictInt = Field(ge=0)
+    memory_mb: StrictInt = Field(ge=0)

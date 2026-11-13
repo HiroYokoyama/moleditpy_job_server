@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS jobs (
  state TEXT NOT NULL, created_at REAL NOT NULL, started_at REAL, ended_at REAL,
  exit_code INTEGER, pid INTEGER, process_started REAL, cancel_requested INTEGER DEFAULT 0,
  reason TEXT NOT NULL DEFAULT '', priority INTEGER NOT NULL DEFAULT 0,
- force_run INTEGER NOT NULL DEFAULT 0, force_actor TEXT);
+ force_run INTEGER NOT NULL DEFAULT 0, force_actor TEXT, held INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS job_files (
  job_id TEXT NOT NULL REFERENCES jobs(id), path TEXT NOT NULL, size INTEGER NOT NULL,
  sha256 TEXT NOT NULL, complete INTEGER DEFAULT 0, PRIMARY KEY(job_id,path));
@@ -60,6 +60,7 @@ class Database:
                 ("work_root", "ALTER TABLE jobs ADD COLUMN work_root TEXT NOT NULL DEFAULT ''"),
                 ("archive_path", "ALTER TABLE jobs ADD COLUMN archive_path TEXT NOT NULL DEFAULT ''"),
                 ("relocate", "ALTER TABLE jobs ADD COLUMN relocate INTEGER NOT NULL DEFAULT 0"),
+                ("held", "ALTER TABLE jobs ADD COLUMN held INTEGER NOT NULL DEFAULT 0"),
             ):
                 if name not in columns:
                     self.connection.execute(statement)

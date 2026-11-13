@@ -303,3 +303,49 @@ def test_a_job_that_reserves_nothing_still_counts_towards_its_owner_limit(client
 @pytest.mark.parametrize("resources", [{"cpus_per_task": -1}, {"memory_mb": -1}])
 def test_a_negative_reservation_is_refused(client, alice, resources):
     assert reserve(client, alice, resources=resources).status_code == 400
+
+
+def test_a_held_job_waits_even_when_forced_and_starts_once_released(client, admin, alice, launches):
+    held = pending(client, alice)
+    response = client.post(f"/api/v1/jobs/{held}/hold", headers=alice["headers"], json={"held": True})
+    assert response.status_code == 200, response.text
+    assert response.json()["display_state"] == "HELD" and response.json()["held"] is True
+    assert change(client, admin, held, "force-run", {"force_run": True}).status_code == 200
+    for _ in range(2):
+        client.app.state.scheduler.tick()
+    assert launches == []
+    response = client.post(f"/api/v1/jobs/{held}/hold", headers=admin["headers"], json={"held": False})
+    assert response.status_code == 200 and response.json()["held"] is False
+    client.app.state.scheduler.tick()
+    assert launches == [held]
+    response = client.post(f"/api/v1/jobs/{held}/hold", headers=alice["headers"], json={"held": True})
+    assert response.status_code == 409
+
+
+def test_only_the_owner_or_an_administrator_can_hold(client, alice):
+    other = enroll(client, "other-user", "user")
+    held = pending(client, alice)
+    response = client.post(f"/api/v1/jobs/{held}/hold", headers=other["headers"], json={"held": True})
+    assert response.status_code == 404
+    response = client.post(f"/api/v1/jobs/{held}/hold", headers=alice["headers"], json={"held": "yes"})
+    assert response.status_code in {400, 422}
+
+
+def test_an_administrator_changes_a_waiting_job_reservation_within_the_budget(client, admin, alice, launches):
+    settings = client.app.state.settings
+    settings.cpus, settings.memory_mb = 2, 4096
+    client.app.state.scheduler.tick()
+    running = pending(client, alice, resources={"cpus_per_task": 2, "memory_mb": 1024})
+    client.app.state.scheduler.tick()
+    waiting = pending(client, alice, resources={"cpus_per_task": 2, "memory_mb": 1024})
+    response = change(client, admin, waiting, "resources", {"cpus_per_task": 0, "memory_mb": 0})
+    assert response.status_code == 200, response.text
+    assert response.json()["spec"]["resources"]["cpus_per_task"] == 0
+    for body in ({"cpus_per_task": 3, "memory_mb": 0}, {"cpus_per_task": 0, "memory_mb": 9999}):
+        assert change(client, admin, waiting, "resources", body).status_code == 422
+    assert change(client, admin, waiting, "resources", {"cpus_per_task": -1, "memory_mb": 0}).status_code in {400, 422}
+    assert client.post(f"/api/v1/admin/jobs/{waiting}/resources", headers=alice["headers"],
+                       json={"cpus_per_task": 1, "memory_mb": 1}).status_code == 403
+    client.app.state.scheduler.tick()
+    assert launches == [running, waiting]
+    assert change(client, admin, waiting, "resources", {"cpus_per_task": 1, "memory_mb": 1}).status_code == 409

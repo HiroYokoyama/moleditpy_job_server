@@ -478,10 +478,12 @@ async function overviewMeters() {
   assert.equal(app.get('#dial-text-cpu-now').textContent,'93%');
   assert.equal(app.call('coreLine').share,null,'No core line without hyper-threading');
   assert.equal(app.get('#dial-mark-cpu-now').getAttribute('class'),'dial-mark unknown');
-  Object.assign(resources,{cpu_cores:8,cpu_threads:12,cpu_percent:70});await app.call('refresh')();
+  Object.assign(resources,{cpu_cores:8,cpu_threads:12,cpu_percent:80});await app.call('refresh')();
   assert.equal(app.call('coreLine').cores,8);
   assert.equal(app.get('#dial-mark-cpu-now').getAttribute('class'),'dial-mark','The dial marks where every core is busy');assert.ok(Math.abs(app.call('coreLine').share-100*8/12)<1e-9);
-  assert.equal(app.get('#dial-cpu-now').getAttribute('class'),'dial-value over','Purple past every core');
+  assert.equal(app.get('#dial-cpu-now').getAttribute('class'),'dial-value over','Purple well past every core');
+  Object.assign(resources,{cpu_percent:76});await app.call('refresh')();
+  assert.equal(app.get('#dial-cpu-now').getAttribute('class'),'dial-value high','A full calculation reads a little over the line and stays red');
   Object.assign(resources,{cpu_percent:62});await app.call('refresh')();
   assert.equal(app.get('#dial-cpu-now').getAttribute('class'),'dial-value high','Red as the cores fill');
   Object.assign(resources,{cpu_percent:93});

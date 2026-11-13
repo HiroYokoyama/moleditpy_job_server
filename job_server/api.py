@@ -22,7 +22,7 @@ from .instance import InstanceLock
 from .jobs import Jobs
 from .scheduler import Scheduler, host_usage
 from .schemas import (
-    Challenge, Enrollment, ForceRun, JobSpec, Login, PasswordChange, PasswordReset, Pause, Priority,
+    Challenge, Enrollment, ForceRun, Hold, JobResources, JobSpec, Login, PasswordChange, PasswordReset, Pause, Priority,
     RoleChange, Token, UserCreate,
 )
 from .settings import Settings
@@ -214,6 +214,8 @@ def create_app(settings=None, dispatch=True):
                 "dependencies",
                 "queue_priority",
                 "force_run",
+                "hold",
+                "edit_resources",
                 "job_folders",
                 "password_change",
             ],
@@ -360,6 +362,17 @@ def create_app(settings=None, dispatch=True):
     @app.post(prefix + "/jobs/{job_id}/commit")
     def commit(job_id: str, p=Depends(principal)):
         return jobs.commit(job_id, p)
+
+    @app.post(prefix + "/jobs/{job_id}/hold")
+    def hold(job_id: str, body: Hold, p=Depends(principal)):
+        """Keep a waiting job from starting, or let it go again; its owner or an administrator."""
+        with db.transaction() as c:
+            job = jobs.authorize(job_id, p)
+            if job["state"] != "PENDING":
+                reject(409, "job_not_pending", "Only a waiting job can be held or released")
+            c.execute("UPDATE jobs SET held=? WHERE id=?", (int(body.held), job_id))
+            db.event(c, "job_hold_changed", p["user_id"], job_id, held=body.held)
+        return jobs.public(jobs.authorize(job_id, p))
 
     @app.post(prefix + "/jobs/{job_id}/cancel", status_code=202)
     def cancel(job_id: str, p=Depends(principal)):
@@ -539,6 +552,24 @@ def create_app(settings=None, dispatch=True):
             c.execute("UPDATE jobs SET priority=? WHERE id=?", (body.priority, job_id))
             db.event(c, "job_priority_changed", p["user_id"], job_id,
                      previous=job["priority"], priority=body.priority)
+        return jobs.public(jobs.authorize(job_id, p))
+
+    @app.post(prefix + "/admin/jobs/{job_id}/resources")
+    def job_resources(job_id: str, body: JobResources, p=Depends(admin)):
+        """Change what a waiting job reserves. It still has to fit the server's budget."""
+        with db.transaction() as c:
+            auth.admin(p)
+            job = jobs.authorize(job_id, p)
+            if job["state"] != "PENDING":
+                reject(409, "job_not_pending", "Only committed pending jobs can change their reservation")
+            if body.cpus_per_task > settings.cpus or body.memory_mb > settings.memory_mb:
+                reject(422, "unsupported_resources", "The reservation exceeds the server's CPU or memory budget")
+            spec = json.loads(job["spec"])
+            previous = dict(spec["resources"])
+            spec["resources"].update(cpus_per_task=body.cpus_per_task, memory_mb=body.memory_mb)
+            c.execute("UPDATE jobs SET spec=? WHERE id=?", (json.dumps(spec), job_id))
+            db.event(c, "job_resources_changed", p["user_id"], job_id,
+                     previous=previous, resources=spec["resources"])
         return jobs.public(jobs.authorize(job_id, p))
 
     @app.post(prefix + "/admin/jobs/{job_id}/force-run")

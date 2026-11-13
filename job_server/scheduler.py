@@ -155,6 +155,9 @@ class Scheduler:
             used_memory = sum(json.loads(j["spec"])["resources"]["memory_mb"] for j in running)
             for job in self.db.rows(PENDING_IN_ORDER):
                 forced = bool(job["force_run"])
+                # A hold outranks a force request: the owner said "not yet".
+                if job["held"]:
+                    continue
                 if paused and not forced:
                     continue
                 spec = json.loads(job["spec"])
