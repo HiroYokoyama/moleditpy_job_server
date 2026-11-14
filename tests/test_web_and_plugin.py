@@ -162,14 +162,16 @@ def test_gui_start_adopts_saved_port(tmp_path, monkeypatch):
     def offline(*args, **kwargs):
         raise OSError("test daemon is offline")
 
-    monkeypatch.setattr(dialog.client, "request", offline)
+    # On the class: starting on a new port replaces dialog.client, and a real
+    # refused connect to 127.0.0.1 takes seconds on Windows.
+    monkeypatch.setattr("job_server.client.JobServerClient.request", offline)
     commands = []
     monkeypatch.setattr("job_server.lifecycle.wait_until_ready", lambda *args: None)
     monkeypatch.setattr(
         "job_server.ui.dashboard.subprocess.Popen", lambda args, **kwargs: commands.append(args)
     )
     dialog.start_daemon()
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + 30
     while dialog.busy and time.monotonic() < deadline:
         app.processEvents()
         time.sleep(0.01)
