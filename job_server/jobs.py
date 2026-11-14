@@ -238,7 +238,19 @@ class Jobs:
                 )
             c.execute("INSERT INTO idempotency_keys VALUES (?,?,?,?)", (owner, key, job_id, digest))
             self.directory(job_id, True).mkdir(parents=True, mode=0o700)
-            self.db.event(c, "job_created", owner, job_id, spec=specification)
+            # A summary: the full specification (command, every file hash) is in the job row.
+            summary = {
+                "name": spec.name,
+                "executor": specification.get("executor"),
+                "cpus": spec.resources.cpus_per_task,
+                "memory_mb": spec.resources.memory_mb,
+                "walltime_seconds": spec.resources.walltime_seconds,
+                "files": len(spec.files),
+                "bytes": sum(f.size for f in spec.files),
+            }
+            if spec.after_job:
+                summary["after_job"] = spec.after_job
+            self.db.event(c, "job_created", owner, job_id, **summary)
         return {"id": job_id, "missing_files": self.missing(job_id)}
 
     def upload(self, job_id, relative, data, content_range, principal):

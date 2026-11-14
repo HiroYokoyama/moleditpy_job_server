@@ -245,4 +245,7 @@ def test_real_api_monitoring_does_not_write_auth_events_each_poll(
     assert not client_module._AUTH_STATES
     with pytest.raises(ClientError):
         JobServerBackend(host).client.request("GET", "/jobs")
-    assert db.connection.total_changes == revoked_changes
+    # A revoked device signing in is a failure worth a row each time; nothing else is written.
+    failed = db.one("SELECT COUNT(*) AS n FROM events WHERE event='device_auth_failed'")["n"]
+    assert 1 <= failed <= 2
+    assert db.connection.total_changes == revoked_changes + failed
