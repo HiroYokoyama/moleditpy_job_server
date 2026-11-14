@@ -17,6 +17,8 @@ from .worker import atomic_json
 
 #: Seconds between dispatcher passes when nothing wakes it sooner.
 TICK_SECONDS = 1.0
+#: Native Windows jobs end with their supervisor; see Scheduler.stopped_with_supervisor.
+JOBS_END_WITH_SUPERVISOR = os.name == "nt"
 
 
 class Scheduler:
@@ -87,7 +89,12 @@ class Scheduler:
                 if result["state"] not in TERMINAL:
                     continue
                 if result["reason"] == "termination_needs_recheck":
-                    self._mark_recheck(job, "NEEDS_RECHECK: termination could not be verified")
+                    # done.json carries the supervisor's identity even before worker.json is read.
+                    supervised = {**job, **{key: result[key] for key in ("pid", "process_started") if result.get(key)}}
+                    if self.stopped_with_supervisor(supervised):
+                        self._release(job, "stopped_with_supervisor")
+                    else:
+                        self._mark_recheck(job, "NEEDS_RECHECK: termination could not be verified")
                     continue
                 with self.db.transaction() as c:
                     c.execute(
@@ -134,8 +141,38 @@ class Scheduler:
             else:
                 alive = time.time() - job["started_at"] < 10
             if not alive:
+                if (control / "done.json").exists():
+                    continue  # It finished between the two checks; the next pass records it.
+                if self.stopped_with_supervisor(job):
+                    self._release(job, "supervisor_lost")
+                    continue
                 # Keep uncertain allocations reserved. Never resubmit a claimed job.
                 self._mark_recheck(job, "NEEDS_RECHECK: supervisor identity missing")
+
+    def stopped_with_supervisor(self, job):
+        """Whether the job's processes certainly ended when its supervisor did.
+
+        Native Windows jobs run in a job object created with KILL_ON_JOB_CLOSE,
+        whose only handle is the supervisor's, and which they cannot leave, so
+        Windows ends them all when the supervisor exits for any reason.
+        Linux and WSL process groups outlive their supervisor.
+        """
+        return bool(
+            JOBS_END_WITH_SUPERVISOR
+            and self.settings.execution_os == "windows"
+            and job["pid"]
+            and job["process_started"]
+            and not self.supervisor_alive(job)
+        )
+
+    def _release(self, job, reason):
+        with self.db.transaction() as c:
+            c.execute(
+                "UPDATE jobs SET state='FAILED',ended_at=?,reason=?,relocate=? "
+                "WHERE id=? AND state='RUNNING'",
+                (time.time(), reason, self.settings.relocates, job["id"]),
+            )
+            self.db.event(c, "job_finished", job_id=job["id"], state="FAILED", reason=reason)
 
     def _mark_recheck(self, job, reason):
         if job["reason"] == reason:

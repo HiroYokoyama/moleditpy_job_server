@@ -133,14 +133,16 @@ def main(config, job_id):
         reason = f"worker_error:{type(exc).__name__}"
         outcome = {"state": "FAILED", "exit_code": None}
         if process is not None:
-            outcome = {"state": "LOST", "exit_code": None}
-            reason = "termination_needs_recheck"
-        if process is not None and process.poll() is None:
+            # Stop whatever is left, even when the leader has already exited, as
+            # cancelling does. Only a stop that could not be completed leaves the
+            # job for an administrator to recheck.
             try:
                 if settings.execution_os == "wsl":
                     wsl.terminate(settings, process, containment)
+                    containment = None
                 else:
                     native.terminate(process, containment)
+                outcome["exit_code"] = process.returncode
             except Exception:
                 outcome = {"state": "LOST", "exit_code": None}
                 reason = "termination_needs_recheck"
