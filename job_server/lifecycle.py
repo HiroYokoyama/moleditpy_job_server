@@ -97,7 +97,13 @@ def stop_processes_and_wait(root, timeout=20):
         )
 
 
-def stop_and_wait(client, root, timeout=20):
+#: Seconds to wait for a stopping daemon to release its data folder. Longer than its
+#: own worst case: 10 s for open requests, then up to 30 s for maintenance and
+#: 5 s each for the dispatcher and the load history.
+STOP_TIMEOUT = 60
+
+
+def stop_and_wait(client, root, timeout=STOP_TIMEOUT):
     from urllib.parse import urlsplit
 
     if directory_is_idle(root):

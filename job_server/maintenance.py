@@ -36,6 +36,8 @@ EVENT_SCHEMA = (
     "CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY, job_id TEXT, actor TEXT, "
     "timestamp REAL NOT NULL, event TEXT NOT NULL, details TEXT NOT NULL)"
 )
+#: Bytes copied between checks for a stop request when a move crosses volumes.
+COPY_CHUNK = 16 * 1024 * 1024
 _UNSAFE = re.compile(r'[\x00-\x1f<>:"/\\|?*]')
 # Windows: rename across volumes. POSIX reports EXDEV.
 _CROSS_DEVICE_WINERROR = 17
@@ -62,6 +64,14 @@ def unique_folder(parent, name):
 
 def _cross_device(error):
     return error.errno == errno.EXDEV or getattr(error, "winerror", None) == _CROSS_DEVICE_WINERROR
+
+
+class Interrupted(Exception):
+    """A stop request ended a copy part-way; the next start copies again.
+
+    Deliberately not an OSError, so shutil.copytree does not collect it as a
+    per-file error and carry on copying.
+    """
 
 
 class Maintenance:
@@ -116,6 +126,8 @@ class Maintenance:
             try:
                 self.relocate(job)
                 self.failures.pop(job["id"], None)
+            except Interrupted:
+                return  # Stopping: not a failure, and the job stays queued for the next start.
             except Exception as exc:
                 attempts += 1
                 logging.warning("Moving job %s failed: %s", job["id"], exc)
@@ -164,7 +176,7 @@ class Maintenance:
             partial = owner_dir / f".{name}.partial-{job['id']}"
             shutil.rmtree(partial, ignore_errors=True)
             try:
-                shutil.copytree(source, partial, symlinks=True)
+                shutil.copytree(source, partial, symlinks=True, copy_function=self._copy_file)
                 os.rename(partial, target)
             except BaseException:
                 shutil.rmtree(partial, ignore_errors=True)
@@ -178,6 +190,22 @@ class Maintenance:
             source.parent.rmdir()  # jobs/<id>, now empty
         except OSError:
             pass
+
+    def _copy_file(self, source, target, *, follow_symlinks=True):
+        """shutil.copy2 that gives way to a stop request, even inside a large file.
+
+        A job's scratch folder can hold tens of gigabytes. Without this, stopping
+        the server waited for the whole copy, past the window's wait.
+        """
+        if self.stop_event.is_set():
+            raise Interrupted
+        with open(source, "rb") as reader, open(target, "wb") as writer:
+            while chunk := reader.read(COPY_CHUNK):
+                if self.stop_event.is_set():
+                    raise Interrupted
+                writer.write(chunk)
+        shutil.copystat(source, target)
+        return target
 
     # Database backups ----------------------------------------------------
 

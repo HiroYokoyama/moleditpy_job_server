@@ -1,3 +1,4 @@
+import time
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -175,3 +176,25 @@ def test_uvicorn_lines_in_startup_log_carry_the_time():
         assert formatter["fmt"].startswith("%(asctime)s ")
         assert formatter["datefmt"] == lifecycle.TIME_FORMAT
     logging.config.dictConfig(config)  # Still a valid uvicorn configuration.
+
+
+def test_the_window_waits_longer_than_the_daemon_can_take_to_stop():
+    # 10 s for open requests, 30 s for maintenance, 5 s each for the dispatcher and history.
+    assert lifecycle.STOP_TIMEOUT > 10 + 30 + 5 + 5
+
+
+def test_a_slow_shutdown_step_is_logged(caplog):
+    import logging
+    import threading
+
+    from job_server.scheduler import Scheduler
+
+    scheduler = Scheduler.__new__(Scheduler)
+    scheduler.stop_event, scheduler.wake_event = threading.Event(), threading.Event()
+    scheduler.thread = None
+    scheduler.maintenance = SimpleNamespace(stop=lambda: time.sleep(1.2))
+    scheduler.history = SimpleNamespace(stop=lambda: None)
+    with caplog.at_level(logging.WARNING):
+        scheduler.stop()
+    assert "Stopping the maintenance took" in caplog.text
+    assert "load history" not in caplog.text
