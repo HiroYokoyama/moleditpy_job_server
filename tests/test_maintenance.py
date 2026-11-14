@@ -16,6 +16,8 @@ from .test_execution import NATIVE_WAIT, wait_job
 
 
 def make_client(tmp_path, **extra):
+    # The move tests check paths by job name alone; the time prefix has its own tests.
+    extra.setdefault("finished_date_prefix", False)
     settings = Settings(
         data_dir=str(tmp_path / "data"), cpus=2, memory_mb=1024,
         finished_dir=str(tmp_path / "finished"), **extra,
@@ -61,6 +63,50 @@ def test_finished_job_moves_to_user_and_job_name_and_stays_downloadable(tmp_path
         assert "result.txt" in [entry["name"] for entry in listing.json()["entries"]]
         events = [e["event"] for e in client.app.state.db.rows("SELECT event FROM events")]
         assert "job_files_moved" in events
+
+
+def test_folder_names_start_with_the_submission_time_by_default(tmp_path):
+    assert Settings().finished_date_prefix is True
+    with make_client(tmp_path, finished_date_prefix=True) as client:
+        alice = enroll(client)
+        job_id = run_job(client, alice, name="water opt")
+        submitted = client.app.state.db.one("SELECT created_at FROM jobs WHERE id=?", (job_id,))
+        stamp = time.strftime("%Y%m%d-%H%M", time.localtime(submitted["created_at"]))
+        maintenance(client).relocate_finished()
+        target = client.app.state.settings.finished_root / "alice" / f"{stamp}_water opt"
+        assert (target / "result.txt").is_file()
+        job = client.app.state.db.one("SELECT archive_path FROM jobs WHERE id=?", (job_id,))
+        assert job["archive_path"] == str(target)
+
+
+def test_the_time_is_the_submission_not_the_end(tmp_path):
+    with make_client(tmp_path, finished_date_prefix=True) as client:
+        upkeep = maintenance(client)
+        submitted = time.mktime((2026, 11, 14, 17, 38, 59, 0, 0, -1))
+        job = {"spec": '{"name": "long run"}', "created_at": submitted}
+        assert upkeep.folder_name(job) == "20261114-1738_long run"
+        # Unsafe characters are still replaced, and an empty name still has a fallback.
+        assert upkeep.folder_name({**job, "spec": '{"name": "a/b"}'}) == "20261114-1738_a_b"
+        assert upkeep.folder_name({**job, "spec": '{"name": "..."}'}) == "20261114-1738_job"
+
+
+def test_the_prefix_can_be_turned_off(tmp_path):
+    with make_client(tmp_path, finished_date_prefix=False) as client:
+        job = {"spec": '{"name": "long run"}', "created_at": time.time()}
+        assert maintenance(client).folder_name(job) == "long run"
+    with pytest.raises(ValueError, match="finished_date_prefix"):
+        Settings(data_dir=str(tmp_path / "data"), finished_date_prefix="yes").validate()
+
+
+def test_same_minute_same_name_still_gets_a_number(tmp_path):
+    with make_client(tmp_path, finished_date_prefix=True) as client:
+        alice = enroll(client)
+        first, second = (run_job(client, alice, name="twin") for _ in range(2))
+        with client.app.state.db.transaction() as c:
+            c.execute("UPDATE jobs SET created_at=? WHERE id IN (?,?)", (time.time(), first, second))
+        maintenance(client).relocate_finished()
+        names = sorted(path.name for path in (client.app.state.settings.finished_root / "alice").iterdir())
+        assert len(names) == 2 and names[1] == names[0] + "_2"
 
 
 def test_same_job_name_gets_a_number_and_users_are_kept_apart(tmp_path):

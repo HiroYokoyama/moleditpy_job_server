@@ -36,6 +36,8 @@ EVENT_SCHEMA = (
     "CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY, job_id TEXT, actor TEXT, "
     "timestamp REAL NOT NULL, event TEXT NOT NULL, details TEXT NOT NULL)"
 )
+#: Submission time at the start of a moved folder's name; sorts by name in time order.
+FOLDER_TIME_FORMAT = "%Y%m%d-%H%M"
 #: Bytes copied between checks for a stop request when a move crosses volumes.
 COPY_CHUNK = 16 * 1024 * 1024
 _UNSAFE = re.compile(r'[\x00-\x1f<>:"/\\|?*]')
@@ -145,8 +147,20 @@ class Maintenance:
             )
             self.db.event(c, event, job_id=job["id"], **details)
 
+    def folder_name(self, job):
+        """<submission time>_<job name>, or the job name alone when the prefix is off.
+
+        The submission time is the local time the job was reserved, so it is known
+        from the start and matches when the user sent it, however long it ran.
+        """
+        name = safe_component(json.loads(job["spec"])["name"], "job")
+        if not self.settings.finished_date_prefix:
+            return name
+        stamp = time.strftime(FOLDER_TIME_FORMAT, time.localtime(job["created_at"]))
+        return f"{stamp}_{name}"
+
     def relocate(self, job):
-        """Move one ended job's folder to <finished>/<user>/<job name>."""
+        """Move one ended job's folder to <finished>/<user>/<submitted>_<job name>."""
         source = work_directory(self.settings, job["work_root"], job["id"])
         if job["archive_path"] or not source.is_dir():
             # Cancelled during upload, or already moved: nothing to move.
@@ -166,7 +180,7 @@ class Maintenance:
         owner_dir.mkdir(exist_ok=True, mode=0o700)
         if is_link(owner_dir) or not owner_dir.resolve().is_relative_to(base):
             raise OSError(f"{owner_dir} is a link")
-        name = safe_component(json.loads(job["spec"])["name"], "job")
+        name = self.folder_name(job)
         target = unique_folder(owner_dir, name)
         try:
             os.rename(source, target)

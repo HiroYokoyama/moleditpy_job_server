@@ -448,6 +448,15 @@ def test_memory_and_storage_are_edited_in_gb_but_saved_in_mb(dashboard):
     assert saved.storage_quota_mb == 2560
 
 
+def test_finished_folder_time_prefix_is_on_and_can_be_saved_off(dashboard):
+    from job_server.settings import Settings
+
+    assert dashboard.finished_date_prefix.isChecked()
+    dashboard.finished_date_prefix.setChecked(False)
+    assert dashboard.save_settings()
+    assert Settings.load(dashboard.config).finished_date_prefix is False
+
+
 def test_job_working_directory_is_saved_and_default_stays_empty(dashboard, tmp_path):
     from job_server.settings import Settings
 
