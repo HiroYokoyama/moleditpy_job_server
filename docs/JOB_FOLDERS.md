@@ -26,7 +26,7 @@ Jobs of deleted accounts go to `deleted-users`.
 - The setting applies after a restart, to jobs that end from then on. **Move existing
   finished jobs now** (or `POST /api/v1/admin/jobs/move-finished`, administrators only)
   also moves jobs that ended earlier. Running and waiting jobs are never moved.
-- The folder must not be, or be inside, the data folder's job, control, log, TLS or backup
+- The folder must not be, or be inside, the data folder's job, control, log, TLS, activity archive or backup
   folders, and must not contain the data or job working directory.
 
 ## Database backups
@@ -41,6 +41,17 @@ A folder on another disk also protects against a disk failure.
 
 To restore, stop the server and replace `server.db` with a copy. Also delete
 `server.db-wal` and `server.db-shm` if they exist.
+
+## Activity log archive (Server 1.1.0)
+
+The activity log (`events` in `server.db`, shown in the dashboard and by
+`GET /api/v1/admin/events`) keeps the last 3 months (`event_keep_months`). Older rows are
+moved to one SQLite file per calendar month, `<data folder>/event-archive/events-YYYY-MM.db`
+(for example `events-2026-10.db`), and deleted from `server.db`. The month is the row's local
+time. Each pass copies and commits the rows to the archive before deleting them, so an
+interrupted pass never loses or duplicates a row; later passes append to the same month's file.
+Event numbers (`seq`) are kept, so clients reading with `after=` see no gaps or repeats among
+recent rows. Archived rows are not served by the API; open the files with any SQLite tool.
 
 ## API (Server 0.7.0)
 

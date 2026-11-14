@@ -1,9 +1,11 @@
-"""Background upkeep: move ended jobs out of the working directory, back up the database.
+"""Background upkeep: move ended jobs out of the working directory, back up the database,
+and move activity log rows older than a few months into monthly archive files.
 
 Runs on its own thread next to the dispatcher, so a long copy or backup never
 delays starting the next job. Only the process that dispatches runs it.
 """
 
+import calendar
 import errno
 import json
 import logging
@@ -27,6 +29,13 @@ RETRY_SECONDS = 60
 MAX_ATTEMPTS = 10
 BACKUP_PREFIX = "server-"
 BACKUP_SUFFIX = ".db"
+EVENT_ARCHIVE_PREFIX = "events-"
+#: Most activity log rows moved in one pass, so the database lock is held only briefly.
+EVENT_BATCH = 5000
+EVENT_SCHEMA = (
+    "CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY, job_id TEXT, actor TEXT, "
+    "timestamp REAL NOT NULL, event TEXT NOT NULL, details TEXT NOT NULL)"
+)
 _UNSAFE = re.compile(r'[\x00-\x1f<>:"/\\|?*]')
 # Windows: rename across volumes. POSIX reports EXDEV.
 _CROSS_DEVICE_WINERROR = 17
@@ -81,7 +90,7 @@ class Maintenance:
             self.stop_event.wait(INTERVAL)
 
     def run_once(self):
-        for step in (self.relocate_finished, self.backup_if_due):
+        for step in (self.relocate_finished, self.backup_if_due, self.archive_events):
             try:
                 step()
             except Exception:
@@ -222,3 +231,83 @@ class Maintenance:
         for old in self.backups()[: -self.settings.db_backup_keep]:
             old.unlink(missing_ok=True)
         return Path(target)
+
+    # Activity log archive -----------------------------------------------
+
+    def event_archives(self):
+        folder = self.settings.event_archive_root
+        if not folder.is_dir():
+            return []
+        return sorted(
+            path for path in folder.iterdir()
+            if path.name.startswith(EVENT_ARCHIVE_PREFIX) and path.name.endswith(BACKUP_SUFFIX)
+            and path.is_file() and not is_link(path)
+        )
+
+    def event_cutoff(self, now=None):
+        """The local time ``event_keep_months`` calendar months before ``now``."""
+        moment = time.localtime(time.time() if now is None else now)
+        months = moment.tm_year * 12 + moment.tm_mon - 1 - self.settings.event_keep_months
+        year, month = divmod(months, 12)
+        month += 1
+        day = min(moment.tm_mday, calendar.monthrange(year, month)[1])
+        return time.mktime(
+            (year, month, day, moment.tm_hour, moment.tm_min, moment.tm_sec, 0, 0, -1)
+        )
+
+    def archive_events(self, now=None):
+        """Move rows older than ``event_keep_months`` into events-YYYY-MM.db files.
+
+        Rows are copied and committed to the archive before they are deleted here,
+        and copying is keyed on ``seq``, so an interrupted pass only repeats work.
+        Returns the number of rows moved.
+        """
+        cutoff = self.event_cutoff(now)
+        moved = 0
+        while not self.stop_event.is_set():
+            # Oldest first by seq, which uses the primary key rather than a scan.
+            rows = self.db.rows("SELECT * FROM events ORDER BY seq LIMIT ?", (EVENT_BATCH,))
+            old = []
+            for row in rows:
+                if row["timestamp"] >= cutoff:
+                    break
+                old.append(row)
+            if not old:
+                break
+            by_month = {}
+            for row in old:
+                month = time.strftime("%Y-%m", time.localtime(row["timestamp"]))
+                by_month.setdefault(month, []).append(row)
+            for month, group in by_month.items():
+                self._write_event_archive(month, group)
+            with self.db.transaction() as c:
+                c.execute(
+                    "DELETE FROM events WHERE seq BETWEEN ? AND ?",
+                    (old[0]["seq"], old[-1]["seq"]),
+                )
+            moved += len(old)
+            if len(old) < len(rows):
+                break
+        return moved
+
+    def _write_event_archive(self, month, rows):
+        folder = self.settings.event_archive_root
+        folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if is_link(folder):
+            raise OSError(f"{folder} is a link")
+        target = folder / f"{EVENT_ARCHIVE_PREFIX}{month}{BACKUP_SUFFIX}"
+        if is_link(target):
+            raise OSError(f"{target} is a link")
+        connection = sqlite3.connect(target)
+        try:
+            connection.execute(EVENT_SCHEMA)
+            connection.executemany(
+                "INSERT OR IGNORE INTO events(seq,job_id,actor,timestamp,event,details) "
+                "VALUES (:seq,:job_id,:actor,:timestamp,:event,:details)",
+                rows,
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        if os.name != "nt":
+            os.chmod(target, 0o600)
