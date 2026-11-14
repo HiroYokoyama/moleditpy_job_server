@@ -1,11 +1,12 @@
 import os
 import shutil
 import signal
+import stat
 import subprocess
 import time
-from pathlib import Path
 
-from ..files import is_link
+
+_REPARSE = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
 
 
 def powershell():
@@ -87,14 +88,28 @@ def terminate(process, containment, grace=1):
 
 
 def directory_size(root):
-    total = 0
-    for directory, dirs, files in os.walk(root, followlinks=False):
-        dirs[:] = [name for name in dirs if not is_link(Path(directory) / name)]
-        for name in files:
-            path = Path(directory) / name
-            try:
-                if not is_link(path):
-                    total += path.stat().st_size
-            except OSError:
-                pass
+    """Bytes in regular files under root, not following links or junctions.
+
+    Uses os.scandir, whose entries carry their stat on Windows, so a large
+    scratch folder costs one directory listing per folder rather than a
+    system call per file.
+    """
+    total, pending = 0, [os.fspath(root)]
+    while pending:
+        try:
+            entries = os.scandir(pending.pop())
+        except OSError:
+            continue
+        with entries:
+            for entry in entries:
+                try:
+                    info = entry.stat(follow_symlinks=False)
+                except OSError:
+                    continue
+                if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & _REPARSE:
+                    continue
+                if stat.S_ISDIR(info.st_mode):
+                    pending.append(entry.path)
+                elif stat.S_ISREG(info.st_mode):
+                    total += info.st_size
     return total

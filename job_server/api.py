@@ -148,6 +148,9 @@ def create_app(settings=None, dispatch=True):
                 )
             request._body = bytes(data)
         response = await call_next(request)
+        if request.method in {"POST", "PUT", "PATCH", "DELETE"} and response.status_code < 400:
+            # Commits, releases and queue changes start jobs now, not at the next pass.
+            scheduler.wake()
         response.headers["X-Request-ID"] = request.state.request_id
         response.headers["X-API-Version"] = "1"
         response.headers["X-Server-Version"] = PLUGIN_VERSION

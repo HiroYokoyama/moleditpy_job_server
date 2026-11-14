@@ -15,10 +15,15 @@ from .maintenance import Maintenance
 from .worker import atomic_json
 
 
+#: Seconds between dispatcher passes when nothing wakes it sooner.
+TICK_SECONDS = 1.0
+
+
 class Scheduler:
     def __init__(self, db, jobs, settings):
         self.db, self.jobs, self.settings = db, jobs, settings
         self.stop_event = threading.Event()
+        self.wake_event = threading.Event()
         self.thread = None
         self.children = []
         self.maintenance = Maintenance(db, jobs, settings, self.supervisor_alive)
@@ -34,8 +39,13 @@ class Scheduler:
         self.maintenance.start()
         self.history.start()
 
+    def wake(self):
+        """Run the next dispatcher pass now, such as after a job was committed."""
+        self.wake_event.set()
+
     def stop(self):
         self.stop_event.set()
+        self.wake_event.set()
         self.maintenance.stop()
         self.history.stop()
         if self.thread:
@@ -47,7 +57,8 @@ class Scheduler:
                 self.tick()
             except Exception:
                 logging.exception("Dispatcher tick failed")
-            self.stop_event.wait(0.2)
+            self.wake_event.wait(TICK_SECONDS)
+            self.wake_event.clear()
 
     @staticmethod
     def supervisor_alive(job):

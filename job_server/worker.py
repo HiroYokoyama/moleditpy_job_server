@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 import os
+import subprocess
 import sys
 import time
 
@@ -12,6 +13,14 @@ from .core import build_wrapper
 from .executor import native, wsl
 from .settings import Settings
 from .files import atomic_write
+
+#: Seconds between checks for cancellation, the walltime and the job's exit.
+POLL_SECONDS = 0.5
+#: Shortest gap between storage quota checks. Walking a large scratch folder is
+#: costly, so the gap also grows to SIZE_CHECK_FACTOR times the last walk's time,
+#: keeping the walk under about 2% of one core.
+SIZE_CHECK_SECONDS = 10
+SIZE_CHECK_FACTOR = 50
 
 
 def atomic_json(path, value):
@@ -60,10 +69,19 @@ def main(config, job_id):
             )
             walltime = spec["resources"]["walltime_seconds"]
             deadline = time.monotonic() + walltime if walltime else None
+            quota = settings.storage_quota_mb * 1024 * 1024
+            next_size_check = time.monotonic()
             while process.poll() is None:
                 cancel = (control / "cancel").exists()
-                too_large = native.directory_size(work) > settings.storage_quota_mb * 1024 * 1024
                 timed_out = deadline is not None and time.monotonic() > deadline
+                too_large = False
+                if not (cancel or timed_out) and time.monotonic() >= next_size_check:
+                    started = time.monotonic()
+                    too_large = native.directory_size(work) > quota
+                    spent = time.monotonic() - started
+                    next_size_check = time.monotonic() + max(
+                        SIZE_CHECK_SECONDS, spent * SIZE_CHECK_FACTOR
+                    )
                 if cancel or too_large or timed_out:
                     reason = (
                         "cancelled"
@@ -82,7 +100,11 @@ def main(config, job_id):
                         "exit_code": process.returncode,
                     }
                     break
-                time.sleep(0.1)
+                try:
+                    # Returns at once when the job exits, instead of sleeping blind.
+                    process.wait(timeout=POLL_SECONDS)
+                except subprocess.TimeoutExpired:
+                    pass
             else:
                 return_code = process.returncode
                 sentinel = work / ".moleditpy_rc"
