@@ -291,3 +291,89 @@ def test_a_failing_step_does_not_stop_the_other(client):
     with mock.patch.object(Maintenance, "relocate_finished", side_effect=RuntimeError("x")):
         upkeep.run_once()
     assert len(upkeep.backups()) == 1
+
+
+# Activity log archive ----------------------------------------------------
+
+
+def add_events(db, stamps):
+    with db.transaction() as c:
+        for stamp in stamps:
+            c.execute(
+                "INSERT INTO events(job_id,actor,timestamp,event,details) VALUES (?,?,?,?,?)",
+                (None, "admin", stamp, "test_event", "{}"),
+            )
+
+
+def archived(path):
+    connection = sqlite3.connect(path)
+    try:
+        return [row[0] for row in connection.execute("SELECT timestamp FROM events ORDER BY seq")]
+    finally:
+        connection.close()
+
+
+def local(year, month, day):
+    return time.mktime((year, month, day, 12, 0, 0, 0, 0, -1))
+
+
+def fresh(tmp_path, **extra):
+    settings = Settings(data_dir=str(tmp_path / "data"), **extra).validate()
+    client = TestClient(create_app(settings, dispatch=False))
+    return settings, client
+
+
+def test_events_older_than_three_months_move_to_monthly_files(tmp_path):
+    settings, client = fresh(tmp_path)
+    with client:
+        db, upkeep = client.app.state.db, maintenance(client)
+        db.connection.execute("DELETE FROM events")
+        db.connection.commit()
+        now = local(2026, 11, 14)
+        july = [local(2026, 7, 30), local(2026, 7, 31)]
+        august = [local(2026, 8, 1), local(2026, 8, 13)]
+        recent = [local(2026, 8, 15), local(2026, 11, 14)]
+        add_events(db, july + august + recent)
+
+        assert upkeep.archive_events(now) == 4
+        assert [row["timestamp"] for row in db.rows("SELECT timestamp FROM events ORDER BY seq")] == recent
+        names = [path.name for path in upkeep.event_archives()]
+        assert names == ["events-2026-07.db", "events-2026-08.db"]
+        root = settings.event_archive_root
+        assert archived(root / "events-2026-07.db") == july
+        assert archived(root / "events-2026-08.db") == august
+        assert upkeep.archive_events(now) == 0
+        # Later passes append to the same month's file.
+        assert upkeep.archive_events(local(2026, 11, 16)) == 1
+        assert archived(root / "events-2026-08.db") == august + recent[:1]
+
+
+def test_cutoff_clamps_to_the_end_of_a_shorter_month(tmp_path):
+    settings, client = fresh(tmp_path)
+    with client:
+        upkeep = maintenance(client)
+        assert upkeep.event_cutoff(local(2026, 5, 31)) == local(2026, 2, 28)
+        assert upkeep.event_cutoff(local(2027, 1, 10)) == local(2026, 10, 10)
+
+
+def test_an_interrupted_archive_pass_does_not_duplicate_rows(tmp_path):
+    settings, client = fresh(tmp_path)
+    with client:
+        db, upkeep = client.app.state.db, maintenance(client)
+        db.connection.execute("DELETE FROM events")
+        db.connection.commit()
+        stamp = local(2026, 1, 5)
+        add_events(db, [stamp, stamp + 1, time.time()])
+        real = db.transaction
+        with mock.patch.object(db, "transaction", side_effect=RuntimeError("crash")):
+            with pytest.raises(RuntimeError):
+                upkeep.archive_events()
+        db.transaction = real
+        assert len(db.rows("SELECT seq FROM events")) == 3  # Copied, not yet deleted.
+        assert upkeep.archive_events() == 2
+        assert archived(settings.event_archive_root / "events-2026-01.db") == [stamp, stamp + 1]
+
+
+def test_event_keep_months_must_be_positive(tmp_path):
+    with pytest.raises(ValueError, match="event_keep_months"):
+        Settings(data_dir=str(tmp_path / "data"), event_keep_months=0).validate()

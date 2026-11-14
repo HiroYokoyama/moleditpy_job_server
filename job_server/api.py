@@ -172,8 +172,11 @@ def create_app(settings=None, dispatch=True):
     def admin(p=Depends(principal)):
         return auth.admin(p)
 
+    def client(request):
+        return request.client.host if request.client else "unknown"
+
     def limited(request):
-        auth.rate_limit(request.client.host if request.client else "unknown")
+        auth.rate_limit(client(request))
 
     prefix = "/api/v1"
 
@@ -226,14 +229,14 @@ def create_app(settings=None, dispatch=True):
     @app.post(prefix + "/auth/login")
     def login(body: Login, request: Request):
         limited(request)
-        return auth.login(body.username, body.password)
+        return auth.login(body.username, body.password, address=client(request))
 
     @app.post(prefix + "/auth/web-login")
     def web_login(body: Login, request: Request):
         if not settings.web_ui:
             reject(404, "not_found", "Web sign-in is disabled")
         limited(request)
-        return auth.login(body.username, body.password, web=True)
+        return auth.login(body.username, body.password, web=True, address=client(request))
 
     @app.post(prefix + "/auth/logout")
     def logout(p=Depends(principal)):
@@ -247,12 +250,12 @@ def create_app(settings=None, dispatch=True):
     @app.post(prefix + "/auth/challenge")
     def challenge(body: Challenge, request: Request):
         limited(request)
-        return auth.challenge(body.device_id)
+        return auth.challenge(body.device_id, address=client(request))
 
     @app.post(prefix + "/auth/token")
     def token(body: Token, request: Request):
         limited(request)
-        return auth.token(body.device_id, body.nonce, body.signature)
+        return auth.token(body.device_id, body.nonce, body.signature, address=client(request))
 
     @app.get(prefix + "/me")
     def me(p=Depends(principal)):

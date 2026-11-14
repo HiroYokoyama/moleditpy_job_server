@@ -1,6 +1,7 @@
 import logging
 import os
 import asyncio
+import copy
 import signal
 import ssl
 import threading
@@ -8,8 +9,19 @@ from contextlib import contextmanager
 
 import uvicorn
 
+from . import PLUGIN_VERSION
 from .api import create_app
+from .lifecycle import TIME_FORMAT
 from .listeners import listener_sockets, tls_listener_sockets
+
+
+def log_config():
+    """Uvicorn's console logging with the time on each line of startup.log."""
+    config = copy.deepcopy(uvicorn.config.LOGGING_CONFIG)
+    for formatter in config["formatters"].values():
+        formatter["fmt"] = "%(asctime)s " + formatter["fmt"]
+        formatter["datefmt"] = TIME_FORMAT
+    return config
 
 
 class CoordinatedServer(uvicorn.Server):
@@ -46,7 +58,7 @@ def run_https(app, config, settings, http_streams):
     secure = uvicorn.Config(
         app, host=settings.lan_bind_address, port=settings.tls_port, lifespan="off",
         proxy_headers=False, access_log=False, limit_concurrency=settings.max_connections,
-        timeout_keep_alive=5, timeout_graceful_shutdown=10,
+        timeout_keep_alive=5, timeout_graceful_shutdown=10, log_config=log_config(),
         ssl_certfile=material["certfile"], ssl_keyfile=material["keyfile"],
         ssl_keyfile_password=material["password"], ssl_version=ssl.PROTOCOL_TLS_SERVER,
         ssl_ciphers="ECDHE+AESGCM:ECDHE+CHACHA20",
@@ -95,6 +107,11 @@ def serve(settings):
         filename=settings.root / "logs" / "daemon.log",
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
+        datefmt=TIME_FORMAT,
+    )
+    logging.info(
+        "Job Server %s starting (pid %d, port %d, data %s)",
+        PLUGIN_VERSION, os.getpid(), settings.port, settings.root,
     )
     app = create_app(settings)
     config = uvicorn.Config(
@@ -106,6 +123,7 @@ def serve(settings):
         limit_concurrency=settings.max_connections,
         timeout_keep_alive=5,
         timeout_graceful_shutdown=10,
+        log_config=log_config(),
     )
     try:
         with listener_sockets(settings) as streams:
@@ -117,3 +135,4 @@ def serve(settings):
                 server.run(sockets=streams)
     finally:
         app.state.db.close()
+        logging.info("Job Server %s stopped (pid %d)", PLUGIN_VERSION, os.getpid())

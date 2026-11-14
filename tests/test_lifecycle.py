@@ -154,3 +154,24 @@ def test_process_stop_escalates_to_kill_then_times_out(monkeypatch, tmp_path):
     monkeypatch.setattr(lifecycle, "_wait_until_idle", lambda root, timeout: next(waits))
     with pytest.raises(TimeoutError, match="was not confirmed"):
         lifecycle.stop_processes_and_wait(tmp_path)
+
+
+def test_startup_banner_names_the_time_and_version():
+    from datetime import datetime
+
+    from job_server import PLUGIN_VERSION
+
+    banner = lifecycle.startup_banner(datetime(2026, 11, 14, 9, 5, 7))
+    assert banner == f"\n===== 2026-11-14 09:05:07 Starting Job Server {PLUGIN_VERSION} =====\n"
+
+
+def test_uvicorn_lines_in_startup_log_carry_the_time():
+    import logging.config
+
+    from job_server.server_app import log_config
+
+    config = log_config()
+    for formatter in config["formatters"].values():
+        assert formatter["fmt"].startswith("%(asctime)s ")
+        assert formatter["datefmt"] == lifecycle.TIME_FORMAT
+    logging.config.dictConfig(config)  # Still a valid uvicorn configuration.

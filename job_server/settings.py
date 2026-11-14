@@ -52,6 +52,8 @@ class Settings:
     db_backup_hours: int = 24
     db_backup_keep: int = 7
     db_backup_dir: str = ""
+    #: Months of activity log kept in server.db; older rows go to monthly archive files.
+    event_keep_months: int = 3
     port: int = 8766
     cpus: int = 2
     memory_mb: int = 4096
@@ -149,6 +151,11 @@ class Settings:
         )
 
     @property
+    def event_archive_root(self):
+        """Where activity log rows moved out of server.db are kept, one file per month."""
+        return self.root / "event-archive"
+
+    @property
     def execution_os(self):
         return (
             ("windows" if os.name == "nt" else "linux")
@@ -221,6 +228,7 @@ class Settings:
             "challenge_seconds",
             "db_backup_hours",
             "db_backup_keep",
+            "event_keep_months",
         ):
             value = getattr(self, key)
             if type(value) is not int or value < 1:
@@ -300,7 +308,7 @@ class Settings:
 
     def _server_folders(self):
         """Folders the server itself writes to, which no other setting may point into."""
-        folders = [self.root / name for name in ("jobs", "staging", "control", "logs", "tls")]
+        folders = [self.root / name for name in ("jobs", "staging", "control", "logs", "tls", "event-archive")]
         folders += [self.job_root / "jobs", self.job_root / "staging"]
         return folders
 

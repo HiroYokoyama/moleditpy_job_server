@@ -65,6 +65,7 @@ class Auth:
         self.db, self.settings = db, settings
         self.attempts = defaultdict(deque)
         self.rate_lock = threading.Lock()
+        self.limited_logged = {}  # address -> when its refusals were last recorded
         self.dummy_hash = password_hash(secrets.token_urlsafe(24))
 
     def rate_limit(self, address):
@@ -74,12 +75,31 @@ class Auth:
                 self.attempts = defaultdict(
                     deque, {k: v for k, v in self.attempts.items() if v and v[-1] > now - 60}
                 )
+                self.limited_logged = {
+                    k: v for k, v in self.limited_logged.items() if v > now - 60
+                }
             history = self.attempts[address]
             while history and history[0] < now - 60:
                 history.popleft()
-            if len(history) >= 20:
-                reject(429, "rate_limit", "Authentication rate limit exceeded")
-            history.append(now)
+            limited = len(history) >= 20
+            if not limited:
+                history.append(now)
+            # Every attempt that gets past the limit is recorded where it fails;
+            # the refusals themselves are recorded once a minute per address,
+            # so an attack still shows without one row per request.
+            record = limited and self.limited_logged.get(address, -60.0) <= now - 60
+            if record:
+                self.limited_logged[address] = now
+        if record:
+            # An address, or "password:<user id>" for the password-change limit.
+            self.failure("auth_rate_limited", None, source=address)
+        if limited:
+            reject(429, "rate_limit", "Authentication rate limit exceeded")
+
+    def failure(self, event, actor=None, **details):
+        """Record a refused sign-in in its own transaction, before the refusal is raised."""
+        with self.db.transaction() as c:
+            self.db.event(c, event, actor, **details)
 
     def create_initial_admin(self, username, password):
         """Local bootstrap only; never expose this operation through HTTP."""
@@ -131,13 +151,24 @@ class Auth:
         )
         return {"token": token, "expires_at": expires, "scope": scope}
 
-    def login(self, username, password, *, web=False):
+    def login(self, username, password, *, web=False, address=None):
         user = self.db.one("SELECT * FROM users WHERE username=?", (username,))
-        if (
-            not verify_password(password, user["password_hash"] if user else self.dummy_hash)
-            or not user
-            or not user["enabled"]
-        ):
+        verified = verify_password(password, user["password_hash"] if user else self.dummy_hash)
+        if not verified or not user or not user["enabled"]:
+            # The caller only ever sees "Invalid credentials"; the log says why.
+            reason = (
+                "unknown_user" if not user
+                else "wrong_password" if not verified
+                else "disabled_user"
+            )
+            self.failure(
+                "login_failed",
+                user["id"] if user else None,
+                username=str(username)[:64],
+                reason=reason,
+                address=address,
+                web=web,
+            )
             reject(401, "invalid_credentials", "Invalid credentials")
         with self.db.transaction() as c:
             # Password verification is deliberately outside the write lock. A
@@ -362,12 +393,24 @@ class Auth:
                 c.execute("DELETE FROM sessions WHERE digest=?", (principal["digest"],))
         return {"device_id": device_id}
 
-    def challenge(self, device_id):
+    def challenge(self, device_id, *, address=None):
         device = self.db.one(
             "SELECT d.*,u.enabled FROM devices d JOIN users u ON u.id=d.user_id WHERE d.id=?",
             (device_id,),
         )
         if not device or device["revoked_at"] or not device["enabled"]:
+            reason = (
+                "unknown_device" if not device
+                else "revoked_device" if device["revoked_at"]
+                else "disabled_user"
+            )
+            self.failure(
+                "device_auth_failed",
+                device["user_id"] if device else None,
+                device_id=str(device_id)[:64],
+                reason=reason,
+                address=address,
+            )
             reject(401, "invalid_device", "Device unavailable")
         nonce = secrets.token_urlsafe(32)
         expires = time.time() + self.settings.challenge_seconds
@@ -382,7 +425,7 @@ class Auth:
             "protocol_version": "1",
         }
 
-    def token(self, device_id, nonce, signature):
+    def token(self, device_id, nonce, signature, *, address=None):
         with self.db.transaction() as c:
             challenge = c.execute(
                 "SELECT * FROM challenges WHERE nonce=? AND device_id=?", (nonce, device_id)
@@ -392,14 +435,15 @@ class Auth:
                 "SELECT d.*,u.enabled FROM devices d JOIN users u ON u.id=d.user_id WHERE d.id=?",
                 (device_id,),
             ).fetchone()
-            valid = bool(
-                challenge
-                and challenge["expires"] > time.time()
-                and device
-                and device["enabled"]
-                and not device["revoked_at"]
-            )
-            if valid:
+            if not challenge:
+                reason = "unknown_challenge"
+            elif challenge["expires"] <= time.time():
+                reason = "expired_challenge"
+            elif not device or not device["enabled"] or device["revoked_at"]:
+                reason = "device_unavailable"
+            else:
+                reason = None
+            if reason is None:
                 try:
                     key = Ed25519PublicKey.from_public_bytes(base64.b64decode(device["public_key"]))
                     key.verify(
@@ -407,11 +451,22 @@ class Auth:
                         signing_message(self.db.metadata("server_id"), device_id, nonce),
                     )
                 except (ValueError, InvalidSignature, TypeError):
-                    valid = False
+                    reason = "bad_signature"
+            valid = reason is None
             if valid:
+                # A success is not an event: a client signs in every few minutes, and the
+                # device's last_access already records it.
                 c.execute("UPDATE devices SET last_access=? WHERE id=?", (time.time(), device_id))
-                self.db.event(c, "device_authenticated", device["user_id"], device_id=device_id)
                 result = self.issue(c, device["user_id"], device_id)
+            else:
+                self.db.event(
+                    c,
+                    "device_auth_failed",
+                    device["user_id"] if device else None,
+                    device_id=str(device_id)[:64],
+                    reason=reason,
+                    address=address,
+                )
         # Consume a failed signature too; raising inside the transaction would undo the DELETE.
         if not valid:
             reject(401, "invalid_signature", "Invalid or expired challenge signature")
