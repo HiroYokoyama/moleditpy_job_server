@@ -15,10 +15,20 @@ from .maintenance import Maintenance
 from .worker import atomic_json
 
 
+#: Seconds between dispatcher passes when nothing wakes it sooner.
+TICK_SECONDS = 1.0
+#: Native Windows jobs end with their supervisor; see Scheduler.stopped_with_supervisor.
+JOBS_END_WITH_SUPERVISOR = os.name == "nt"
+#: Seconds between checks of one job's process group after its supervisor vanished.
+GROUP_PROBE_SECONDS = 30
+
+
 class Scheduler:
     def __init__(self, db, jobs, settings):
         self.db, self.jobs, self.settings = db, jobs, settings
         self.stop_event = threading.Event()
+        self.wake_event = threading.Event()
+        self.probe_due = {}  # job id -> monotonic time of the next process group check
         self.thread = None
         self.children = []
         self.maintenance = Maintenance(db, jobs, settings, self.supervisor_alive)
@@ -34,8 +44,13 @@ class Scheduler:
         self.maintenance.start()
         self.history.start()
 
+    def wake(self):
+        """Run the next dispatcher pass now, such as after a job was committed."""
+        self.wake_event.set()
+
     def stop(self):
         self.stop_event.set()
+        self.wake_event.set()
         self.maintenance.stop()
         self.history.stop()
         if self.thread:
@@ -47,7 +62,8 @@ class Scheduler:
                 self.tick()
             except Exception:
                 logging.exception("Dispatcher tick failed")
-            self.stop_event.wait(0.2)
+            self.wake_event.wait(TICK_SECONDS)
+            self.wake_event.clear()
 
     @staticmethod
     def supervisor_alive(job):
@@ -76,7 +92,12 @@ class Scheduler:
                 if result["state"] not in TERMINAL:
                     continue
                 if result["reason"] == "termination_needs_recheck":
-                    self._mark_recheck(job, "NEEDS_RECHECK: termination could not be verified")
+                    # done.json carries the supervisor's identity even before worker.json is read.
+                    supervised = {**job, **{key: result[key] for key in ("pid", "process_started") if result.get(key)}}
+                    if self.stopped_with_supervisor(supervised):
+                        self._release(job, "stopped_with_supervisor")
+                    else:
+                        self._mark_recheck(job, "NEEDS_RECHECK: termination could not be verified")
                     continue
                 with self.db.transaction() as c:
                     c.execute(
@@ -123,8 +144,88 @@ class Scheduler:
             else:
                 alive = time.time() - job["started_at"] < 10
             if not alive:
+                if (control / "done.json").exists():
+                    continue  # It finished between the two checks; the next pass records it.
+                if self.stopped_with_supervisor(job):
+                    self._release(job, "supervisor_lost")
+                    continue
                 # Keep uncertain allocations reserved. Never resubmit a claimed job.
                 self._mark_recheck(job, "NEEDS_RECHECK: supervisor identity missing")
+
+    def stopped_with_supervisor(self, job):
+        """Whether the job's processes certainly ended once its supervisor did.
+
+        Native Windows jobs run in a job object created with KILL_ON_JOB_CLOSE,
+        whose only handle is the supervisor's and which they cannot leave, so
+        Windows ends them all when the supervisor exits for any reason.
+        Linux and WSL process groups can outlive the supervisor, so the group
+        itself is checked; only "no such process" counts as ended.
+        """
+        if not (job["pid"] and job["process_started"]) or self.supervisor_alive(job):
+            return False
+        execution_os = self.settings.execution_os
+        if execution_os == "windows":
+            return JOBS_END_WITH_SUPERVISOR
+        now = time.monotonic()
+        if self.probe_due.get(job["id"], 0) > now:
+            return False
+        self.probe_due[job["id"]] = now + GROUP_PROBE_SECONDS
+        try:
+            if execution_os == "linux":
+                return self._linux_group_gone(job)
+            if execution_os == "wsl":
+                return self._wsl_group_gone(job)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            logging.warning("Checking job %s's processes failed", job["id"], exc_info=True)
+        return False
+
+    def _linux_group_gone(self, job):
+        control = self.settings.root / "control" / job["id"]
+        try:
+            pgid = int(json.loads((control / "payload.json").read_text("utf-8"))["pgid"])
+        except FileNotFoundError:
+            return False  # The payload may have started just before the supervisor vanished.
+        if pgid <= 1:
+            return False
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            return True
+        except PermissionError:
+            return False  # A group exists, even if it is not ours.
+        return False
+
+    def _wsl_group_gone(self, job):
+        from .executor import wsl
+        from .jobs import work_directory
+
+        pidfile = work_directory(self.settings, job["work_root"], job["id"]) / ".server_process"
+        try:
+            pgid = int(pidfile.read_text("ascii").strip())
+        except FileNotFoundError:
+            return False
+        if pgid <= 1:
+            return False
+        try:
+            wsl.run(
+                self.settings, "/usr/bin/env", "LC_ALL=C", "/bin/kill", "-0", "--", f"-{pgid}",
+                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            )
+        except subprocess.CalledProcessError as error:
+            # kill exits 1 for both "no such process" and "not permitted"; wsl.exe
+            # failures use other codes. Only the first means the group is gone.
+            return error.returncode == 1 and b"No such process" in (error.stderr or b"")
+        return False
+
+    def _release(self, job, reason):
+        self.probe_due.pop(job["id"], None)
+        with self.db.transaction() as c:
+            c.execute(
+                "UPDATE jobs SET state='FAILED',ended_at=?,reason=?,relocate=? "
+                "WHERE id=? AND state='RUNNING'",
+                (time.time(), reason, self.settings.relocates, job["id"]),
+            )
+            self.db.event(c, "job_finished", job_id=job["id"], state="FAILED", reason=reason)
 
     def _mark_recheck(self, job, reason):
         if job["reason"] == reason:
