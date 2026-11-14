@@ -1488,7 +1488,11 @@ class Dashboard(QDialog):
             + environment.get("PYTHONPATH", "")
         )
         with (log_dir / "startup.log").open("ab") as log:
+            from ..lifecycle import startup_banner
             from ..runtime import python_executable
+
+            log.write(startup_banner().encode("utf-8"))
+            log.flush()
 
             process = subprocess.Popen(
                 [

@@ -1,12 +1,25 @@
 """Bounded lifecycle waits for the local administration client."""
 
 import time
+from datetime import datetime
 from http.client import HTTPException
 
 import psutil
 
 from .daemon_ownership import daemon_processes, verify_local_daemon
 from .instance import DaemonAlreadyRunning, InstanceLock
+
+
+#: Local time without a UTC offset, matching the dashboard.
+TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+
+def startup_banner(now=None):
+    """The line written to startup.log before each daemon launch."""
+    from . import PLUGIN_VERSION
+
+    stamp = (now or datetime.now()).strftime(TIME_FORMAT)
+    return "\n===== " + stamp + " Starting Job Server " + PLUGIN_VERSION + " =====\n"
 
 
 def directory_is_idle(root):
