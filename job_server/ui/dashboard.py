@@ -744,10 +744,16 @@ class Dashboard(QDialog):
             "Select the finished jobs folder",
         )
         finished_layout.addLayout(row)
+        self.finished_date_prefix = QCheckBox(
+            "Start folder names with the submission time (20261114-1738_<job name>)"
+        )
+        self.finished_date_prefix.setChecked(self.settings.finished_date_prefix)
+        finished_layout.addWidget(self.finished_date_prefix)
         finished_help = QLabel(
-            "When set, each job that ends is moved here as <user>/<job name> (a number is "
-            "added if the name is taken). Clients can still browse and download it. Applies to "
-            "jobs that end after a restart. Choose a private folder."
+            "When set, each job that ends is moved here as <user>/<submitted>_<job name>, or "
+            "<user>/<job name> without the time (a number is added if the name is taken). "
+            "Clients can still browse and download it. Applies to jobs that end after a "
+            "restart; folders already moved keep their names. Choose a private folder."
         )
         finished_help.setWordWrap(True)
         finished_layout.addWidget(finished_help)
@@ -1298,6 +1304,7 @@ class Dashboard(QDialog):
                 python_executable=self.python_path.text().strip(),
                 job_dir=self.job_dir.text().strip(),
                 finished_dir=self.finished_dir.text().strip(),
+                finished_date_prefix=self.finished_date_prefix.isChecked(),
                 db_backup=self.db_backup.isChecked(),
                 db_backup_dir=self.db_backup_dir.text().strip(),
                 job_setup_commands=[

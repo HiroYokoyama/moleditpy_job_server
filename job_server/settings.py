@@ -48,6 +48,8 @@ class Settings:
     data_dir: str = "~/.moleditpy/job_server"
     job_dir: str = ""
     finished_dir: str = ""
+    #: Start each moved folder's name with its submission time, as 20261114-1738_<job name>.
+    finished_date_prefix: bool = True
     db_backup: bool = True
     db_backup_hours: int = 24
     db_backup_keep: int = 7
@@ -166,7 +168,7 @@ class Settings:
     def validate(self):
         for key in (
             "trusted_users_only", "allow_privileged", "web_ui", "allow_lan_http", "lan_tls",
-            "db_backup",
+            "db_backup", "finished_date_prefix",
         ):
             if type(getattr(self, key)) is not bool:
                 raise ValueError(f"{key} must be a boolean")

@@ -14,8 +14,12 @@ server's SHA-256, and names are only ever shown as text.
 
 In the desktop window's settings, **Finished jobs folder** (`finished_dir` in
 `settings.json`) moves each job that ends (done, failed, cancelled or lost) out of the
-working directory to `<finished folder>/<username>/<job name>`. A job name already used by
-that user gets `_2`, `_3`, and so on. Characters a folder name cannot hold become `_`.
+working directory to `<finished folder>/<username>/<submitted>_<job name>`, for example
+`alice/20261114-1738_water opt`. The time is when the job was submitted, in local time to
+the minute, so folders sort by name in submission order. Turn off **Start folder names with
+the submission time** (`finished_date_prefix`, on by default since Server 1.2.0) to use the
+job name alone. Folders moved earlier keep their names. A name already used by that user
+gets `_2`, `_3`, and so on. Characters a folder name cannot hold become `_`.
 Jobs of deleted accounts go to `deleted-users`.
 
 - The move happens on a background thread, a few seconds after the job's supervisor exits.
