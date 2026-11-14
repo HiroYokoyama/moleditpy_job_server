@@ -1,6 +1,7 @@
 """When a job is held for an administrator's recheck, and when it is released instead."""
 
 import json
+import subprocess
 import time
 from types import SimpleNamespace
 
@@ -103,7 +104,7 @@ def test_a_lost_windows_supervisor_releases_its_job(client, running):
 
 
 @pytest.mark.parametrize("executor", ["linux", "wsl"])
-def test_a_lost_supervisor_elsewhere_still_needs_a_recheck(client, running, executor):
+def test_without_a_recorded_process_group_a_recheck_is_needed(client, running, executor):
     use_executor(client, executor)
     client.app.state.scheduler.reconcile()
     job = state(client, running)
@@ -152,3 +153,111 @@ def test_a_job_finishing_between_the_checks_is_recorded_normally(client, running
     client.app.state.scheduler.reconcile()
     job = state(client, running)
     assert job["state"] == "RUNNING" and not job["reason"].startswith("NEEDS_RECHECK")
+
+
+# Linux and WSL process groups -------------------------------------------
+
+
+def record_group(client, job_id, pgid=5150):
+    control = client.app.state.settings.root / "control" / job_id
+    control.mkdir(parents=True, exist_ok=True)
+    (control / "payload.json").write_text(json.dumps({"pgid": pgid}))
+
+
+def killpg_raising(monkeypatch, error, calls=None):
+    def killpg(pgid, signal):
+        if calls is not None:
+            calls.append((pgid, signal))
+        if error:
+            raise error
+    monkeypatch.setattr(scheduler_module.os, "killpg", killpg, raising=False)
+
+
+def test_a_lost_linux_supervisor_whose_group_is_gone_releases_its_job(client, running, monkeypatch):
+    use_executor(client, "linux")
+    record_group(client, running)
+    calls = []
+    killpg_raising(monkeypatch, ProcessLookupError(), calls)
+    client.app.state.scheduler.reconcile()
+    assert calls == [(5150, 0)]
+    assert state(client, running) == {"state": "FAILED", "reason": "supervisor_lost"}
+
+
+@pytest.mark.parametrize("error", [None, PermissionError()])
+def test_a_linux_group_that_still_exists_needs_a_recheck(client, running, monkeypatch, error):
+    use_executor(client, "linux")
+    record_group(client, running)
+    killpg_raising(monkeypatch, error)
+    client.app.state.scheduler.reconcile()
+    job = state(client, running)
+    assert job["state"] == "RUNNING" and job["reason"].startswith("NEEDS_RECHECK")
+
+
+def test_the_group_is_checked_again_only_after_a_while(client, running, monkeypatch):
+    use_executor(client, "linux")
+    record_group(client, running)
+    calls = []
+    killpg_raising(monkeypatch, None, calls)
+    scheduler = client.app.state.scheduler
+    for _ in range(3):
+        scheduler.reconcile()
+    assert len(calls) == 1
+    scheduler.probe_due[running] = 0
+    killpg_raising(monkeypatch, ProcessLookupError(), calls)
+    scheduler.reconcile()
+    assert state(client, running)["state"] == "FAILED"
+
+
+def wsl_job(client, job_id, monkeypatch, outcome):
+    use_executor(client, "wsl")
+    settings = client.app.state.settings
+    work = settings.root / "wsl-native" / "jobs" / job_id / "work"
+    work.mkdir(parents=True)
+    (work / ".server_process").write_text("777\n", encoding="ascii")
+    from job_server.executor import wsl
+
+    monkeypatch.setattr(wsl, "native_root", lambda _: settings.root / "wsl-native")
+    commands = []
+
+    def run(settings, *args, **kwargs):
+        commands.append(args)
+        if outcome is not None:
+            raise outcome
+
+    monkeypatch.setattr(wsl, "run", run)
+    return commands
+
+
+def test_a_lost_wsl_supervisor_whose_group_is_gone_releases_its_job(client, running, monkeypatch):
+    gone = subprocess.CalledProcessError(1, "kill", stderr=b"kill: (-777): No such process\n")
+    commands = wsl_job(client, running, monkeypatch, gone)
+    client.app.state.scheduler.reconcile()
+    assert commands == [("/usr/bin/env", "LC_ALL=C", "/bin/kill", "-0", "--", "-777")]
+    assert state(client, running) == {"state": "FAILED", "reason": "supervisor_lost"}
+
+
+@pytest.mark.parametrize("outcome", [
+    None,  # The group answered.
+    subprocess.CalledProcessError(1, "kill", stderr=b"kill: (-777): Operation not permitted\n"),
+    subprocess.CalledProcessError(4294967295, "wsl.exe", stderr=b"distribution not found"),
+    subprocess.TimeoutExpired("wsl.exe", 15),
+])
+def test_an_unclear_wsl_answer_needs_a_recheck(client, running, monkeypatch, outcome):
+    wsl_job(client, running, monkeypatch, outcome)
+    client.app.state.scheduler.reconcile()
+    job = state(client, running)
+    assert job["state"] == "RUNNING" and job["reason"].startswith("NEEDS_RECHECK")
+
+
+@pytest.mark.skipif(not hasattr(__import__("os"), "killpg"), reason="POSIX process groups")
+def test_a_real_linux_group_is_seen_alive_then_gone(client, running):
+    use_executor(client, "linux")
+    payload = subprocess.Popen(["sleep", "30"], start_new_session=True)
+    try:
+        record_group(client, running, payload.pid)
+        scheduler = client.app.state.scheduler
+        assert not scheduler._linux_group_gone({"id": running})
+    finally:
+        payload.kill()
+        payload.wait()
+    assert scheduler._linux_group_gone({"id": running})

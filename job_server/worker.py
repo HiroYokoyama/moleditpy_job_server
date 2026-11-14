@@ -67,6 +67,10 @@ def main(config, job_id):
                 if settings.execution_os == "wsl"
                 else native.start(wrapper, log, windows)
             )
+            if settings.execution_os == "linux":
+                # The payload leads its own process group. The daemon checks the group
+                # if this supervisor disappears, to tell whether the job still runs.
+                atomic_json(control / "payload.json", {"pgid": process.pid})
             walltime = spec["resources"]["walltime_seconds"]
             deadline = time.monotonic() + walltime if walltime else None
             quota = settings.storage_quota_mb * 1024 * 1024
