@@ -137,6 +137,54 @@ def test_cross_volume_move_copies_then_removes_the_original(tmp_path):
         assert not list((settings.finished_root / "alice").glob(".*partial*"))
 
 
+def test_stopping_interrupts_a_cross_volume_copy_and_keeps_the_job_queued(tmp_path, monkeypatch):
+    """A stop request must not wait for a large copy: that held the server's lock past the window's wait."""
+    from job_server import maintenance as maintenance_module
+
+    with make_client(tmp_path) as client:
+        alice = enroll(client)
+        job_id = run_job(client, alice, name="huge")
+        settings = client.app.state.settings
+        work = settings.root / "jobs" / job_id / "work"
+        (work / "scratch.tmp").write_bytes(b"x" * 64)
+        upkeep = maintenance(client)
+        monkeypatch.setattr(maintenance_module, "COPY_CHUNK", 8)
+        real_read = open
+        chunks = []
+
+        def rename(source, target):
+            raise OSError(errno.EXDEV, "cross-device")
+
+        def opener(path, mode="r", *args, **kwargs):
+            stream = real_read(path, mode, *args, **kwargs)
+            if "r" in mode and str(path).endswith("scratch.tmp"):
+                read = stream.read
+
+                def reading(size=-1):
+                    chunks.append(size)
+                    if len(chunks) == 2:
+                        upkeep.stop_event.set()  # Stop arrives part-way through the large file.
+                    return read(size)
+
+                stream.read = reading
+            return stream
+
+        monkeypatch.setattr("builtins.open", opener)
+        with mock.patch("job_server.maintenance.os.rename", rename):
+            started = time.monotonic()
+            upkeep.relocate_finished()
+        monkeypatch.undo()
+        assert time.monotonic() - started < 5
+        assert 2 <= len(chunks) < 8  # Stopped inside the file, not after copying it all.
+        assert (work / "scratch.tmp").stat().st_size == 64  # The original is untouched.
+        assert not list((settings.finished_root / "alice").glob("*"))  # No partial copy left.
+        job = client.app.state.db.one("SELECT * FROM jobs WHERE id=?", (job_id,))
+        assert job["relocate"] == 1 and job["archive_path"] == ""  # Moved at the next start.
+        assert job_id not in upkeep.failures  # An interruption is not a failed attempt.
+        events = client.app.state.db.rows("SELECT event FROM events WHERE job_id=?", (job_id,))
+        assert {"event": "job_move_failed"} not in events
+
+
 def test_a_held_file_is_retried_later_not_copied(tmp_path):
     with make_client(tmp_path) as client:
         alice = enroll(client)

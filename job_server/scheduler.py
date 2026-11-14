@@ -51,10 +51,17 @@ class Scheduler:
     def stop(self):
         self.stop_event.set()
         self.wake_event.set()
-        self.maintenance.stop()
-        self.history.stop()
-        if self.thread:
-            self.thread.join(timeout=5)
+        for name, stop in (
+            ("maintenance", self.maintenance.stop),
+            ("load history", self.history.stop),
+            ("dispatcher", lambda: self.thread and self.thread.join(timeout=5)),
+        ):
+            started = time.monotonic()
+            stop()
+            spent = time.monotonic() - started
+            if spent > 1:
+                # The data folder stays locked until this returns; say what held it.
+                logging.warning("Stopping the %s took %.1f s", name, spent)
 
     def _loop(self):
         while not self.stop_event.is_set():
