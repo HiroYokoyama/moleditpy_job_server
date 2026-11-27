@@ -31,19 +31,33 @@ def execution_core():
     return SubmitPreset, SHELL, WINDOWS
 
 
+_TAG = re.compile(r"\{(\w+)\}|\[(\w+)\]")
+#: Characters that may follow a placeholder and still belong to its word, so
+#: ``{stem}.out`` is quoted as one ``'my mol.out'``. PowerShell reads a quoted
+#: string followed by ``.out`` as a member access: ``'input'.out`` is $null,
+#: and redirecting to it discards the output. A comma is PowerShell's array
+#: operator and a backslash is the POSIX escape, so each stays outside there.
+_POSIX_WORD = re.compile(r"[\w@%+=:,./-]*", re.ASCII)
+_WINDOWS_WORD = re.compile(r"[\w%+=:./\\-]*", re.ASCII)
+#: A word PowerShell passes on as it is, the counterpart of what shlex.quote
+#: leaves bare. It starts with a letter, digit or underscore so it is never a
+#: parameter, splat, dot-source or call.
+_WINDOWS_BARE = re.compile(r"\w[\w%+=:./\\-]*", re.ASCII)
+
+
+def _quote_windows(word):
+    return word if _WINDOWS_BARE.fullmatch(word) else "'" + word.replace("'", "''") + "'"
+
+
 def render_command(template, values, windows=False):
-    def quote(value):
-        return "'" + str(value).replace("'", "''") + "'" if windows else shlex.quote(str(value))
+    quote = _quote_windows if windows else shlex.quote
+    word_chars = _WINDOWS_WORD if windows else _POSIX_WORD
 
-    def replace(match):
-        tag = match.group(1) or match.group(2)
-        return quote(values[tag]) if tag in values else match.group(0)
+    def tag(match):
+        return match.group(1) or match.group(2)
 
-    markers = {
-        match.start()
-        for match in re.finditer(r"\{(\w+)\}|\[(\w+)\]", template)
-        if (match.group(1) or match.group(2)) in values
-    }
+    known = [match for match in _TAG.finditer(template) if tag(match) in values]
+    markers = {match.start() for match in known}
     quoting, escaped = None, False
     for index, character in enumerate(template):
         if index in markers and (quoting or escaped):
@@ -57,7 +71,27 @@ def render_command(template, values, windows=False):
                 quoting = None
             elif quoting is None:
                 quoting = character
-    return re.sub(r"\{(\w+)\}|\[(\w+)\]", replace, template)
+    # Each placeholder, with the literal characters and placeholders joined to
+    # it, becomes one quoted word.
+    rendered, position, index = [], 0, 0
+    while index < len(known):
+        rendered.append(template[position : known[index].start()])
+        word, end = str(values[tag(known[index])]), known[index].end()
+        index += 1
+        while True:
+            literal = word_chars.match(template, end).group(0)
+            end += len(literal)
+            word += literal
+            if index < len(known) and known[index].start() == end:
+                word += str(values[tag(known[index])])
+                end = known[index].end()
+                index += 1
+            else:
+                break
+        rendered.append(quote(word))
+        position = end
+    rendered.append(template[position:])
+    return "".join(rendered)
 
 
 def build_wrapper(spec, workdir, windows=False, setup_commands=()):
