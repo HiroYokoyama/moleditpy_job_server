@@ -195,8 +195,11 @@ def run_gui(config=None):
 
     if sys.platform in ("win32", "linux"):
         # Give the standalone dashboard a regular application-window entry.
-        flags = dialog.windowFlags() & ~Qt.WindowType.WindowType_Mask
-        dialog.setWindowFlags(flags | Qt.WindowType.Window)
+        # Mask in integers: PySide6's ~WindowType_Mask is 0x1ffff00, which
+        # also drops WindowCloseButtonHint (0x8000000) and greys out the
+        # title-bar close button on Windows.
+        flags = int(dialog.windowFlags()) & ~int(Qt.WindowType.WindowType_Mask)
+        dialog.setWindowFlags(Qt.WindowType(flags | int(Qt.WindowType.Window)))
         if owns_app:
             app.setWindowIcon(dialog.windowIcon())
 

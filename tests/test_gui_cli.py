@@ -1,6 +1,7 @@
 """`python -m job_server gui`: the dashboard without MoleditPy."""
 
 import ctypes
+import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -165,3 +166,75 @@ def test_launcher_runs_the_plugin_folder_by_its_own_name(tmp_path):
     text = desktop_entry("/usr/bin/python3", plugins / "moleditpy_job_server", "/i.png")
     assert "Exec=/usr/bin/python3 -m moleditpy_job_server gui" in text.splitlines()
     assert f"Path={plugins}" in text.splitlines()
+
+
+@pytest.mark.parametrize("platform", ["win32", "linux"])
+def test_standalone_window_keeps_the_dashboard_title_bar_hints(tmp_path, monkeypatch, platform):
+    # PySide6's ~WindowType_Mask also cleared WindowCloseButtonHint, so the
+    # standalone dashboard's close button was greyed out on Windows.
+    pytest.importorskip("PySide6")
+    from PySide6 import QtWidgets
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication
+    from job_server.settings import Settings
+    from job_server.ui import dashboard as dashboard_module
+    from job_server.ui import standalone
+
+    app = QApplication.instance() or QApplication([])
+    original_name, original_desktop_file = app.applicationName(), app.desktopFileName()
+    original_icon = app.windowIcon()
+    config = tmp_path / "settings.json"
+    Settings(data_dir=str(tmp_path)).save(config)
+    dashboard = dashboard_module.Dashboard(config=config)
+    dashboard.timer.stop()
+
+    real_windll = getattr(ctypes, "windll", None)
+
+    def create_app(argv):
+        return app
+
+    create_app.instance = lambda: None
+    monkeypatch.setattr(QtWidgets, "QApplication", create_app)
+    monkeypatch.setattr(standalone, "sys", SimpleNamespace(platform=platform, argv=[]))
+    monkeypatch.setattr(
+        ctypes,
+        "windll",
+        SimpleNamespace(shell32=SimpleNamespace(SetCurrentProcessExplicitAppUserModelID=id)),
+        raising=False,
+    )
+    monkeypatch.setattr("job_server.plugin.missing_dependencies", lambda: [])
+    monkeypatch.setattr(dashboard_module, "Dashboard", lambda config: dashboard)
+
+    def check_dashboard():
+        dashboard.timer.stop()
+        flags = dashboard.windowFlags()
+        assert dashboard.windowType() == Qt.WindowType.Window
+        for hint in (
+            Qt.WindowType.WindowCloseButtonHint,
+            Qt.WindowType.WindowMinimizeButtonHint,
+            Qt.WindowType.WindowMaximizeButtonHint,
+        ):
+            assert flags & hint
+        if os.name == "nt" and app.platformName() == "windows":
+            # Ask Windows itself whether the title-bar close item is greyed;
+            # the offscreen platform the suite normally uses has no HWND.
+            app.processEvents()
+            user32 = real_windll.user32
+            user32.GetSystemMenu.restype = ctypes.c_void_p
+            user32.GetSystemMenu.argtypes = [ctypes.c_void_p, ctypes.c_bool]
+            user32.GetMenuState.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_uint]
+            menu = user32.GetSystemMenu(int(dashboard.winId()), False)
+            sc_close, mf_grayed_or_disabled = 0xF060, 0x3
+            assert menu
+            assert not user32.GetMenuState(menu, sc_close, 0) & mf_grayed_or_disabled
+        return 0
+
+    monkeypatch.setattr(app, "exec", check_dashboard)
+    try:
+        assert standalone.run_gui(config) == 0
+    finally:
+        dashboard.close()
+        app.processEvents()
+        app.setApplicationName(original_name)
+        app.setDesktopFileName(original_desktop_file)
+        app.setWindowIcon(original_icon)
