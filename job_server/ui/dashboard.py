@@ -230,12 +230,14 @@ class Dashboard(QDialog):
         # A control panel, not a question: it stays open beside MoleditPy
         # and the jobs it watches, so it is a modeless window with the
         # usual minimise/maximise buttons, and it can go full screen
-        # (View menu, F11).
+        # (View menu, F11). The Window type, not Dialog: on Windows a
+        # dialog with a maximise button gets its close button greyed out.
         self.setModal(False)
         self.setWindowFlags(
-            self.windowFlags()
+            Qt.WindowType.Window
             | Qt.WindowType.WindowMinimizeButtonHint
             | Qt.WindowType.WindowMaximizeButtonHint
+            | Qt.WindowType.WindowCloseButtonHint
         )
         self.config = Path(config) if config else Settings().root / "settings.json"
         if self.config.exists():
